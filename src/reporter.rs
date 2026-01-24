@@ -16,7 +16,10 @@ pub fn format_violations(violations: &[&Violation]) -> String {
     }
 
     let mut lines = vec![
-        format!("GUARDRAILS: {} issues blocked this operation", violations.len()),
+        format!(
+            "GUARDRAILS: {} issues blocked this operation",
+            violations.len()
+        ),
         String::new(),
     ];
 

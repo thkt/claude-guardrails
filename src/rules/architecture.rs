@@ -23,11 +23,11 @@ static RE_IMPORT_UI_NO_FEATURES: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"from\s+['"].*/(components|hooks|pages)/"#)
         .expect("RE_IMPORT_UI_NO_FEATURES: invalid regex")
 });
-static RE_IMPORT_PAGES: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"from\s+['"].*\/pages/"#).expect("RE_IMPORT_PAGES: invalid regex")
-});
+static RE_IMPORT_PAGES: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"from\s+['"].*\/pages/"#).expect("RE_IMPORT_PAGES: invalid regex"));
 
-static LAYER_VIOLATIONS: Lazy<[LayerViolation; 3]> = Lazy::new(|| [
+static LAYER_VIOLATIONS: Lazy<[LayerViolation; 3]> = Lazy::new(|| {
+    [
         LayerViolation {
             from_pattern: &RE_UTILS,
             importing: &RE_IMPORT_UI,
@@ -44,7 +44,7 @@ static LAYER_VIOLATIONS: Lazy<[LayerViolation; 3]> = Lazy::new(|| [
             failure: "Pass data via props instead (components should not import pages)",
         },
     ]
-);
+});
 
 pub fn rule() -> Rule {
     Rule {

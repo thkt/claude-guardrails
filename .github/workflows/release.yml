@@ -153,72 +153,14 @@ jobs:
           # Ensure Formula directory exists
           mkdir -p Formula
 
-          # Generate Formula (no indentation to avoid style issues)
-          cat > Formula/guardrails.rb << FORMULA_EOF
-class Guardrails < Formula
-  desc "PreToolCall hook for Claude Code - security guardrails using biome + custom rules"
-  homepage "https://github.com/thkt/claude-guardrails"
-  version "${VERSION}"
-  license "MIT"
-
-  on_macos do
-    on_arm do
-      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-aarch64-apple-darwin"
-      sha256 "${SHA_AARCH64_DARWIN}"
-    end
-    on_intel do
-      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-x86_64-apple-darwin"
-      sha256 "${SHA_X86_64_DARWIN}"
-    end
-  end
-
-  on_linux do
-    on_arm do
-      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-aarch64-unknown-linux-gnu"
-      sha256 "${SHA_AARCH64_LINUX}"
-    end
-    on_intel do
-      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-x86_64-unknown-linux-gnu"
-      sha256 "${SHA_X86_64_LINUX}"
-    end
-  end
-
-  def install
-    binary_name = if OS.mac?
-      Hardware::CPU.arm? ? "guardrails-aarch64-apple-darwin" : "guardrails-x86_64-apple-darwin"
-    else
-      Hardware::CPU.arm? ? "guardrails-aarch64-unknown-linux-gnu" : "guardrails-x86_64-unknown-linux-gnu"
-    end
-    bin.install binary_name => "guardrails"
-  end
-
-  def caveats
-    <<~EOS
-      To use guardrails with Claude Code, add to your ~/.claude/settings.json:
-
-        "hooks": {
-          "PreToolUse": [
-            {
-              "matcher": "Write|Edit|MultiEdit",
-              "hooks": [
-                {
-                  "type": "command",
-                  "command": "#{HOMEBREW_PREFIX}/bin/guardrails",
-                  "timeout": 1000
-                }
-              ]
-            }
-          ]
-        }
-    EOS
-  end
-
-  test do
-    output = pipe_output(bin/"guardrails", '{"tool_input":{"content":"test"}}', 0)
-    assert_match "pass", output
-  end
-end
-FORMULA_EOF
+          # Update Formula using sed on existing template
+          sed -e "s/__VERSION__/$VERSION/g" \
+              -e "s/__TAG__/$TAG/g" \
+              -e "s/__SHA_AARCH64_DARWIN__/$SHA_AARCH64_DARWIN/g" \
+              -e "s/__SHA_X86_64_DARWIN__/$SHA_X86_64_DARWIN/g" \
+              -e "s/__SHA_AARCH64_LINUX__/$SHA_AARCH64_LINUX/g" \
+              -e "s/__SHA_X86_64_LINUX__/$SHA_X86_64_LINUX/g" \
+              Formula/guardrails.rb.template > Formula/guardrails.rb
 
       - name: Commit and push
         env:

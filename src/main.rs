@@ -68,7 +68,10 @@ fn main() {
     }
 
     let mut input_str = String::new();
-    let bytes_read = match io::stdin().take(MAX_INPUT_SIZE).read_to_string(&mut input_str) {
+    let bytes_read = match io::stdin()
+        .take(MAX_INPUT_SIZE)
+        .read_to_string(&mut input_str)
+    {
         Ok(n) => n,
         Err(e) => {
             eprintln!("guardrails: failed to read stdin: {}", e);
@@ -77,7 +80,10 @@ fn main() {
     };
 
     if bytes_read as u64 == MAX_INPUT_SIZE {
-        eprintln!("guardrails: warning: input truncated at {} bytes", MAX_INPUT_SIZE);
+        eprintln!(
+            "guardrails: warning: input truncated at {} bytes",
+            MAX_INPUT_SIZE
+        );
     }
 
     let input: ToolInput = match serde_json::from_str(&input_str) {
@@ -89,7 +95,10 @@ fn main() {
     };
 
     let Some((file_path, content)) = get_file_and_content(&input) else {
-        eprintln!("guardrails: skipping {} (unsupported or empty)", input.tool_name);
+        eprintln!(
+            "guardrails: skipping {} (unsupported or empty)",
+            input.tool_name
+        );
         std::process::exit(0);
     };
 

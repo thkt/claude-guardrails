@@ -1,4 +1,6 @@
-use super::{count_non_comment_matches, find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE};
+use super::{
+    count_non_comment_matches, find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE,
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 

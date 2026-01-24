@@ -25,7 +25,9 @@ struct BiomeAdvices {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum BiomeAdvice {
-    Log { log: (String, Vec<BiomeMessagePart>) },
+    Log {
+        log: (String, Vec<BiomeMessagePart>),
+    },
     #[allow(dead_code)]
     Other(serde_json::Value),
 }
@@ -60,7 +62,10 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     let temp_name = format!(".guardrails-check-{}.{}", std::process::id(), extension);
     let temp_path = dir.join(&temp_name);
     if let Err(e) = std::fs::create_dir_all(dir) {
-        eprintln!("guardrails: biome: failed to create directory {:?}: {}", dir, e);
+        eprintln!(
+            "guardrails: biome: failed to create directory {:?}: {}",
+            dir, e
+        );
     }
 
     let mut file = match std::fs::File::create(&temp_path) {
@@ -114,7 +119,10 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         if !stdout.is_empty() || !stderr.is_empty() {
             eprintln!("guardrails: biome: no JSON output (may have config issues)");
             if !stderr.is_empty() {
-                eprintln!("guardrails: biome stderr: {}", stderr.lines().next().unwrap_or(""));
+                eprintln!(
+                    "guardrails: biome stderr: {}",
+                    stderr.lines().next().unwrap_or("")
+                );
             }
         }
         return vec![];
@@ -171,18 +179,26 @@ fn cleanup_temp_file(path: &std::path::Path) {
 fn get_fix_for_rule(category: &str) -> Option<&'static str> {
     match category {
         // security
-        "lint/security/noGlobalEval" => Some("Use JSON.parse() for data, or restructure to avoid dynamic code execution"),
+        "lint/security/noGlobalEval" => {
+            Some("Use JSON.parse() for data, or restructure to avoid dynamic code execution")
+        }
         // suspicious
-        "lint/suspicious/noExplicitAny" => Some("Use `unknown` with type guards, or define a specific type/interface"),
+        "lint/suspicious/noExplicitAny" => {
+            Some("Use `unknown` with type guards, or define a specific type/interface")
+        }
         "lint/suspicious/noDebugger" => Some("Remove debugger statement"),
         "lint/suspicious/noConsole" => Some("Remove console.log or use a proper logger"),
         // correctness
-        "lint/correctness/noUnusedVariables" => Some("Remove the variable, or prefix with _ if intentional"),
+        "lint/correctness/noUnusedVariables" => {
+            Some("Remove the variable, or prefix with _ if intentional")
+        }
         "lint/correctness/noUnusedImports" => Some("Remove the unused import"),
         // a11y
         "lint/a11y/useAltText" => Some("Add alt attribute to img element"),
         "lint/a11y/useButtonType" => Some("Add type attribute to button element"),
-        "lint/a11y/noBlankTarget" => Some("Add rel=\"noopener noreferrer\" to links with target=\"_blank\""),
+        "lint/a11y/noBlankTarget" => {
+            Some("Add rel=\"noopener noreferrer\" to links with target=\"_blank\"")
+        }
         _ => None,
     }
 }

@@ -8,12 +8,30 @@ static RE_EXCLUDED_FILE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static CONSOLE_METHODS: [(&str, Lazy<Regex>); 6] = [
-    ("log", Lazy::new(|| Regex::new(r"console\.log\s*\(").expect("console.log regex"))),
-    ("debug", Lazy::new(|| Regex::new(r"console\.debug\s*\(").expect("console.debug regex"))),
-    ("info", Lazy::new(|| Regex::new(r"console\.info\s*\(").expect("console.info regex"))),
-    ("trace", Lazy::new(|| Regex::new(r"console\.trace\s*\(").expect("console.trace regex"))),
-    ("table", Lazy::new(|| Regex::new(r"console\.table\s*\(").expect("console.table regex"))),
-    ("dir", Lazy::new(|| Regex::new(r"console\.dir\s*\(").expect("console.dir regex"))),
+    (
+        "log",
+        Lazy::new(|| Regex::new(r"console\.log\s*\(").expect("console.log regex")),
+    ),
+    (
+        "debug",
+        Lazy::new(|| Regex::new(r"console\.debug\s*\(").expect("console.debug regex")),
+    ),
+    (
+        "info",
+        Lazy::new(|| Regex::new(r"console\.info\s*\(").expect("console.info regex")),
+    ),
+    (
+        "trace",
+        Lazy::new(|| Regex::new(r"console\.trace\s*\(").expect("console.trace regex")),
+    ),
+    (
+        "table",
+        Lazy::new(|| Regex::new(r"console\.table\s*\(").expect("console.table regex")),
+    ),
+    (
+        "dir",
+        Lazy::new(|| Regex::new(r"console\.dir\s*\(").expect("console.dir regex")),
+    ),
 ];
 
 pub fn rule() -> Rule {

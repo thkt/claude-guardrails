@@ -23,28 +23,30 @@ static RE_NULL_PROMISE_CATCH: Lazy<Regex> = Lazy::new(|| {
         .expect("RE_NULL_PROMISE_CATCH: invalid regex")
 });
 
-static ERROR_ISSUES: Lazy<[ErrorIssue; 4]> = Lazy::new(|| [
-    ErrorIssue {
-        pattern: &RE_EMPTY_CATCH,
-        failure: "Add error logging (console.error) or send to error tracking service",
-        severity: Severity::High,
-    },
-    ErrorIssue {
-        pattern: &RE_COMMENT_CATCH,
-        failure: "Add error logging with comment explaining why it's intentionally suppressed",
-        severity: Severity::Medium,
-    },
-    ErrorIssue {
-        pattern: &RE_EMPTY_PROMISE_CATCH,
-        failure: "Add error handling or comment explaining why error is ignored",
-        severity: Severity::High,
-    },
-    ErrorIssue {
-        pattern: &RE_NULL_PROMISE_CATCH,
-        failure: "Use Result type pattern or return explicit error type instead of null",
-        severity: Severity::Medium,
-    },
-]);
+static ERROR_ISSUES: Lazy<[ErrorIssue; 4]> = Lazy::new(|| {
+    [
+        ErrorIssue {
+            pattern: &RE_EMPTY_CATCH,
+            failure: "Add error logging (console.error) or send to error tracking service",
+            severity: Severity::High,
+        },
+        ErrorIssue {
+            pattern: &RE_COMMENT_CATCH,
+            failure: "Add error logging with comment explaining why it's intentionally suppressed",
+            severity: Severity::Medium,
+        },
+        ErrorIssue {
+            pattern: &RE_EMPTY_PROMISE_CATCH,
+            failure: "Add error handling or comment explaining why error is ignored",
+            severity: Severity::High,
+        },
+        ErrorIssue {
+            pattern: &RE_NULL_PROMISE_CATCH,
+            failure: "Use Result type pattern or return explicit error type instead of null",
+            severity: Severity::Medium,
+        },
+    ]
+});
 
 pub fn rule() -> Rule {
     Rule {

@@ -95,7 +95,10 @@ impl Config {
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
             Err(e) => {
-                eprintln!("guardrails: warning: cannot read config {:?}: {}", config_path, e);
+                eprintln!(
+                    "guardrails: warning: cannot read config {:?}: {}",
+                    config_path, e
+                );
                 Config::default()
             }
         }
