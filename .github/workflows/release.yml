@@ -5,11 +5,15 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    permissions:
+      contents: read
+    timeout-minutes: 30
     strategy:
       matrix:
         include:
@@ -29,7 +33,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # stable
@@ -66,7 +70,7 @@ jobs:
           chmod +x "$NAME"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.name }}
@@ -74,16 +78,27 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
 
     steps:
-      - name: Get version
+      - name: Get and validate version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
@@ -96,93 +111,114 @@ jobs:
   update-homebrew:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: thkt/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Download artifacts for checksums
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
-      - name: Update Formula
+      - name: Validate and update Formula
         env:
           VERSION: ${{ needs.release.outputs.version }}
           TAG: ${{ github.ref_name }}
         run: |
+          # Validate version format again
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+
+          # Validate TAG matches VERSION
+          if [[ "$TAG" != "v$VERSION" ]]; then
+            echo "::error::TAG ($TAG) does not match VERSION (v$VERSION)"
+            exit 1
+          fi
+
+          # Calculate checksums
           SHA_AARCH64_DARWIN=$(sha256sum artifacts/guardrails-aarch64-apple-darwin/guardrails-aarch64-apple-darwin | cut -d' ' -f1)
           SHA_X86_64_DARWIN=$(sha256sum artifacts/guardrails-x86_64-apple-darwin/guardrails-x86_64-apple-darwin | cut -d' ' -f1)
           SHA_AARCH64_LINUX=$(sha256sum artifacts/guardrails-aarch64-unknown-linux-gnu/guardrails-aarch64-unknown-linux-gnu | cut -d' ' -f1)
           SHA_X86_64_LINUX=$(sha256sum artifacts/guardrails-x86_64-unknown-linux-gnu/guardrails-x86_64-unknown-linux-gnu | cut -d' ' -f1)
 
-          cat > Formula/guardrails.rb << EOF
-          class Guardrails < Formula
-            desc "PreToolCall hook for Claude Code - security guardrails using biome + custom rules"
-            homepage "https://github.com/thkt/claude-guardrails"
-            version "${VERSION}"
-            license "MIT"
+          # Ensure Formula directory exists
+          mkdir -p Formula
 
-            on_macos do
-              on_arm do
-                url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-aarch64-apple-darwin"
-                sha256 "${SHA_AARCH64_DARWIN}"
-              end
-              on_intel do
-                url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-x86_64-apple-darwin"
-                sha256 "${SHA_X86_64_DARWIN}"
-              end
-            end
+          # Generate Formula (no indentation to avoid style issues)
+          cat > Formula/guardrails.rb << FORMULA_EOF
+class Guardrails < Formula
+  desc "PreToolCall hook for Claude Code - security guardrails using biome + custom rules"
+  homepage "https://github.com/thkt/claude-guardrails"
+  version "${VERSION}"
+  license "MIT"
 
-            on_linux do
-              on_arm do
-                url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-aarch64-unknown-linux-gnu"
-                sha256 "${SHA_AARCH64_LINUX}"
-              end
-              on_intel do
-                url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-x86_64-unknown-linux-gnu"
-                sha256 "${SHA_X86_64_LINUX}"
-              end
-            end
+  on_macos do
+    on_arm do
+      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-aarch64-apple-darwin"
+      sha256 "${SHA_AARCH64_DARWIN}"
+    end
+    on_intel do
+      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-x86_64-apple-darwin"
+      sha256 "${SHA_X86_64_DARWIN}"
+    end
+  end
 
-            def install
-              binary_name = if OS.mac?
-                Hardware::CPU.arm? ? "guardrails-aarch64-apple-darwin" : "guardrails-x86_64-apple-darwin"
-              else
-                Hardware::CPU.arm? ? "guardrails-aarch64-unknown-linux-gnu" : "guardrails-x86_64-unknown-linux-gnu"
-              end
-              bin.install binary_name => "guardrails"
-            end
+  on_linux do
+    on_arm do
+      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-aarch64-unknown-linux-gnu"
+      sha256 "${SHA_AARCH64_LINUX}"
+    end
+    on_intel do
+      url "https://github.com/thkt/claude-guardrails/releases/download/${TAG}/guardrails-x86_64-unknown-linux-gnu"
+      sha256 "${SHA_X86_64_LINUX}"
+    end
+  end
 
-            def caveats
-              <<~EOS
-                To use guardrails with Claude Code, add to your ~/.claude/settings.json:
+  def install
+    binary_name = if OS.mac?
+      Hardware::CPU.arm? ? "guardrails-aarch64-apple-darwin" : "guardrails-x86_64-apple-darwin"
+    else
+      Hardware::CPU.arm? ? "guardrails-aarch64-unknown-linux-gnu" : "guardrails-x86_64-unknown-linux-gnu"
+    end
+    bin.install binary_name => "guardrails"
+  end
 
-                  "hooks": {
-                    "PreToolUse": [
-                      {
-                        "matcher": "Write|Edit|MultiEdit",
-                        "hooks": [
-                          {
-                            "type": "command",
-                            "command": "#{HOMEBREW_PREFIX}/bin/guardrails",
-                            "timeout": 1000
-                          }
-                        ]
-                      }
-                    ]
-                  }
-              EOS
-            end
+  def caveats
+    <<~EOS
+      To use guardrails with Claude Code, add to your ~/.claude/settings.json:
 
-            test do
-              assert_match(//, pipe_output(bin/"guardrails", "{}", 0))
-            end
-          end
-          EOF
+        "hooks": {
+          "PreToolUse": [
+            {
+              "matcher": "Write|Edit|MultiEdit",
+              "hooks": [
+                {
+                  "type": "command",
+                  "command": "#{HOMEBREW_PREFIX}/bin/guardrails",
+                  "timeout": 1000
+                }
+              ]
+            }
+          ]
+        }
+    EOS
+  end
+
+  test do
+    output = pipe_output(bin/"guardrails", '{"tool_input":{"content":"test"}}', 0)
+    assert_match "pass", output
+  end
+end
+FORMULA_EOF
 
       - name: Commit and push
         env:
@@ -191,5 +227,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/guardrails.rb
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
           git commit -m "feat: update guardrails to v${VERSION}"
           git push
