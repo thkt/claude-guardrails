@@ -10,7 +10,13 @@ Code quality checker for Claude Code's PreToolCall hook. Combines biome CLI with
 
 ## Installation
 
-### From Release (Recommended)
+### Homebrew (Recommended)
+
+```bash
+brew install thkt/tap/guardrails
+```
+
+### From Release
 
 Download the latest binary from [Releases](https://github.com/thkt/claude-guardrails/releases):
 
@@ -73,25 +79,64 @@ See `src/rules/` for custom rules that complement biome's built-in checks:
 
 ## Configuration
 
-Create `config.json` next to the binary or in `~/.config/guardrails/`:
+Create `~/.config/guardrails/config.json` to customize rules:
+
+```bash
+mkdir -p ~/.config/guardrails
+```
 
 ```json
 {
   "enabled": true,
   "rules": {
+    "biome": true,
     "architecture": true,
     "errorHandling": true,
     "naming": true,
     "transaction": true,
     "consoleLog": true,
-    "security": true,
-    "biome": true
+    "security": true
   },
   "severity": {
     "blockOn": ["critical", "high"]
   }
 }
 ```
+
+### Examples
+
+**biome only** (disable custom rules):
+
+```json
+{
+  "rules": {
+    "biome": true,
+    "architecture": false,
+    "errorHandling": false,
+    "naming": false,
+    "transaction": false,
+    "consoleLog": false,
+    "security": false
+  }
+}
+```
+
+**Custom rules only** (disable biome):
+
+```json
+{
+  "rules": {
+    "biome": false
+  }
+}
+```
+
+### Config file search order
+
+1. `~/.config/guardrails/config.json` (recommended)
+2. `$XDG_CONFIG_HOME/guardrails/config.json`
+3. `./config.json` (current directory)
+4. Next to the binary
 
 ## License
 
