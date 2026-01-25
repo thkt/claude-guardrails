@@ -9,13 +9,11 @@ struct LargeImport {
 }
 
 static RE_LODASH_FULL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"import\s+[\w]+\s+from\s+['"]lodash['"]"#)
-        .expect("RE_LODASH_FULL: invalid regex")
+    Regex::new(r#"import\s+[\w]+\s+from\s+['"]lodash['"]"#).expect("RE_LODASH_FULL: invalid regex")
 });
 
 static RE_MOMENT_FULL: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"import\s+[\w]+\s+from\s+['"]moment['"]"#)
-        .expect("RE_MOMENT_FULL: invalid regex")
+    Regex::new(r#"import\s+[\w]+\s+from\s+['"]moment['"]"#).expect("RE_MOMENT_FULL: invalid regex")
 });
 
 static RE_MUI_ICONS_FULL: Lazy<Regex> = Lazy::new(|| {

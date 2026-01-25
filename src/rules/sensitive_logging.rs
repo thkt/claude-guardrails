@@ -37,7 +37,8 @@ pub fn rule() -> Rule {
                 violations.push(Violation {
                     rule: "sensitive-logging".to_string(),
                     severity: Severity::High,
-                    failure: "Logging sensitive data via logger. Remove or mask before logging.".to_string(),
+                    failure: "Logging sensitive data via logger. Remove or mask before logging."
+                        .to_string(),
                     file: file_path.to_string(),
                     line: Some(line_num),
                 });
@@ -47,7 +48,9 @@ pub fn rule() -> Rule {
                 violations.push(Violation {
                     rule: "sensitive-logging".to_string(),
                     severity: Severity::High,
-                    failure: "Logging sensitive data in template literal. Remove or mask before logging.".to_string(),
+                    failure:
+                        "Logging sensitive data in template literal. Remove or mask before logging."
+                            .to_string(),
                     file: file_path.to_string(),
                     line: Some(line_num),
                 });

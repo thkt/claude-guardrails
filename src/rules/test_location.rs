@@ -29,7 +29,9 @@ pub fn rule() -> Rule {
                     return vec![Violation {
                         rule: "test-location".to_string(),
                         severity: Severity::Medium,
-                        failure: "Test files should be in tests/ or __tests__/ directory outside src/".to_string(),
+                        failure:
+                            "Test files should be in tests/ or __tests__/ directory outside src/"
+                                .to_string(),
                         file: file_path.to_string(),
                         line: None,
                     }];
@@ -57,7 +59,10 @@ mod tests {
     #[test]
     fn detects_tests_dir_in_src() {
         assert_eq!(check("/project/src/__tests__/utils.ts").len(), 1);
-        assert_eq!(check("/project/src/components/__tests__/Button.ts").len(), 1);
+        assert_eq!(
+            check("/project/src/components/__tests__/Button.ts").len(),
+            1
+        );
     }
 
     #[test]

@@ -27,9 +27,8 @@ static RE_CREATE_ELEMENT: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"document\.createElement\s*\(").expect("RE_CREATE_ELEMENT: invalid regex")
 });
 
-static RE_APPEND_CHILD: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\.appendChild\s*\(").expect("RE_APPEND_CHILD: invalid regex")
-});
+static RE_APPEND_CHILD: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\.appendChild\s*\(").expect("RE_APPEND_CHILD: invalid regex"));
 
 static DOM_ACCESS: Lazy<[DomAccess; 5]> = Lazy::new(|| {
     [
