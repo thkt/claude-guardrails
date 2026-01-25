@@ -1,8 +1,20 @@
+// Design note: Each rule module follows a similar pattern (struct + regex array + iteration).
+// This duplication is intentional - it keeps rules independent and easy to modify without
+// affecting others. The cost of abstraction outweighs the benefit for this use case.
+
 mod architecture;
-mod console_log;
-mod error_handling;
+mod bundle_size;
+mod crypto_weak;
+mod dom_access;
+mod flaky_test;
+mod generated_file;
 mod naming;
 mod security;
+mod sensitive_file;
+mod sensitive_logging;
+mod sync_io;
+mod test_assertion;
+mod test_location;
 mod transaction;
 
 use crate::config::Config;
@@ -85,11 +97,11 @@ impl Rule {
 pub fn load_rules(config: &Config) -> Vec<Rule> {
     let mut rules = Vec::new();
 
+    if config.rules.sensitive_file {
+        rules.push(sensitive_file::rule());
+    }
     if config.rules.architecture {
         rules.push(architecture::rule());
-    }
-    if config.rules.error_handling {
-        rules.push(error_handling::rule());
     }
     if config.rules.naming {
         rules.push(naming::rule());
@@ -97,11 +109,35 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
     if config.rules.transaction {
         rules.push(transaction::rule());
     }
-    if config.rules.console_log {
-        rules.push(console_log::rule());
-    }
     if config.rules.security {
         rules.push(security::rule());
+    }
+    if config.rules.crypto_weak {
+        rules.push(crypto_weak::rule());
+    }
+    if config.rules.generated_file {
+        rules.push(generated_file::rule());
+    }
+    if config.rules.test_location {
+        rules.push(test_location::rule());
+    }
+    if config.rules.dom_access {
+        rules.push(dom_access::rule());
+    }
+    if config.rules.sync_io {
+        rules.push(sync_io::rule());
+    }
+    if config.rules.bundle_size {
+        rules.push(bundle_size::rule());
+    }
+    if config.rules.test_assertion {
+        rules.push(test_assertion::rule());
+    }
+    if config.rules.flaky_test {
+        rules.push(flaky_test::rule());
+    }
+    if config.rules.sensitive_logging {
+        rules.push(sensitive_logging::rule());
     }
 
     rules

@@ -15,18 +15,34 @@ pub struct Config {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RulesConfig {
+    #[serde(rename = "sensitiveFile", default = "default_true")]
+    pub sensitive_file: bool,
     #[serde(default = "default_true")]
     pub architecture: bool,
-    #[serde(rename = "errorHandling", default = "default_true")]
-    pub error_handling: bool,
     #[serde(default = "default_true")]
     pub naming: bool,
     #[serde(default = "default_true")]
     pub transaction: bool,
-    #[serde(rename = "consoleLog", default = "default_true")]
-    pub console_log: bool,
     #[serde(default = "default_true")]
     pub security: bool,
+    #[serde(rename = "cryptoWeak", default = "default_true")]
+    pub crypto_weak: bool,
+    #[serde(rename = "generatedFile", default = "default_true")]
+    pub generated_file: bool,
+    #[serde(rename = "testLocation", default = "default_true")]
+    pub test_location: bool,
+    #[serde(rename = "domAccess", default = "default_true")]
+    pub dom_access: bool,
+    #[serde(rename = "syncIo", default = "default_true")]
+    pub sync_io: bool,
+    #[serde(rename = "bundleSize", default = "default_true")]
+    pub bundle_size: bool,
+    #[serde(rename = "testAssertion", default = "default_true")]
+    pub test_assertion: bool,
+    #[serde(rename = "flakyTest", default = "default_true")]
+    pub flaky_test: bool,
+    #[serde(rename = "sensitiveLogging", default = "default_true")]
+    pub sensitive_logging: bool,
     #[serde(default = "default_true")]
     pub biome: bool,
 }
@@ -34,12 +50,20 @@ pub struct RulesConfig {
 impl Default for RulesConfig {
     fn default() -> Self {
         Self {
+            sensitive_file: true,
             architecture: true,
-            error_handling: true,
             naming: true,
             transaction: true,
-            console_log: true,
             security: true,
+            crypto_weak: true,
+            generated_file: true,
+            test_location: true,
+            dom_access: true,
+            sync_io: true,
+            bundle_size: true,
+            test_assertion: true,
+            flaky_test: true,
+            sensitive_logging: true,
             biome: true,
         }
     }

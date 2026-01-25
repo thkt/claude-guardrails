@@ -64,11 +64,22 @@ Add to `~/.claude/settings.json`:
 
 See `src/rules/` for custom rules that complement biome's built-in checks:
 
-- Security patterns (XSS vectors, unsafe APIs)
-- Architecture layer violations
-- Error handling patterns
-- Naming conventions
-- Transaction boundaries
+| Rule               | Severity | Description                                                   |
+| ------------------ | -------- | ------------------------------------------------------------- |
+| `sensitiveFile`    | Critical | Blocks writes to .env, credentials._, _.pem, id_rsa           |
+| `cryptoWeak`       | High     | Detects MD5, SHA1, DES, RC4 usage                             |
+| `sensitiveLogging` | High     | Detects password/token/secret in console.log                  |
+| `security`         | High     | XSS vectors, unsafe APIs                                      |
+| `architecture`     | High     | Layer violations (e.g., UI importing domain)                  |
+| `transaction`      | Medium   | Multiple writes without transaction wrapper                   |
+| `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                  |
+| `syncIo`           | Medium   | readFileSync, writeFileSync (blocks event loop)               |
+| `bundleSize`       | Medium   | Full lodash/moment imports                                    |
+| `testAssertion`    | Medium   | Tests without expect() or assert calls                        |
+| `flakyTest`        | Low      | setTimeout, Math.random in tests                              |
+| `generatedFile`    | High     | Warns on _.generated._, \*.g.ts edits                         |
+| `testLocation`     | Medium   | Test files in src/ directory                                  |
+| `naming`           | Mixed    | Naming conventions (hooks=High, components=Medium, types=Low) |
 
 ## Exit Codes
 
@@ -90,12 +101,20 @@ mkdir -p ~/.config/guardrails
   "enabled": true,
   "rules": {
     "biome": true,
+    "sensitiveFile": true,
+    "cryptoWeak": true,
+    "sensitiveLogging": true,
+    "security": true,
     "architecture": true,
-    "errorHandling": true,
-    "naming": true,
     "transaction": true,
-    "consoleLog": true,
-    "security": true
+    "domAccess": true,
+    "syncIo": true,
+    "bundleSize": true,
+    "testAssertion": true,
+    "flakyTest": true,
+    "generatedFile": true,
+    "testLocation": true,
+    "naming": true
   },
   "severity": {
     "blockOn": ["critical", "high"]
@@ -111,12 +130,20 @@ mkdir -p ~/.config/guardrails
 {
   "rules": {
     "biome": true,
+    "sensitiveFile": false,
+    "cryptoWeak": false,
+    "sensitiveLogging": false,
+    "security": false,
     "architecture": false,
-    "errorHandling": false,
-    "naming": false,
     "transaction": false,
-    "consoleLog": false,
-    "security": false
+    "domAccess": false,
+    "syncIo": false,
+    "bundleSize": false,
+    "testAssertion": false,
+    "flakyTest": false,
+    "generatedFile": false,
+    "testLocation": false,
+    "naming": false
   }
 }
 ```
@@ -131,12 +158,34 @@ mkdir -p ~/.config/guardrails
 }
 ```
 
+**Security-focused** (high severity rules only):
+
+```json
+{
+  "rules": {
+    "sensitiveFile": true,
+    "cryptoWeak": true,
+    "sensitiveLogging": true,
+    "security": true,
+    "architecture": false,
+    "transaction": false,
+    "domAccess": false,
+    "syncIo": false,
+    "bundleSize": false,
+    "testAssertion": false,
+    "flakyTest": false,
+    "generatedFile": false,
+    "testLocation": false,
+    "naming": false
+  }
+}
+```
+
 ### Config file search order
 
-1. `~/.config/guardrails/config.json` (recommended)
-2. `$XDG_CONFIG_HOME/guardrails/config.json`
-3. `./config.json` (current directory)
-4. Next to the binary
+1. Next to the binary (and parent directories)
+2. `./config.json` (current directory)
+3. `$XDG_CONFIG_HOME/guardrails/config.json` or `~/.config/guardrails/config.json`
 
 ## License
 
