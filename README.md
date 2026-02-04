@@ -44,14 +44,14 @@ Add to `~/.claude/settings.json`:
 
 ```json
 {
-  "hooks": {
-    "preToolCall": [
-      {
-        "matcher": "Write",
-        "command": "guardrails"
-      }
-    ]
-  }
+  "hooks" : [
+    {
+      "command" : "guardrails",
+      "timeout" : 1000,
+      "type" : "command"
+    }
+  ],
+  "matcher" : "Write|Edit|MultiEdit"
 }
 ```
 
