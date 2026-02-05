@@ -1,7 +1,9 @@
 use crate::rules::{Severity, Violation};
 use serde::Deserialize;
 use std::io::Write;
+use std::path::Path;
 use std::process::Command;
+use tempfile::NamedTempFile;
 
 #[derive(Debug, Deserialize)]
 struct BiomeOutput {
@@ -52,15 +54,19 @@ pub fn is_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Creates temp file in same directory as file_path to inherit project's biome.json
+/// Creates temp file in same directory as file_path to inherit project's biome.json.
+/// Uses tempfile crate for secure temp file creation.
 pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    use std::path::Path;
-
     let path = Path::new(file_path);
-    let dir = path.parent().unwrap_or(Path::new("/tmp/claude"));
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("ts");
-    let temp_name = format!(".guardrails-check-{}.{}", std::process::id(), extension);
-    let temp_path = dir.join(&temp_name);
+
+    // Use parent directory if available, otherwise system temp dir
+    let temp_dir = std::env::temp_dir();
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(&temp_dir);
+
     if let Err(e) = std::fs::create_dir_all(dir) {
         eprintln!(
             "guardrails: biome: failed to create directory {:?}: {}",
@@ -68,7 +74,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         );
     }
 
-    let mut file = match std::fs::File::create(&temp_path) {
+    let temp_file = match NamedTempFile::with_suffix_in(format!(".{}", extension), dir) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("guardrails: biome: failed to create temp file: {}", e);
@@ -76,17 +82,15 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    if let Err(e) = file.write_all(content.as_bytes()) {
+    if let Err(e) = temp_file.as_file().write_all(content.as_bytes()) {
         eprintln!("guardrails: biome: failed to write temp file: {}", e);
-        cleanup_temp_file(&temp_path);
         return vec![];
     }
 
-    let temp_path_str = match temp_path.to_str() {
+    let temp_path_str = match temp_file.path().to_str() {
         Some(s) => s,
         None => {
             eprintln!("guardrails: biome: temp path contains non-UTF8 characters");
-            cleanup_temp_file(&temp_path);
             return vec![];
         }
     };
@@ -98,12 +102,9 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         Ok(o) => o,
         Err(e) => {
             eprintln!("guardrails: biome: failed to execute: {}", e);
-            cleanup_temp_file(&temp_path);
             return vec![];
         }
     };
-
-    cleanup_temp_file(&temp_path);
 
     // biome outputs to stdout even on errors
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -136,6 +137,14 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
+    // Pre-compute line offsets once for all diagnostics
+    let source_code = biome_output
+        .diagnostics
+        .first()
+        .and_then(|d| d.location.source_code.as_deref())
+        .unwrap_or("");
+    let line_offsets = build_line_offsets(source_code);
+
     biome_output
         .diagnostics
         .into_iter()
@@ -148,9 +157,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
 
             let line = d.location.span.as_ref().map(|span| {
                 let offset = span.first().copied().unwrap_or(0) as usize;
-                let source = d.location.source_code.as_deref().unwrap_or("");
-                let line_num = source.chars().take(offset).filter(|&c| c == '\n').count() + 1;
-                line_num as u32
+                offset_to_line(&line_offsets, offset)
             });
 
             let fix = get_fix_for_rule(&d.category)
@@ -168,11 +175,17 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         .collect()
 }
 
-fn cleanup_temp_file(path: &std::path::Path) {
-    if let Err(e) = std::fs::remove_file(path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("guardrails: biome: failed to cleanup temp file: {}", e);
-        }
+/// Returns byte offsets of newline characters for O(log n) line lookup.
+fn build_line_offsets(source: &str) -> Vec<usize> {
+    source
+        .char_indices()
+        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
+        .collect()
+}
+
+fn offset_to_line(line_offsets: &[usize], offset: usize) -> u32 {
+    match line_offsets.binary_search(&offset) {
+        Ok(idx) | Err(idx) => (idx + 1) as u32,
     }
 }
 
@@ -208,10 +221,19 @@ fn extract_fix_from_advices(advices: &BiomeAdvices, fallback: &str) -> String {
         .advices
         .iter()
         .filter_map(|advice| {
-            if let BiomeAdvice::Log { log: (_, parts) } = advice {
-                let text: String = parts.iter().map(|p| p.content.as_str()).collect();
-                if !text.is_empty() {
-                    return Some(text);
+            match advice {
+                BiomeAdvice::Log { log: (_, parts) } => {
+                    let text: String = parts.iter().map(|p| p.content.as_str()).collect();
+                    if !text.is_empty() {
+                        return Some(text);
+                    }
+                }
+                // Log unrecognized advice format to detect biome output changes
+                BiomeAdvice::Other(value) => {
+                    eprintln!(
+                        "guardrails: biome: unrecognized advice format (may indicate biome update): {:?}",
+                        value
+                    );
                 }
             }
             None
@@ -223,4 +245,108 @@ fn extract_fix_from_advices(advices: &BiomeAdvices, fallback: &str) -> String {
     } else {
         texts.join(" ")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_line_offsets_empty() {
+        let offsets = build_line_offsets("");
+        assert!(offsets.is_empty());
+    }
+
+    #[test]
+    fn test_build_line_offsets_single_line() {
+        let offsets = build_line_offsets("hello world");
+        assert!(offsets.is_empty());
+    }
+
+    #[test]
+    fn test_build_line_offsets_multiple_lines() {
+        let offsets = build_line_offsets("line1\nline2\nline3");
+        assert_eq!(offsets, vec![5, 11]); // positions of \n characters
+    }
+
+    #[test]
+    fn test_offset_to_line_first_line() {
+        let offsets = build_line_offsets("line1\nline2\nline3");
+        assert_eq!(offset_to_line(&offsets, 0), 1);
+        assert_eq!(offset_to_line(&offsets, 4), 1);
+    }
+
+    #[test]
+    fn test_offset_to_line_second_line() {
+        let offsets = build_line_offsets("line1\nline2\nline3");
+        assert_eq!(offset_to_line(&offsets, 6), 2);
+        assert_eq!(offset_to_line(&offsets, 10), 2);
+    }
+
+    #[test]
+    fn test_offset_to_line_third_line() {
+        let offsets = build_line_offsets("line1\nline2\nline3");
+        assert_eq!(offset_to_line(&offsets, 12), 3);
+    }
+
+    #[test]
+    fn test_get_fix_for_known_rule() {
+        assert!(get_fix_for_rule("lint/security/noGlobalEval").is_some());
+        assert!(get_fix_for_rule("lint/suspicious/noExplicitAny").is_some());
+        assert!(get_fix_for_rule("lint/a11y/useAltText").is_some());
+    }
+
+    #[test]
+    fn test_get_fix_for_unknown_rule() {
+        assert!(get_fix_for_rule("unknown/rule").is_none());
+    }
+
+    #[test]
+    fn test_extract_fix_from_empty_advices() {
+        let advices = BiomeAdvices { advices: vec![] };
+        let result = extract_fix_from_advices(&advices, "fallback message");
+        assert_eq!(result, "fallback message");
+    }
+
+    #[test]
+    fn test_extract_fix_from_log_advice() {
+        let advices = BiomeAdvices {
+            advices: vec![BiomeAdvice::Log {
+                log: (
+                    "info".to_string(),
+                    vec![BiomeMessagePart {
+                        content: "Fix suggestion".to_string(),
+                    }],
+                ),
+            }],
+        };
+        let result = extract_fix_from_advices(&advices, "fallback");
+        assert_eq!(result, "Fix suggestion");
+    }
+
+    #[test]
+    fn test_biome_output_parsing() {
+        let json = r#"{"diagnostics":[]}"#;
+        let output: BiomeOutput = serde_json::from_str(json).unwrap();
+        assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_biome_diagnostic_parsing() {
+        let json = r#"{
+            "diagnostics": [{
+                "category": "lint/test",
+                "severity": "error",
+                "description": "Test error",
+                "advices": {"advices": []},
+                "location": {"span": [10, 20], "sourceCode": "test"}
+            }]
+        }"#;
+        let output: BiomeOutput = serde_json::from_str(json).unwrap();
+        assert_eq!(output.diagnostics.len(), 1);
+        assert_eq!(output.diagnostics[0].category, "lint/test");
+        assert_eq!(output.diagnostics[0].severity, "error");
+    }
+
+    // TODO: Integration tests for is_available() and check() require mocking biome command
 }
