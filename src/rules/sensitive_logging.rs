@@ -2,6 +2,9 @@ use super::{Rule, Severity, Violation, RE_JS_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
+// Note: Pattern covers common logging calls. Bracket notation (console["log"]) and
+// optional chaining (console?.log) are intentionally not supported - these patterns
+// are rare and would add complexity without significant benefit.
 static RE_CONSOLE_CALL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"console\.(log|warn|error|info|debug)\s*\(")
         .expect("RE_CONSOLE_CALL: invalid regex")
@@ -16,184 +19,254 @@ static RE_SENSITIVE_KEYWORD: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\b(password|secret|token|apiKey|api_key|credential|auth|private_key|privateKey|accessToken|access_token|refreshToken|refresh_token)\b")
         .expect("RE_SENSITIVE_KEYWORD: invalid regex")
 });
-fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
-    let bytes = content.as_bytes();
-    let mut depth = 1;
-    let mut pos = start;
 
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_template = false;
-    // Track brace depth for template interpolations: ${...}
-    let mut template_interp_depth: Vec<i32> = Vec::new();
+/// Unified string/comment scanner to eliminate DRY violation.
+/// Tracks: single quotes, double quotes, template literals, block comments.
+struct StringScanner<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    in_single_quote: bool,
+    in_double_quote: bool,
+    in_template: bool,
+    in_block_comment: bool,
+    template_interp_depth: Vec<i32>,
+}
 
-    while pos < bytes.len() && depth > 0 {
-        let byte = bytes[pos];
-        let next_byte = bytes.get(pos + 1).copied();
+impl<'a> StringScanner<'a> {
+    fn new(bytes: &'a [u8], start: usize) -> Self {
+        Self {
+            bytes,
+            pos: start,
+            in_single_quote: false,
+            in_double_quote: false,
+            in_template: false,
+            in_block_comment: false,
+            template_interp_depth: Vec::new(),
+        }
+    }
 
-        // Handle template interpolation content (inside ${...})
-        if !template_interp_depth.is_empty() {
-            match byte {
-                b'{' => {
-                    *template_interp_depth.last_mut().unwrap() += 1;
+    fn in_string_or_comment(&self) -> bool {
+        self.in_single_quote
+            || self.in_double_quote
+            || self.in_template
+            || self.in_block_comment
+            || !self.template_interp_depth.is_empty()
+    }
+
+    fn current(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.pos + 1).copied()
+    }
+
+    /// Advance scanner, handling strings/comments. Returns true if advanced.
+    fn advance(&mut self) -> bool {
+        if self.pos >= self.bytes.len() {
+            return false;
+        }
+
+        let byte = self.bytes[self.pos];
+        let next = self.peek();
+
+        // Block comment handling
+        if self.in_block_comment {
+            if byte == b'*' && next == Some(b'/') {
+                self.in_block_comment = false;
+                self.pos += 2;
+            } else {
+                self.pos += 1;
+            }
+            return true;
+        }
+
+        // Template interpolation content (inside ${...})
+        if !self.template_interp_depth.is_empty() {
+            // Handle escape in strings inside interpolation
+            if (self.in_single_quote || self.in_double_quote) && byte == b'\\' {
+                self.pos += 2;
+                return true;
+            }
+            if self.in_single_quote {
+                if byte == b'\'' {
+                    self.in_single_quote = false;
                 }
+                self.pos += 1;
+                return true;
+            }
+            if self.in_double_quote {
+                if byte == b'"' {
+                    self.in_double_quote = false;
+                }
+                self.pos += 1;
+                return true;
+            }
+            match byte {
+                b'{' => *self.template_interp_depth.last_mut().unwrap() += 1,
                 b'}' => {
-                    let interp_depth = template_interp_depth.last_mut().unwrap();
-                    *interp_depth -= 1;
-                    if *interp_depth == 0 {
-                        template_interp_depth.pop();
-                        in_template = true; // Back to template literal
+                    let depth = self.template_interp_depth.last_mut().unwrap();
+                    *depth -= 1;
+                    if *depth == 0 {
+                        self.template_interp_depth.pop();
+                        self.in_template = true;
                     }
                 }
-                b'\'' => in_single_quote = true,
-                b'"' => in_double_quote = true,
-                b'`' => in_template = true,
-                b'(' => depth += 1,
-                b')' => depth -= 1,
+                b'\'' => self.in_single_quote = true,
+                b'"' => self.in_double_quote = true,
+                b'`' => self.in_template = true,
                 _ => {}
             }
-            pos += 1;
-            continue;
+            self.pos += 1;
+            return true;
         }
 
-        // Handle string literals
-        if in_single_quote || in_double_quote || in_template {
-            if byte == b'\\' && pos + 1 < bytes.len() {
-                pos += 2;
-                continue;
+        // String literal handling
+        if self.in_single_quote || self.in_double_quote || self.in_template {
+            if byte == b'\\' {
+                self.pos += 2;
+                return true;
             }
-            if in_single_quote && byte == b'\'' {
-                in_single_quote = false;
-            } else if in_double_quote && byte == b'"' {
-                in_double_quote = false;
-            } else if in_template {
+            if self.in_single_quote && byte == b'\'' {
+                self.in_single_quote = false;
+            } else if self.in_double_quote && byte == b'"' {
+                self.in_double_quote = false;
+            } else if self.in_template {
                 if byte == b'`' {
-                    in_template = false;
-                } else if byte == b'$' && next_byte == Some(b'{') {
-                    // Enter template interpolation
-                    in_template = false;
-                    template_interp_depth.push(1);
-                    pos += 2;
-                    continue;
+                    self.in_template = false;
+                } else if byte == b'$' && next == Some(b'{') {
+                    self.in_template = false;
+                    self.template_interp_depth.push(1);
+                    self.pos += 2;
+                    return true;
                 }
             }
-            pos += 1;
-            continue;
+            self.pos += 1;
+            return true;
         }
 
+        // Normal code - check for string/comment start
         match byte {
-            b'\'' => in_single_quote = true,
-            b'"' => in_double_quote = true,
-            b'`' => in_template = true,
-            b'(' => depth += 1,
-            b')' => depth -= 1,
+            b'\'' => self.in_single_quote = true,
+            b'"' => self.in_double_quote = true,
+            b'`' => self.in_template = true,
+            b'/' if next == Some(b'*') => {
+                self.in_block_comment = true;
+                self.pos += 2;
+                return true;
+            }
             _ => {}
         }
 
-        pos += 1;
+        self.pos += 1;
+        true
+    }
+}
+
+fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
+    let bytes = content.as_bytes();
+    let mut scanner = StringScanner::new(bytes, start);
+    let mut depth = 1;
+
+    while scanner.pos < bytes.len() && depth > 0 {
+        let in_context = scanner.in_string_or_comment();
+        let byte = scanner.current();
+
+        scanner.advance();
+
+        if !in_context {
+            match byte {
+                Some(b'(') => depth += 1,
+                Some(b')') => depth -= 1,
+                _ => {}
+            }
+        }
     }
 
     if depth == 0 {
-        Some(&content[start..pos - 1])
+        Some(&content[start..scanner.pos - 1])
     } else {
         None
     }
 }
 
-fn is_in_line_comment(content: &str, pos: usize) -> bool {
+fn is_in_comment(content: &str, pos: usize) -> bool {
     let line_start = content[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let bytes = content.as_bytes();
-    let mut i = line_start;
+    let mut scanner = StringScanner::new(bytes, line_start);
 
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_template = false;
-
-    while i + 1 < pos {
-        let b = bytes[i];
-
-        if in_single_quote || in_double_quote || in_template {
-            if b == b'\\' && i + 1 < pos {
-                i += 2;
-                continue;
-            }
-            if in_single_quote && b == b'\'' {
-                in_single_quote = false;
-            } else if in_double_quote && b == b'"' {
-                in_double_quote = false;
-            } else if in_template && b == b'`' {
-                in_template = false;
-            }
-            i += 1;
-            continue;
+    while scanner.pos < pos {
+        if !scanner.in_string_or_comment()
+            && scanner.current() == Some(b'/')
+            && (scanner.peek() == Some(b'/') || scanner.peek() == Some(b'*'))
+        {
+            return true;
         }
-
-        match b {
-            b'\'' => in_single_quote = true,
-            b'"' => in_double_quote = true,
-            b'`' => in_template = true,
-            b'/' if bytes.get(i + 1) == Some(&b'/') => return true,
-            _ => {}
-        }
-
-        i += 1;
+        scanner.advance();
     }
 
-    false
+    scanner.in_block_comment
 }
 
-/// Find the position of line comment start, ignoring "//" inside strings.
-fn find_line_comment_start(line: &str) -> Option<usize> {
-    let bytes = line.as_bytes();
-    let mut i = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_template = false;
+/// Extract code portions (excluding strings and comments) for keyword matching.
+/// Template interpolations (${...}) are included as code.
+fn extract_code_portions(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let mut scanner = StringScanner::new(bytes, 0);
+    let mut code = String::new();
 
-    while i + 1 < bytes.len() {
-        let b = bytes[i];
+    while scanner.pos < bytes.len() {
+        let byte = scanner.current();
 
-        if in_single_quote || in_double_quote || in_template {
-            if b == b'\\' && i + 1 < bytes.len() {
-                i += 2;
-                continue;
+        // Template interpolation content is code
+        let in_interpolation = !scanner.template_interp_depth.is_empty()
+            && !scanner.in_single_quote
+            && !scanner.in_double_quote;
+
+        // Skip if in string literal or comment (but not interpolation)
+        let skip = (scanner.in_single_quote
+            || scanner.in_double_quote
+            || scanner.in_template
+            || scanner.in_block_comment)
+            && !in_interpolation;
+
+        // Check for line comment start
+        if !skip && !in_interpolation && byte == Some(b'/') && scanner.peek() == Some(b'/') {
+            while scanner.pos < bytes.len() && scanner.current() != Some(b'\n') {
+                scanner.pos += 1;
             }
-            if in_single_quote && b == b'\'' {
-                in_single_quote = false;
-            } else if in_double_quote && b == b'"' {
-                in_double_quote = false;
-            } else if in_template && b == b'`' {
-                in_template = false;
-            }
-            i += 1;
             continue;
         }
 
-        match b {
-            b'\'' => in_single_quote = true,
-            b'"' => in_double_quote = true,
-            b'`' => in_template = true,
-            b'/' if bytes.get(i + 1) == Some(&b'/') => return Some(i),
-            _ => {}
-        }
+        scanner.advance();
 
-        i += 1;
+        if !skip {
+            if let Some(b) = byte {
+                code.push(b as char);
+            }
+        }
     }
 
-    None
+    code
 }
 
 fn contains_sensitive_keyword(content: &str) -> bool {
-    for line in content.lines() {
-        let line = line.trim();
-        let code = find_line_comment_start(line)
-            .map(|idx| &line[..idx])
-            .unwrap_or(line);
-        if RE_SENSITIVE_KEYWORD.is_match(code) {
-            return true;
-        }
+    let code = extract_code_portions(content);
+    RE_SENSITIVE_KEYWORD.is_match(&code)
+}
+
+/// Pre-compute line offsets for O(log n) line number lookup.
+fn build_line_offsets(content: &str) -> Vec<usize> {
+    content
+        .char_indices()
+        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
+        .collect()
+}
+
+fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
+    match offsets.binary_search(&offset) {
+        Ok(idx) | Err(idx) => idx + 1,
     }
-    false
 }
 
 pub fn rule() -> Rule {
@@ -202,47 +275,47 @@ pub fn rule() -> Rule {
         checker: Box::new(|content: &str, file_path: &str| {
             let mut violations = Vec::new();
             let mut reported_lines = std::collections::HashSet::new();
+            let line_offsets = build_line_offsets(content);
 
-            for caps in RE_CONSOLE_CALL.find_iter(content) {
-                if is_in_line_comment(content, caps.start()) {
-                    continue;
+            let check_match = |caps: regex::Match,
+                               violations: &mut Vec<Violation>,
+                               reported_lines: &mut std::collections::HashSet<usize>,
+                               msg: &str| {
+                if is_in_comment(content, caps.start()) {
+                    return;
                 }
-                let match_end = caps.end();
-                if let Some(args) = extract_paren_content(content, match_end) {
+                if let Some(args) = extract_paren_content(content, caps.end()) {
                     if contains_sensitive_keyword(args) {
-                        let line_num = content[..caps.start()].lines().count() + 1;
+                        let line_num = offset_to_line(&line_offsets, caps.start());
                         if reported_lines.insert(line_num) {
                             violations.push(Violation {
                                 rule: "sensitive-logging".to_string(),
                                 severity: Severity::High,
-                                failure: "Logging sensitive data (password, token, secret). Remove or mask before logging.".to_string(),
+                                failure: msg.to_string(),
                                 file: file_path.to_string(),
                                 line: Some(line_num as u32),
                             });
                         }
                     }
                 }
+            };
+
+            for caps in RE_CONSOLE_CALL.find_iter(content) {
+                check_match(
+                    caps,
+                    &mut violations,
+                    &mut reported_lines,
+                    "Logging sensitive data (password, token, secret). Remove or mask before logging.",
+                );
             }
 
             for caps in RE_LOGGER_CALL.find_iter(content) {
-                if is_in_line_comment(content, caps.start()) {
-                    continue;
-                }
-                let match_end = caps.end();
-                if let Some(args) = extract_paren_content(content, match_end) {
-                    if contains_sensitive_keyword(args) {
-                        let line_num = content[..caps.start()].lines().count() + 1;
-                        if reported_lines.insert(line_num) {
-                            violations.push(Violation {
-                                rule: "sensitive-logging".to_string(),
-                                severity: Severity::High,
-                                failure: "Logging sensitive data via logger. Remove or mask before logging.".to_string(),
-                                file: file_path.to_string(),
-                                line: Some(line_num as u32),
-                            });
-                        }
-                    }
-                }
+                check_match(
+                    caps,
+                    &mut violations,
+                    &mut reported_lines,
+                    "Logging sensitive data via logger. Remove or mask before logging.",
+                );
             }
 
             violations
@@ -339,5 +412,17 @@ mod tests {
         // URL contains "//" but should not be treated as line comment
         let content = r#"console.log("https://example.com", password);"#;
         assert_eq!(check(content).len(), 1);
+    }
+
+    #[test]
+    fn ignores_block_comments() {
+        let content = "/* console.log(password); */\nconsole.log('safe');";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn ignores_inline_block_comment() {
+        let content = "console.log(/* password */ 'masked');";
+        assert!(check(content).is_empty());
     }
 }

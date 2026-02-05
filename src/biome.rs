@@ -87,7 +87,10 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     }
 
     if let Err(e) = temp_file.as_file().flush() {
-        eprintln!("guardrails: biome: failed to flush temp file: {}", e);
+        eprintln!(
+            "guardrails: biome: failed to flush temp file before lint: {}",
+            e
+        );
         return vec![];
     }
 
@@ -114,30 +117,37 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Find JSON in output (skip warning line about unstable option)
-    let json_str = stdout
-        .lines()
-        .find(|line| line.starts_with('{'))
-        .unwrap_or("");
-
-    if json_str.is_empty() {
-        if !stdout.is_empty() || !stderr.is_empty() {
-            eprintln!("guardrails: biome: no JSON output (may have config issues)");
-            if !stderr.is_empty() {
-                eprintln!(
-                    "guardrails: biome stderr: {}",
-                    stderr.lines().next().unwrap_or("")
-                );
-            }
-        }
-        return vec![];
-    }
-
-    let biome_output: BiomeOutput = match serde_json::from_str(json_str) {
+    // Try parsing full stdout as JSON first, then fall back to finding JSON line.
+    // Biome may prefix output with warning lines about unstable options.
+    let biome_output: BiomeOutput = match serde_json::from_str(&stdout) {
         Ok(o) => o,
-        Err(e) => {
-            eprintln!("guardrails: biome: failed to parse output: {}", e);
-            return vec![];
+        Err(_) => {
+            // Fallback: find first line starting with '{' (JSON object)
+            let json_str = stdout
+                .lines()
+                .find(|line| line.trim_start().starts_with('{'))
+                .unwrap_or("");
+
+            if json_str.is_empty() {
+                if !stdout.is_empty() || !stderr.is_empty() {
+                    eprintln!("guardrails: biome: no JSON in output (may have config issues)");
+                    if !stderr.is_empty() {
+                        eprintln!(
+                            "guardrails: biome stderr: {}",
+                            stderr.lines().next().unwrap_or("")
+                        );
+                    }
+                }
+                return vec![];
+            }
+
+            match serde_json::from_str(json_str) {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("guardrails: biome: JSON parse error: {}", e);
+                    return vec![];
+                }
+            }
         }
     };
 
