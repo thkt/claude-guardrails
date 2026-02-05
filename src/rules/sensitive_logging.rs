@@ -85,7 +85,9 @@ fn extract_code_portions(content: &str) -> String {
 
         if !skip {
             if let Some(b) = byte {
-                code.push(b as char);
+                if b.is_ascii() {
+                    code.push(b as char);
+                }
             }
         }
     }
