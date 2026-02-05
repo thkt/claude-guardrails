@@ -59,7 +59,6 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     let path = Path::new(file_path);
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("ts");
 
-    // Use parent directory if available, otherwise system temp dir
     let temp_dir = std::env::temp_dir();
     let dir = path
         .parent()
@@ -220,17 +219,12 @@ fn extract_fix_from_advices(advices: &BiomeAdvices, fallback: &str) -> String {
     let texts: Vec<String> = advices
         .advices
         .iter()
-        .filter_map(|advice| {
-            match advice {
-                BiomeAdvice::Log { log: (_, parts) } => {
-                    let text: String = parts.iter().map(|p| p.content.as_str()).collect();
-                    if !text.is_empty() {
-                        return Some(text);
-                    }
-                }
-                BiomeAdvice::Other(_) => {}
+        .filter_map(|advice| match advice {
+            BiomeAdvice::Log { log: (_, parts) } => {
+                let text: String = parts.iter().map(|p| p.content.as_str()).collect();
+                if text.is_empty() { None } else { Some(text) }
             }
-            None
+            BiomeAdvice::Other(_) => None,
         })
         .collect();
 
