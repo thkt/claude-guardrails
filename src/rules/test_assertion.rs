@@ -17,6 +17,10 @@ static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
 
 /// Extract brace content while properly handling string literals and comments.
 /// This prevents false positives from braces inside strings like `const s = "{"`.
+///
+/// Known limitation: Template literal interpolations (`${...}`) are treated as part of
+/// the string, so braces inside them won't be counted. This is acceptable since test
+/// code rarely uses complex interpolated expressions with nested blocks.
 fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut depth = 1;
