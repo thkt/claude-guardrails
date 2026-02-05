@@ -5,9 +5,8 @@
 //! - Comments (line `//` and block `/* */`)
 //! - Template interpolations `${...}`
 //!
-//! Note: This scanner operates on ASCII bytes. Multi-byte UTF-8 characters
-//! in identifiers may not match correctly, but this is acceptable for
-//! typical English codebases where sensitive keywords are ASCII.
+//! Note: Tracks ASCII delimiters only. UTF-8 content is handled correctly
+//! since multi-byte sequences never contain ASCII delimiter bytes.
 
 /// Unified string/comment scanner for JavaScript/TypeScript parsing.
 pub struct StringScanner<'a> {
