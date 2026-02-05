@@ -1,9 +1,6 @@
-use super::{find_non_comment_match, Rule, Severity, Violation};
+use super::{find_non_comment_match, Rule, Severity, Violation, RE_TEST_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-static RE_TEST_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
 struct FlakyPattern {
     pattern: &'static Lazy<Regex>,

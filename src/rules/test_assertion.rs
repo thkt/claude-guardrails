@@ -1,10 +1,7 @@
-use super::{Rule, Severity, Violation};
+use super::{Rule, Severity, Violation, RE_TEST_FILE};
 use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-static RE_TEST_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
 // Note: Pattern covers common test syntaxes. Variants like it.skip, test.only,
 // and function() syntax are intentionally not supported - these are less common

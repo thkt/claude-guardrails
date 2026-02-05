@@ -1,9 +1,6 @@
-use super::{Rule, Severity, Violation};
+use super::{Rule, Severity, Violation, RE_ALL_FILES};
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-static RE_ALL_FILES: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r".*").expect("RE_ALL_FILES: invalid regex"));
 
 static SENSITIVE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![

@@ -21,6 +21,12 @@ use serde::Deserialize;
 pub static RE_JS_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
 
+pub static RE_TEST_FILE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
+
+pub static RE_ALL_FILES: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
+
 /// Returns true if the line starts with a comment marker (does not detect inline comments).
 /// Note: For JSDoc-style block comments, only matches `* ` (with space) or bare `*` lines
 /// to avoid false positives on multiplication expressions like `x * y`.
