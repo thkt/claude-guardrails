@@ -8,7 +8,6 @@
 //! Note: Tracks ASCII delimiters only. UTF-8 content is handled correctly
 //! since multi-byte sequences never contain ASCII delimiter bytes.
 
-/// Unified string/comment scanner for JavaScript/TypeScript parsing.
 pub struct StringScanner<'a> {
     bytes: &'a [u8],
     pub pos: usize,

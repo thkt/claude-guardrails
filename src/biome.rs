@@ -151,8 +151,6 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    // Note: Uses first diagnostic's source_code for all diagnostics.
-    // This is valid for single-file lint runs (our use case).
     let source_code = biome_output
         .diagnostics
         .first()
@@ -275,7 +273,4 @@ mod tests {
         let result = extract_fix_from_advices(&advices, "fallback");
         assert_eq!(result, "Fix suggestion");
     }
-
-    // Note: Integration tests for is_available() and check() require the actual biome binary.
-    // Mocking Command execution in Rust adds significant complexity for limited benefit.
 }
