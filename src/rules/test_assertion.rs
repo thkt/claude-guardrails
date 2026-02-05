@@ -17,10 +17,7 @@ static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
 
 /// Extract brace content while properly handling string literals and comments.
 /// This prevents false positives from braces inside strings like `const s = "{"`.
-///
-/// Known limitation: Template literal interpolations (`${...}`) are treated as part of
-/// the string, so braces inside them won't be counted. This is acceptable since test
-/// code rarely uses complex interpolated expressions with nested blocks.
+/// Also handles template literal interpolations (`${...}`) by tracking brace depth within them.
 fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut depth = 1;
@@ -32,6 +29,8 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let mut in_template = false;
     let mut in_line_comment = false;
     let mut in_block_comment = false;
+    // Stack to track nested template interpolation depths
+    let mut template_interp_depth: Vec<i32> = Vec::new();
 
     while pos < bytes.len() && depth > 0 {
         let byte = bytes[pos];
@@ -57,20 +56,72 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             continue;
         }
 
-        // Handle string literals
-        if in_single_quote || in_double_quote || in_template {
-            // Check for escape sequences
+        // Handle template literal with interpolation support
+        if in_template {
             if byte == b'\\' && pos + 1 < bytes.len() {
-                pos += 2; // Skip escaped character
+                pos += 2;
                 continue;
             }
-            // Check for string end
+            // Check for interpolation start: ${
+            if byte == b'$' && next_byte == Some(b'{') {
+                template_interp_depth.push(1);
+                pos += 2;
+                continue;
+            }
+            if byte == b'`' {
+                in_template = false;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Handle being inside template interpolation ${...}
+        if !template_interp_depth.is_empty() {
+            if byte == b'\\' && pos + 1 < bytes.len() {
+                pos += 2;
+                continue;
+            }
+            // Nested strings inside interpolation
+            if byte == b'\'' {
+                in_single_quote = true;
+                pos += 1;
+                continue;
+            } else if byte == b'"' {
+                in_double_quote = true;
+                pos += 1;
+                continue;
+            } else if byte == b'`' {
+                in_template = true;
+                pos += 1;
+                continue;
+            } else if byte == b'{' {
+                if let Some(d) = template_interp_depth.last_mut() {
+                    *d += 1;
+                }
+            } else if byte == b'}' {
+                if let Some(d) = template_interp_depth.last_mut() {
+                    *d -= 1;
+                    if *d == 0 {
+                        template_interp_depth.pop();
+                        pos += 1;
+                        continue;
+                    }
+                }
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Handle regular string literals
+        if in_single_quote || in_double_quote {
+            if byte == b'\\' && pos + 1 < bytes.len() {
+                pos += 2;
+                continue;
+            }
             if in_single_quote && byte == b'\'' {
                 in_single_quote = false;
             } else if in_double_quote && byte == b'"' {
                 in_double_quote = false;
-            } else if in_template && byte == b'`' {
-                in_template = false;
             }
             pos += 1;
             continue;
@@ -295,8 +346,31 @@ mod tests {
                 console.log(s);
             });
         "#;
-        // Should detect missing assertion even with string containing braces
         let violations = check(content);
         assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn handles_template_literal_interpolation_with_braces() {
+        let content = r#"
+            it('should handle interpolation with arrow function', () => {
+                const fn = () => { return 42; };
+                const s = `result: ${fn()}`;
+                expect(s).toBe("result: 42");
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_nested_template_interpolation() {
+        let content = r#"
+            it('should handle nested interpolation', () => {
+                const obj = { a: 1 };
+                const s = `value: ${obj.a > 0 ? 'positive' : 'negative'}`;
+                expect(s).toBeDefined();
+            });
+        "#;
+        assert!(check(content).is_empty());
     }
 }
