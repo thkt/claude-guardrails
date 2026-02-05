@@ -83,7 +83,7 @@ fn main() {
     // Fail fast on truncation - truncated JSON would produce misleading parse errors.
     if bytes_read as u64 == MAX_INPUT_SIZE {
         eprintln!(
-            "guardrails: error: input too large (>{} bytes), aborting",
+            "guardrails: error: input too large (>={} bytes), aborting",
             MAX_INPUT_SIZE
         );
         std::process::exit(1);

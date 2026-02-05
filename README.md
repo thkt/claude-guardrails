@@ -250,18 +250,21 @@ mkdir -p ~/.config/guardrails
 
 ## Known Limitations
 
-- **Multi-line block comments**: Code inside block comments spanning multiple lines may trigger false positives. The scanner starts from line boundaries for performance.
-  ```javascript
-  /*
-  console.log(password);  // May trigger sensitiveLogging (false positive)
-  */
-  ```
-- **Mid-line block comment endings**: Code after `*/` on the same line may not be detected by some rules.
-  ```javascript
-  /* comment */ realCode(); // realCode may be missed by line-based rules
-  ```
+### Line-based rules (architecture, security, cryptoWeak, etc.)
 
-These trade-offs prioritize performance (O(line) vs O(file)) and are acceptable for guardrails use cases where false positives are preferable to false negatives.
+These rules use `starts_with_comment` helper which only checks line beginnings:
+
+- **Multi-line block comments**: Lines inside block comments may not be recognized as comments.
+- **Mid-line block comment endings**: Code after `*/` on the same line may be missed.
+- **Asterisk at line start**: Lines starting with `* ` are treated as JSDoc continuations.
+
+### Scanner-based rules (sensitiveLogging, testAssertion)
+
+These rules use `StringScanner` which tracks comment state across lines:
+
+- **JavaScript regex literals**: Patterns containing `//` or `/*` (e.g., `/https:\/\//`) may be misidentified as comment starts.
+
+These trade-offs are acceptable for guardrails use cases where false positives are preferable to false negatives.
 
 ## License
 

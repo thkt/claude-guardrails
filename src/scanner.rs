@@ -187,6 +187,7 @@ pub fn build_line_offsets(content: &str) -> Vec<usize> {
 }
 
 /// Convert byte offset to 1-based line number using binary search.
+/// Offsets pointing to newline characters belong to the line ending at that position.
 pub fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
     match offsets.binary_search(&offset) {
         Ok(idx) | Err(idx) => idx + 1,
