@@ -248,6 +248,21 @@ mkdir -p ~/.config/guardrails
 2. `./config.json` (current directory)
 3. `$XDG_CONFIG_HOME/guardrails/config.json` or `~/.config/guardrails/config.json`
 
+## Known Limitations
+
+- **Multi-line block comments**: Code inside block comments spanning multiple lines may trigger false positives. The scanner starts from line boundaries for performance.
+  ```javascript
+  /*
+  console.log(password);  // May trigger sensitiveLogging (false positive)
+  */
+  ```
+- **Mid-line block comment endings**: Code after `*/` on the same line may not be detected by some rules.
+  ```javascript
+  /* comment */ realCode(); // realCode may be missed by line-based rules
+  ```
+
+These trade-offs prioritize performance (O(line) vs O(file)) and are acceptable for guardrails use cases where false positives are preferable to false negatives.
+
 ## License
 
 MIT
