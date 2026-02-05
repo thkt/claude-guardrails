@@ -1,5 +1,5 @@
 use super::{Rule, Severity, Violation};
-use crate::scanner::StringScanner;
+use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -24,32 +24,13 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut scanner = StringScanner::new(bytes, start);
     let mut depth = 1;
-    let mut in_line_comment = false;
 
     while scanner.pos < bytes.len() && depth > 0 {
         let byte = scanner.current();
-        let next_byte = scanner.peek();
-
-        // Handle line comments (not handled by StringScanner)
-        if in_line_comment {
-            if byte == Some(b'\n') {
-                in_line_comment = false;
-            }
-            scanner.pos += 1;
-            continue;
-        }
-
-        // Check for line comment start
-        if !scanner.in_non_code_context() && byte == Some(b'/') && next_byte == Some(b'/') {
-            in_line_comment = true;
-            scanner.pos += 2;
-            continue;
-        }
-
         let in_context = scanner.in_non_code_context();
         scanner.advance();
 
-        if !in_context && !in_line_comment {
+        if !in_context {
             match byte {
                 Some(b'{') => depth += 1,
                 Some(b'}') => depth -= 1,
@@ -70,6 +51,7 @@ pub fn rule() -> Rule {
         file_pattern: RE_TEST_FILE.clone(),
         checker: Box::new(|content: &str, file_path: &str| {
             let mut violations = Vec::new();
+            let line_offsets = build_line_offsets(content);
 
             for caps in RE_TEST_START.captures_iter(content) {
                 let test_name = caps.get(2).map(|m| m.as_str()).unwrap_or("unknown");
@@ -87,7 +69,7 @@ pub fn rule() -> Rule {
                 }
 
                 let test_start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                let line_num = content[..test_start].lines().count() + 1;
+                let line_num = offset_to_line(&line_offsets, test_start);
 
                 violations.push(Violation {
                     rule: "test-assertion".to_string(),

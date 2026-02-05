@@ -17,6 +17,7 @@ pub struct StringScanner<'a> {
     pub in_double_quote: bool,
     pub in_template: bool,
     pub in_block_comment: bool,
+    pub in_line_comment: bool,
     pub template_interp_depth: Vec<i32>,
 }
 
@@ -29,6 +30,7 @@ impl<'a> StringScanner<'a> {
             in_double_quote: false,
             in_template: false,
             in_block_comment: false,
+            in_line_comment: false,
             template_interp_depth: Vec::new(),
         }
     }
@@ -40,6 +42,7 @@ impl<'a> StringScanner<'a> {
             || self.in_double_quote
             || self.in_template
             || self.in_block_comment
+            || self.in_line_comment
             || !self.template_interp_depth.is_empty()
     }
 
@@ -59,6 +62,15 @@ impl<'a> StringScanner<'a> {
 
         let byte = self.bytes[self.pos];
         let next = self.peek();
+
+        // Line comment handling
+        if self.in_line_comment {
+            if byte == b'\n' {
+                self.in_line_comment = false;
+            }
+            self.pos += 1;
+            return true;
+        }
 
         // Block comment handling
         if self.in_block_comment {
@@ -146,6 +158,11 @@ impl<'a> StringScanner<'a> {
             b'\'' => self.in_single_quote = true,
             b'"' => self.in_double_quote = true,
             b'`' => self.in_template = true,
+            b'/' if next == Some(b'/') => {
+                self.in_line_comment = true;
+                self.pos += 2;
+                return true;
+            }
             b'/' if next == Some(b'*') => {
                 self.in_block_comment = true;
                 self.pos += 2;
@@ -221,6 +238,20 @@ mod tests {
         assert!(scanner.in_template);
         scanner.advance(); // ` (pos=6, exits template)
         assert!(!scanner.in_template);
+    }
+
+    #[test]
+    fn scanner_handles_line_comment() {
+        let content = b"// comment\ncode";
+        let mut scanner = StringScanner::new(content, 0);
+
+        scanner.advance(); // // (advances by 2)
+        assert!(scanner.in_line_comment);
+        while scanner.in_line_comment && scanner.pos < content.len() {
+            scanner.advance();
+        }
+        assert!(!scanner.in_line_comment);
+        assert_eq!(scanner.pos, 11); // After \n (pointing to 'c' in code)
     }
 
     #[test]

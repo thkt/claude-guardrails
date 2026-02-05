@@ -54,16 +54,10 @@ fn is_in_comment(content: &str, pos: usize) -> bool {
     let mut scanner = StringScanner::new(bytes, line_start);
 
     while scanner.pos < pos {
-        if !scanner.in_non_code_context()
-            && scanner.current() == Some(b'/')
-            && (scanner.peek() == Some(b'/') || scanner.peek() == Some(b'*'))
-        {
-            return true;
-        }
         scanner.advance();
     }
 
-    scanner.in_block_comment
+    scanner.in_block_comment || scanner.in_line_comment
 }
 
 /// Extract code portions (excluding strings and comments) for keyword matching.
@@ -84,16 +78,9 @@ fn extract_code_portions(content: &str) -> String {
         let skip = (scanner.in_single_quote
             || scanner.in_double_quote
             || scanner.in_template
-            || scanner.in_block_comment)
+            || scanner.in_block_comment
+            || scanner.in_line_comment)
             && !in_interpolation;
-
-        // Check for line comment start
-        if !skip && !in_interpolation && byte == Some(b'/') && scanner.peek() == Some(b'/') {
-            while scanner.pos < bytes.len() && scanner.current() != Some(b'\n') {
-                scanner.pos += 1;
-            }
-            continue;
-        }
 
         scanner.advance();
 
