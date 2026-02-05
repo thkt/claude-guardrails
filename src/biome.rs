@@ -342,5 +342,6 @@ mod tests {
         assert_eq!(output.diagnostics[0].severity, "error");
     }
 
-    // TODO: Integration tests for is_available() and check() require mocking biome command
+    // Note: Integration tests for is_available() and check() require the actual biome binary.
+    // Mocking Command execution in Rust adds significant complexity for limited benefit.
 }
