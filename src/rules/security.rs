@@ -124,7 +124,6 @@ mod tests {
 
     #[test]
     fn detects_html_injection() {
-        // These patterns are XSS vectors that should be detected
         let inner = "el.innerHTML = x;";
         let outer = "el.outerHTML = x;";
         assert!(!check(inner, "/src/component.tsx").is_empty());

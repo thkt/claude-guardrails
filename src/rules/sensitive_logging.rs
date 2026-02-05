@@ -2,25 +2,20 @@ use super::{Rule, Severity, Violation, RE_JS_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-/// Matches console.log/warn/error/info/debug calls
 static RE_CONSOLE_CALL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"console\.(log|warn|error|info|debug)\s*\(")
         .expect("RE_CONSOLE_CALL: invalid regex")
 });
 
-/// Matches logger.log/warn/error/info/debug calls
 static RE_LOGGER_CALL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(logger|log)\.(log|warn|error|info|debug)\s*\(")
         .expect("RE_LOGGER_CALL: invalid regex")
 });
 
-/// Sensitive keyword pattern
 static RE_SENSITIVE_KEYWORD: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\b(password|secret|token|apiKey|api_key|credential|auth|private_key|privateKey|accessToken|access_token|refreshToken|refresh_token)\b")
         .expect("RE_SENSITIVE_KEYWORD: invalid regex")
 });
-
-/// Extract content inside parentheses, handling nested parens and string literals.
 fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut depth = 1;
@@ -69,7 +64,6 @@ fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
     }
 }
 
-/// Check if a position is inside a single-line comment.
 fn is_in_line_comment(content: &str, pos: usize) -> bool {
     // Find the start of the line containing this position
     let line_start = content[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -78,7 +72,6 @@ fn is_in_line_comment(content: &str, pos: usize) -> bool {
     line_before_pos.contains("//")
 }
 
-/// Check if content contains sensitive keywords (excluding comments).
 fn contains_sensitive_keyword(content: &str) -> bool {
     for line in content.lines() {
         let line = line.trim();
