@@ -128,6 +128,8 @@ impl Config {
         }
     }
 
+    // Config path resolution depends on filesystem state, making unit tests difficult.
+    // TODO: Extract path candidate generation from existence checking for testability.
     fn config_path() -> PathBuf {
         let exe_dir = std::env::current_exe()
             .ok()

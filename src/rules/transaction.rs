@@ -14,6 +14,20 @@ static RE_WRITE_OPS: Lazy<Regex> = Lazy::new(|| {
         .expect("RE_WRITE_OPS: invalid regex")
 });
 
+// Transaction boundary detection patterns:
+// Matches various transaction management patterns across frameworks:
+//   - @Transactional       : Java/NestJS decorator
+//   - \btransaction\b      : Generic transaction keyword (word boundary)
+//   - $transaction         : Prisma's transaction API
+//   - \bunitOfWork\b       : DDD Unit of Work pattern
+//   - \brunInTransaction\b : Custom transaction runner
+//   - \bwithTransaction\b  : Functional transaction wrapper
+//   - \bbeginTransaction\b : Explicit transaction start
+//   - \bQueryRunner\b      : TypeORM query runner (manages transactions)
+//   - \bgetManager\b       : TypeORM entity manager
+//   - knex.transaction     : Knex.js transaction
+//   - sequelize.transaction: Sequelize ORM transaction
+//   - db.transaction       : Drizzle ORM and generic DB transaction
 static RE_TX_BOUNDARY: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"(?i)(@Transactional|\btransaction\b|\$transaction|\bunitOfWork\b|\brunInTransaction\b|\bwithTransaction\b|\bbeginTransaction\b|\bQueryRunner\b|\bgetManager\b|knex\.transaction|sequelize\.transaction|db\.transaction)",
@@ -52,7 +66,6 @@ pub fn rule() -> Rule {
     }
 }
 
-// TXRULE-001: Unit tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,7 +189,6 @@ mod tests {
         assert!(violations.is_empty());
     }
 
-    // TXRULE-007: Word boundary tests
     #[test]
     fn detects_when_transaction_keyword_only_in_variable_name() {
         let content = r#"
@@ -189,7 +201,6 @@ mod tests {
         assert_eq!(violations.len(), 1);
     }
 
-    // TXRULE-008: Comment filtering tests
     #[test]
     fn detects_when_transaction_keyword_only_in_comment() {
         let content = r#"
@@ -203,7 +214,6 @@ mod tests {
         assert_eq!(violations.len(), 1);
     }
 
-    // TXRULE-009: Word boundary for other patterns
     #[test]
     fn detects_when_unitofwork_only_in_variable_name() {
         let content = r#"
