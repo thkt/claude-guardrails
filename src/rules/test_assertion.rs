@@ -238,7 +238,6 @@ mod tests {
         assert_eq!(violations.len(), 1);
     }
 
-    // Tests for improved brace extraction
     #[test]
     fn handles_braces_in_string_literals() {
         let content = r#"
@@ -247,7 +246,6 @@ mod tests {
                 expect(s).toBe("{ not a real brace }");
             });
         "#;
-        // Should pass because there IS an expect() assertion
         assert!(check(content).is_empty());
     }
 
