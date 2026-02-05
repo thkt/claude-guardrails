@@ -1,4 +1,5 @@
 use crate::rules::{Severity, Violation};
+use crate::scanner::{build_line_offsets, offset_to_line};
 use serde::Deserialize;
 use std::io::Write;
 use std::path::Path;
@@ -151,6 +152,8 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
+    // Note: Uses first diagnostic's source_code for all diagnostics.
+    // This is valid for single-file lint runs (our use case).
     let source_code = biome_output
         .diagnostics
         .first()
@@ -170,7 +173,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
 
             let line = d.location.span.as_ref().map(|span| {
                 let offset = span.first().copied().unwrap_or(0) as usize;
-                offset_to_line(&line_offsets, offset)
+                offset_to_line(&line_offsets, offset) as u32
             });
 
             let fix = get_fix_for_rule(&d.category)
@@ -186,21 +189,6 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
             }
         })
         .collect()
-}
-
-/// Returns byte offsets of newline characters for O(log n) line lookup.
-fn build_line_offsets(source: &str) -> Vec<usize> {
-    source
-        .char_indices()
-        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
-        .collect()
-}
-
-/// Convert byte offset to 1-based line number.
-fn offset_to_line(line_offsets: &[usize], offset: usize) -> u32 {
-    match line_offsets.binary_search(&offset) {
-        Ok(idx) | Err(idx) => (idx + 1) as u32,
-    }
 }
 
 fn get_fix_for_rule(category: &str) -> Option<&'static str> {

@@ -2,6 +2,7 @@ mod biome;
 mod config;
 mod reporter;
 mod rules;
+mod scanner;
 
 use config::Config;
 use reporter::{format_violations, format_warnings};

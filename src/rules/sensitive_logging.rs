@@ -1,4 +1,5 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
+use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -20,156 +21,13 @@ static RE_SENSITIVE_KEYWORD: Lazy<Regex> = Lazy::new(|| {
         .expect("RE_SENSITIVE_KEYWORD: invalid regex")
 });
 
-/// Unified string/comment scanner to eliminate DRY violation.
-/// Tracks: single quotes, double quotes, template literals, block comments.
-struct StringScanner<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-    in_single_quote: bool,
-    in_double_quote: bool,
-    in_template: bool,
-    in_block_comment: bool,
-    template_interp_depth: Vec<i32>,
-}
-
-impl<'a> StringScanner<'a> {
-    fn new(bytes: &'a [u8], start: usize) -> Self {
-        Self {
-            bytes,
-            pos: start,
-            in_single_quote: false,
-            in_double_quote: false,
-            in_template: false,
-            in_block_comment: false,
-            template_interp_depth: Vec::new(),
-        }
-    }
-
-    fn in_string_or_comment(&self) -> bool {
-        self.in_single_quote
-            || self.in_double_quote
-            || self.in_template
-            || self.in_block_comment
-            || !self.template_interp_depth.is_empty()
-    }
-
-    fn current(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
-    }
-
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos + 1).copied()
-    }
-
-    /// Advance scanner, handling strings/comments. Returns true if advanced.
-    fn advance(&mut self) -> bool {
-        if self.pos >= self.bytes.len() {
-            return false;
-        }
-
-        let byte = self.bytes[self.pos];
-        let next = self.peek();
-
-        // Block comment handling
-        if self.in_block_comment {
-            if byte == b'*' && next == Some(b'/') {
-                self.in_block_comment = false;
-                self.pos += 2;
-            } else {
-                self.pos += 1;
-            }
-            return true;
-        }
-
-        // Template interpolation content (inside ${...})
-        if !self.template_interp_depth.is_empty() {
-            // Handle escape in strings inside interpolation
-            if (self.in_single_quote || self.in_double_quote) && byte == b'\\' {
-                self.pos += 2;
-                return true;
-            }
-            if self.in_single_quote {
-                if byte == b'\'' {
-                    self.in_single_quote = false;
-                }
-                self.pos += 1;
-                return true;
-            }
-            if self.in_double_quote {
-                if byte == b'"' {
-                    self.in_double_quote = false;
-                }
-                self.pos += 1;
-                return true;
-            }
-            match byte {
-                b'{' => *self.template_interp_depth.last_mut().unwrap() += 1,
-                b'}' => {
-                    let depth = self.template_interp_depth.last_mut().unwrap();
-                    *depth -= 1;
-                    if *depth == 0 {
-                        self.template_interp_depth.pop();
-                        self.in_template = true;
-                    }
-                }
-                b'\'' => self.in_single_quote = true,
-                b'"' => self.in_double_quote = true,
-                b'`' => self.in_template = true,
-                _ => {}
-            }
-            self.pos += 1;
-            return true;
-        }
-
-        // String literal handling
-        if self.in_single_quote || self.in_double_quote || self.in_template {
-            if byte == b'\\' {
-                self.pos += 2;
-                return true;
-            }
-            if self.in_single_quote && byte == b'\'' {
-                self.in_single_quote = false;
-            } else if self.in_double_quote && byte == b'"' {
-                self.in_double_quote = false;
-            } else if self.in_template {
-                if byte == b'`' {
-                    self.in_template = false;
-                } else if byte == b'$' && next == Some(b'{') {
-                    self.in_template = false;
-                    self.template_interp_depth.push(1);
-                    self.pos += 2;
-                    return true;
-                }
-            }
-            self.pos += 1;
-            return true;
-        }
-
-        // Normal code - check for string/comment start
-        match byte {
-            b'\'' => self.in_single_quote = true,
-            b'"' => self.in_double_quote = true,
-            b'`' => self.in_template = true,
-            b'/' if next == Some(b'*') => {
-                self.in_block_comment = true;
-                self.pos += 2;
-                return true;
-            }
-            _ => {}
-        }
-
-        self.pos += 1;
-        true
-    }
-}
-
 fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut scanner = StringScanner::new(bytes, start);
     let mut depth = 1;
 
     while scanner.pos < bytes.len() && depth > 0 {
-        let in_context = scanner.in_string_or_comment();
+        let in_context = scanner.in_non_code_context();
         let byte = scanner.current();
 
         scanner.advance();
@@ -196,7 +54,7 @@ fn is_in_comment(content: &str, pos: usize) -> bool {
     let mut scanner = StringScanner::new(bytes, line_start);
 
     while scanner.pos < pos {
-        if !scanner.in_string_or_comment()
+        if !scanner.in_non_code_context()
             && scanner.current() == Some(b'/')
             && (scanner.peek() == Some(b'/') || scanner.peek() == Some(b'*'))
         {
@@ -253,20 +111,6 @@ fn extract_code_portions(content: &str) -> String {
 fn contains_sensitive_keyword(content: &str) -> bool {
     let code = extract_code_portions(content);
     RE_SENSITIVE_KEYWORD.is_match(&code)
-}
-
-/// Pre-compute line offsets for O(log n) line number lookup.
-fn build_line_offsets(content: &str) -> Vec<usize> {
-    content
-        .char_indices()
-        .filter_map(|(i, c)| if c == '\n' { Some(i) } else { None })
-        .collect()
-}
-
-fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
-    match offsets.binary_search(&offset) {
-        Ok(idx) | Err(idx) => idx + 1,
-    }
 }
 
 pub fn rule() -> Rule {
@@ -386,7 +230,6 @@ mod tests {
 
     #[test]
     fn handles_string_with_parens() {
-        // Parentheses inside strings should not affect depth tracking
         let content = r#"console.log("(test)", password);"#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
@@ -394,7 +237,6 @@ mod tests {
 
     #[test]
     fn no_duplicate_violations() {
-        // Should report only once per line
         let content = r#"console.log(password, secret);"#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
@@ -402,14 +244,12 @@ mod tests {
 
     #[test]
     fn detects_sensitive_in_template_interpolation() {
-        // Function calls inside ${...} should be parsed correctly
         let content = r#"console.log(`value: ${getPassword(password)}`);"#;
         assert_eq!(check(content).len(), 1);
     }
 
     #[test]
     fn url_in_string_not_treated_as_comment() {
-        // URL contains "//" but should not be treated as line comment
         let content = r#"console.log("https://example.com", password);"#;
         assert_eq!(check(content).len(), 1);
     }

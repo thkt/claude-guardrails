@@ -22,16 +22,21 @@ pub static RE_JS_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
 
 /// Returns true if the line starts with a comment marker (does not detect inline comments).
+/// Note: For JSDoc-style block comments, only matches `* ` (with space) or bare `*` lines
+/// to avoid false positives on multiplication expressions like `x * y`.
 #[inline]
 fn starts_with_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*")
+    trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with("* ")
+        || trimmed == "*"
 }
 
 /// Returns an iterator over non-comment lines with their 1-based line numbers.
 /// Use this when you need to perform multiple pattern matches on the same content.
 #[inline]
-pub fn non_comment_lines(content: &str) -> impl Iterator<Item = (u32, &str)> {
+pub(crate) fn non_comment_lines(content: &str) -> impl Iterator<Item = (u32, &str)> {
     content
         .lines()
         .enumerate()

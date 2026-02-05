@@ -1,10 +1,14 @@
 use super::{Rule, Severity, Violation};
+use crate::scanner::StringScanner;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
 static RE_TEST_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
+// Note: Pattern covers common test syntaxes. Variants like it.skip, test.only,
+// and function() syntax are intentionally not supported - these are less common
+// and would add regex complexity without significant benefit.
 static RE_TEST_START: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(it|test)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{"#)
         .expect("RE_TEST_START: invalid regex")
@@ -15,152 +19,47 @@ static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
         .expect("RE_ASSERTION: invalid regex")
 });
 
-/// Extract brace content while properly handling string literals and comments.
-/// This prevents false positives from braces inside strings like `const s = "{"`.
-/// Also handles template literal interpolations (`${...}`) by tracking brace depth within them.
+/// Extract brace content using shared StringScanner.
 fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
+    let mut scanner = StringScanner::new(bytes, start);
     let mut depth = 1;
-    let mut pos = start;
-
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_template = false;
     let mut in_line_comment = false;
-    let mut in_block_comment = false;
-    let mut template_interp_depth: Vec<i32> = Vec::new();
 
-    while pos < bytes.len() && depth > 0 {
-        let byte = bytes[pos];
-        let next_byte = bytes.get(pos + 1).copied();
+    while scanner.pos < bytes.len() && depth > 0 {
+        let byte = scanner.current();
+        let next_byte = scanner.peek();
 
+        // Handle line comments (not handled by StringScanner)
         if in_line_comment {
-            if byte == b'\n' {
+            if byte == Some(b'\n') {
                 in_line_comment = false;
             }
-            pos += 1;
+            scanner.pos += 1;
             continue;
         }
 
-        if in_block_comment {
-            if byte == b'*' && next_byte == Some(b'/') {
-                in_block_comment = false;
-                pos += 2;
-                continue;
-            }
-            pos += 1;
+        // Check for line comment start
+        if !scanner.in_non_code_context() && byte == Some(b'/') && next_byte == Some(b'/') {
+            in_line_comment = true;
+            scanner.pos += 2;
             continue;
         }
 
-        if in_template {
-            if byte == b'\\' && pos + 1 < bytes.len() {
-                pos += 2;
-                continue;
-            }
-            if byte == b'$' && next_byte == Some(b'{') {
-                in_template = false;
-                template_interp_depth.push(1);
-                pos += 2;
-                continue;
-            }
-            if byte == b'`' {
-                in_template = false;
-            }
-            pos += 1;
-            continue;
-        }
+        let in_context = scanner.in_non_code_context();
+        scanner.advance();
 
-        if !template_interp_depth.is_empty() {
-            if in_single_quote || in_double_quote {
-                if byte == b'\\' && pos + 1 < bytes.len() {
-                    pos += 2;
-                    continue;
-                }
-                if in_single_quote && byte == b'\'' {
-                    in_single_quote = false;
-                } else if in_double_quote && byte == b'"' {
-                    in_double_quote = false;
-                }
-                pos += 1;
-                continue;
-            }
-
-            if byte == b'\\' && pos + 1 < bytes.len() {
-                pos += 2;
-                continue;
-            }
-            if byte == b'\'' {
-                in_single_quote = true;
-                pos += 1;
-                continue;
-            } else if byte == b'"' {
-                in_double_quote = true;
-                pos += 1;
-                continue;
-            } else if byte == b'`' {
-                in_template = true;
-                pos += 1;
-                continue;
-            } else if byte == b'{' {
-                if let Some(d) = template_interp_depth.last_mut() {
-                    *d += 1;
-                }
-            } else if byte == b'}' {
-                if let Some(d) = template_interp_depth.last_mut() {
-                    *d -= 1;
-                    if *d == 0 {
-                        template_interp_depth.pop();
-                        // Return to template mode after interpolation closes
-                        in_template = true;
-                        pos += 1;
-                        continue;
-                    }
-                }
-            }
-            pos += 1;
-            continue;
-        }
-
-        if in_single_quote || in_double_quote {
-            if byte == b'\\' && pos + 1 < bytes.len() {
-                pos += 2;
-                continue;
-            }
-            if in_single_quote && byte == b'\'' {
-                in_single_quote = false;
-            } else if in_double_quote && byte == b'"' {
-                in_double_quote = false;
-            }
-            pos += 1;
-            continue;
-        }
-
-        if byte == b'/' {
-            if next_byte == Some(b'/') {
-                in_line_comment = true;
-                pos += 2;
-                continue;
-            } else if next_byte == Some(b'*') {
-                in_block_comment = true;
-                pos += 2;
-                continue;
+        if !in_context && !in_line_comment {
+            match byte {
+                Some(b'{') => depth += 1,
+                Some(b'}') => depth -= 1,
+                _ => {}
             }
         }
-
-        match byte {
-            b'\'' => in_single_quote = true,
-            b'"' => in_double_quote = true,
-            b'`' => in_template = true,
-            b'{' => depth += 1,
-            b'}' => depth -= 1,
-            _ => {}
-        }
-
-        pos += 1;
     }
 
     if depth == 0 {
-        Some(&content[start..pos - 1])
+        Some(&content[start..scanner.pos - 1])
     } else {
         None
     }
