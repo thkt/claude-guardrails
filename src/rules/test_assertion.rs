@@ -16,7 +16,6 @@ static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
         .expect("RE_ASSERTION: invalid regex")
 });
 
-/// Extract brace content using shared StringScanner.
 fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut scanner = StringScanner::new(bytes, start);
