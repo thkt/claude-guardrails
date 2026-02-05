@@ -143,10 +143,8 @@ impl Config {
             search_paths.push(dir.join("config.json"));
         }
 
-        // Fallback: current directory
         search_paths.push(PathBuf::from("config.json"));
 
-        // Fallback: XDG config home or ~/.config
         if let Some(config_dir) = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))

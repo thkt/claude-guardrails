@@ -23,20 +23,17 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let mut depth = 1;
     let mut pos = start;
 
-    // State tracking for strings and comments
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut in_template = false;
     let mut in_line_comment = false;
     let mut in_block_comment = false;
-    // Stack to track nested template interpolation depths
     let mut template_interp_depth: Vec<i32> = Vec::new();
 
     while pos < bytes.len() && depth > 0 {
         let byte = bytes[pos];
         let next_byte = bytes.get(pos + 1).copied();
 
-        // Handle line comment end
         if in_line_comment {
             if byte == b'\n' {
                 in_line_comment = false;
@@ -45,7 +42,6 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             continue;
         }
 
-        // Handle block comment end
         if in_block_comment {
             if byte == b'*' && next_byte == Some(b'/') {
                 in_block_comment = false;
@@ -56,14 +52,11 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             continue;
         }
 
-        // Handle template literal with interpolation support
         if in_template {
             if byte == b'\\' && pos + 1 < bytes.len() {
                 pos += 2;
                 continue;
             }
-            // Check for interpolation start: ${
-            // Exit template mode to process interpolation content as code
             if byte == b'$' && next_byte == Some(b'{') {
                 in_template = false;
                 template_interp_depth.push(1);
@@ -77,9 +70,7 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             continue;
         }
 
-        // Handle being inside template interpolation ${...}
         if !template_interp_depth.is_empty() {
-            // First, handle strings inside interpolation
             if in_single_quote || in_double_quote {
                 if byte == b'\\' && pos + 1 < bytes.len() {
                     pos += 2;
@@ -98,7 +89,6 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
                 pos += 2;
                 continue;
             }
-            // Enter nested strings inside interpolation
             if byte == b'\'' {
                 in_single_quote = true;
                 pos += 1;
@@ -131,7 +121,6 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             continue;
         }
 
-        // Handle regular string literals
         if in_single_quote || in_double_quote {
             if byte == b'\\' && pos + 1 < bytes.len() {
                 pos += 2;
@@ -146,7 +135,6 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             continue;
         }
 
-        // Detect comment start
         if byte == b'/' {
             if next_byte == Some(b'/') {
                 in_line_comment = true;
@@ -159,7 +147,6 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
             }
         }
 
-        // Detect string start
         match byte {
             b'\'' => in_single_quote = true,
             b'"' => in_double_quote = true,

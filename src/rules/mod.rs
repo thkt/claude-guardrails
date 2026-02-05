@@ -1,19 +1,3 @@
-// Design note: Each rule module follows a similar pattern (struct + regex array + iteration).
-// This duplication is intentional - it keeps rules independent and easy to modify without
-// affecting others. The cost of abstraction outweighs the benefit for this use case.
-//
-// Performance note: O(rules * lines) - each rule iterates through all lines independently.
-// The helper functions (find_non_comment_match, count_non_comment_matches) provide
-// a uniform way to filter comments, but each rule call re-iterates the content.
-//
-// Future optimization options (when performance becomes critical):
-// 1. Single-pass architecture: Iterate lines once, apply all regex patterns per line
-// 2. RegexSet: Combine patterns and match in single pass
-// 3. Parallel processing: Process rules concurrently with rayon
-//
-// For now, we prioritize rule independence and maintainability over micro-optimization.
-// The current approach is sufficient for typical file sizes (<10MB limit in main.rs).
-
 mod architecture;
 mod bundle_size;
 mod crypto_weak;

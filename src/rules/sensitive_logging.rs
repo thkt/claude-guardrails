@@ -82,16 +82,10 @@ fn is_in_line_comment(content: &str, pos: usize) -> bool {
 fn contains_sensitive_keyword(content: &str) -> bool {
     for line in content.lines() {
         let line = line.trim();
-        // Skip single-line comments
         if line.starts_with("//") {
             continue;
         }
-        // Remove inline comments before checking
-        let code = if let Some(idx) = line.find("//") {
-            &line[..idx]
-        } else {
-            line
-        };
+        let code = line.find("//").map(|idx| &line[..idx]).unwrap_or(line);
         if RE_SENSITIVE_KEYWORD.is_match(code) {
             return true;
         }
@@ -106,9 +100,7 @@ pub fn rule() -> Rule {
             let mut violations = Vec::new();
             let mut reported_lines = std::collections::HashSet::new();
 
-            // Check console.log/warn/error/info/debug calls
             for caps in RE_CONSOLE_CALL.find_iter(content) {
-                // Skip if inside a comment
                 if is_in_line_comment(content, caps.start()) {
                     continue;
                 }
@@ -129,9 +121,7 @@ pub fn rule() -> Rule {
                 }
             }
 
-            // Check logger.log/warn/error/info/debug calls
             for caps in RE_LOGGER_CALL.find_iter(content) {
-                // Skip if inside a comment
                 if is_in_line_comment(content, caps.start()) {
                     continue;
                 }

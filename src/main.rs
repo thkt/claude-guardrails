@@ -106,7 +106,6 @@ fn main() {
 
     let mut violations: Vec<Violation> = Vec::new();
 
-    // Run biome check if enabled
     if config.rules.biome && is_js_ts_file(&file_path) {
         if biome::is_available() {
             violations.extend(biome::check(&content, &file_path));
@@ -115,7 +114,6 @@ fn main() {
         }
     }
 
-    // Run custom rules
     let rules = rules::load_rules(&config);
     for rule in &rules {
         if !rule.file_pattern.is_match(&file_path) {
