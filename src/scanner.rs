@@ -43,15 +43,30 @@ impl<'a> StringScanner<'a> {
         }
     }
 
-    /// Returns true if currently inside a string literal, comment, or template interpolation.
-    /// Note: Template interpolation content IS code, but we track it separately for depth.
-    pub fn in_non_code_context(&self) -> bool {
+    /// Returns true if currently inside a string literal or comment.
+    /// Template interpolation (`${...}`) returns false because it contains executable code.
+    pub fn in_string_or_comment(&self) -> bool {
         self.in_single_quote
             || self.in_double_quote
             || self.in_template
             || self.in_block_comment
             || self.in_line_comment
-            || !self.template_interp_depth.is_empty()
+    }
+
+    /// Returns true when bracket matching should be skipped.
+    /// Includes strings, comments, and interpolation-closing braces.
+    /// Use this for counting `{}` or `()` to find code block boundaries.
+    pub fn skip_for_bracket_matching(&self) -> bool {
+        if self.in_string_or_comment() {
+            return true;
+        }
+        // Skip interpolation-closing brace: depth 1 + current `}` = syntax, not code
+        if let Some(&depth) = self.template_interp_depth.last() {
+            if depth == 1 && self.current() == Some(b'}') {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn current(&self) -> Option<u8> {
@@ -212,7 +227,7 @@ mod tests {
         let content = b"'hello'";
         let mut scanner = StringScanner::new(content, 0);
 
-        assert!(!scanner.in_non_code_context());
+        assert!(!scanner.in_string_or_comment());
         scanner.advance(); // '
         assert!(scanner.in_single_quote);
         while scanner.pos < content.len() {

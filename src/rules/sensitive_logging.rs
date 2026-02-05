@@ -27,7 +27,7 @@ fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
     let mut depth = 1;
 
     while scanner.pos < bytes.len() && depth > 0 {
-        let in_context = scanner.in_non_code_context();
+        let in_context = scanner.skip_for_bracket_matching();
         let byte = scanner.current();
 
         scanner.advance();

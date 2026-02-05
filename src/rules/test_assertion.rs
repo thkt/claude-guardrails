@@ -23,7 +23,7 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
 
     while scanner.pos < bytes.len() && depth > 0 {
         let byte = scanner.current();
-        let in_context = scanner.in_non_code_context();
+        let in_context = scanner.skip_for_bracket_matching();
         scanner.advance();
 
         if !in_context {

@@ -43,8 +43,6 @@ struct BiomeMessagePart {
 #[derive(Debug, Deserialize)]
 struct BiomeLocation {
     span: Option<Vec<u32>>,
-    #[serde(rename = "sourceCode")]
-    source_code: Option<String>,
 }
 
 pub fn is_available() -> bool {
@@ -66,6 +64,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(&temp_dir);
 
+    // Note: file_path is assumed from trusted source (Claude Code tool invocations)
     if let Err(e) = std::fs::create_dir_all(dir) {
         eprintln!(
             "guardrails: biome: failed to create directory {:?}: {}",
@@ -154,12 +153,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    let source_code = biome_output
-        .diagnostics
-        .first()
-        .and_then(|d| d.location.source_code.as_deref())
-        .unwrap_or("");
-    let line_offsets = build_line_offsets(source_code);
+    let line_offsets = build_line_offsets(content);
 
     biome_output
         .diagnostics
