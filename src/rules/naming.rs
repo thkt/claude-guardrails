@@ -101,3 +101,63 @@ pub fn rule() -> Rule {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(content: &str, path: &str) -> Vec<Violation> {
+        rule().check(content, path)
+    }
+
+    #[test]
+    fn detects_lowercase_component() {
+        let content = r#"const myComponent = () => { return <div>Hello</div>; };"#;
+        let violations = check(content, "/src/components/MyComponent.tsx");
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].failure.contains("PascalCase"));
+    }
+
+    #[test]
+    fn detects_non_use_hook() {
+        let content = r#"const fetchData = () => { const [data] = useState(null); return data; };"#;
+        let violations = check(content, "/src/hooks/useFetch.ts");
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].failure.contains("useXxx"));
+    }
+
+    #[test]
+    fn detects_lowercase_interface() {
+        let content = "interface user { name: string; }";
+        let violations = check(content, "/src/types.ts");
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].failure.contains("interface"));
+    }
+
+    #[test]
+    fn detects_lowercase_type() {
+        let content = "type userRole = 'admin' | 'user';";
+        let violations = check(content, "/src/types.ts");
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].failure.contains("type"));
+    }
+
+    #[test]
+    fn allows_correct_naming() {
+        let cases = [
+            (
+                "const MyComponent = () => { return <div/>; };",
+                "/src/components/MyComponent.tsx",
+            ),
+            (
+                "const useFetch = () => { const [d] = useState(); return d; };",
+                "/src/hooks/useFetch.ts",
+            ),
+            ("interface User { name: string; }", "/src/types.ts"),
+            ("type UserRole = 'admin' | 'user';", "/src/types.ts"),
+        ];
+        for (content, path) in cases {
+            assert!(check(content, path).is_empty(), "Should allow: {}", content);
+        }
+    }
+}

@@ -88,27 +88,23 @@ mod tests {
     }
 
     #[test]
-    fn detects_md5_create_hash() {
-        let content = r#"const hash = crypto.createHash('md5').update(data).digest('hex');"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("MD5"));
-    }
-
-    #[test]
-    fn detects_sha1_create_hash() {
-        let content = r#"const hash = crypto.createHash('sha1').update(data).digest('hex');"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("SHA-1"));
-    }
-
-    #[test]
-    fn detects_des_cipher() {
-        let content = r#"const cipher = crypto.createCipher('des', key);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("DES"));
+    fn detects_weak_algorithms() {
+        let cases = [
+            (
+                "crypto.createHash('md5').update(data).digest('hex');",
+                "MD5",
+            ),
+            (
+                "crypto.createHash('sha1').update(data).digest('hex');",
+                "SHA-1",
+            ),
+            ("crypto.createCipher('des', key);", "DES"),
+        ];
+        for (content, expected) in cases {
+            let violations = check(content);
+            assert_eq!(violations.len(), 1, "Should detect: {}", expected);
+            assert!(violations[0].failure.contains(expected));
+        }
     }
 
     #[test]

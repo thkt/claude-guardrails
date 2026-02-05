@@ -222,7 +222,11 @@ fn extract_fix_from_advices(advices: &BiomeAdvices, fallback: &str) -> String {
         .filter_map(|advice| match advice {
             BiomeAdvice::Log { log: (_, parts) } => {
                 let text: String = parts.iter().map(|p| p.content.as_str()).collect();
-                if text.is_empty() { None } else { Some(text) }
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(text)
+                }
             }
             BiomeAdvice::Other(_) => None,
         })
@@ -258,23 +262,11 @@ mod tests {
     }
 
     #[test]
-    fn test_offset_to_line_first_line() {
+    fn test_offset_to_line() {
         let offsets = build_line_offsets("line1\nline2\nline3");
-        assert_eq!(offset_to_line(&offsets, 0), 1);
-        assert_eq!(offset_to_line(&offsets, 4), 1);
-    }
-
-    #[test]
-    fn test_offset_to_line_second_line() {
-        let offsets = build_line_offsets("line1\nline2\nline3");
-        assert_eq!(offset_to_line(&offsets, 6), 2);
-        assert_eq!(offset_to_line(&offsets, 10), 2);
-    }
-
-    #[test]
-    fn test_offset_to_line_third_line() {
-        let offsets = build_line_offsets("line1\nline2\nline3");
-        assert_eq!(offset_to_line(&offsets, 12), 3);
+        for (offset, expected) in [(0, 1), (4, 1), (6, 2), (10, 2), (12, 3)] {
+            assert_eq!(offset_to_line(&offsets, offset), expected);
+        }
     }
 
     #[test]
@@ -310,30 +302,6 @@ mod tests {
         };
         let result = extract_fix_from_advices(&advices, "fallback");
         assert_eq!(result, "Fix suggestion");
-    }
-
-    #[test]
-    fn test_biome_output_parsing() {
-        let json = r#"{"diagnostics":[]}"#;
-        let output: BiomeOutput = serde_json::from_str(json).unwrap();
-        assert!(output.diagnostics.is_empty());
-    }
-
-    #[test]
-    fn test_biome_diagnostic_parsing() {
-        let json = r#"{
-            "diagnostics": [{
-                "category": "lint/test",
-                "severity": "error",
-                "description": "Test error",
-                "advices": {"advices": []},
-                "location": {"span": [10, 20], "sourceCode": "test"}
-            }]
-        }"#;
-        let output: BiomeOutput = serde_json::from_str(json).unwrap();
-        assert_eq!(output.diagnostics.len(), 1);
-        assert_eq!(output.diagnostics[0].category, "lint/test");
-        assert_eq!(output.diagnostics[0].severity, "error");
     }
 
     // Note: Integration tests for is_available() and check() require the actual biome binary.

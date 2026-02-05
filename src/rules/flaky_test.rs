@@ -95,63 +95,20 @@ mod tests {
     }
 
     #[test]
-    fn detects_set_timeout() {
-        let content = r#"
-            it('should wait', async () => {
-                setTimeout(() => done(), 1000);
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("setTimeout"));
-    }
-
-    #[test]
-    fn detects_sleep() {
-        let content = r#"
-            it('should wait', async () => {
-                await sleep(500);
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("sleep"));
-    }
-
-    #[test]
-    fn detects_math_random() {
-        let content = r#"
-            it('should generate random', () => {
-                const value = Math.random();
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("Math.random"));
-    }
-
-    #[test]
-    fn detects_date_now() {
-        let content = r#"
-            it('should check time', () => {
-                const now = Date.now();
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("Date.now"));
-    }
-
-    #[test]
-    fn detects_new_date() {
-        let content = r#"
-            it('should format date', () => {
-                const date = new Date();
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("new Date"));
+    fn detects_flaky_patterns() {
+        let cases = [
+            ("setTimeout(() => done(), 1000);", "setTimeout"),
+            ("await sleep(500);", "sleep"),
+            ("const value = Math.random();", "Math.random"),
+            ("const now = Date.now();", "Date.now"),
+            ("const date = new Date();", "new Date"),
+        ];
+        for (code, expected) in cases {
+            let content = format!("it('test', () => {{ {} }});", code);
+            let violations = check(&content);
+            assert_eq!(violations.len(), 1, "Should detect: {}", expected);
+            assert!(violations[0].failure.contains(expected));
+        }
     }
 
     #[test]

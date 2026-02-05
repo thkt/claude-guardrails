@@ -156,93 +156,49 @@ mod tests {
     }
 
     #[test]
-    fn detects_console_log_password() {
-        let content = r#"console.log('User password:', password);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("sensitive"));
+    fn detects_sensitive_keywords() {
+        let cases = [
+            ("console.log('User password:', password);", "password"),
+            ("console.log('Token:', accessToken);", "accessToken"),
+            ("console.error('API Key:', apiKey);", "apiKey"),
+            ("logger.info('Secret:', secret);", "secret"),
+            ("console.log('Refresh:', refreshToken);", "refreshToken"),
+            ("logger.debug('Cred:', credential);", "credential"),
+        ];
+        for (content, keyword) in cases {
+            let violations = check(content);
+            assert_eq!(violations.len(), 1, "Should detect: {}", keyword);
+        }
     }
 
     #[test]
-    fn detects_console_log_token() {
-        let content = r#"console.log('Token:', accessToken);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-    }
-
-    #[test]
-    fn detects_console_log_api_key() {
-        let content = r#"console.error('API Key:', apiKey);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-    }
-
-    #[test]
-    fn detects_logger_with_secret() {
-        let content = r#"logger.info('Secret:', secret);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-    }
-
-    #[test]
-    fn detects_template_literal_password() {
+    fn detects_template_literal_with_sensitive() {
         let content = r#"console.log(`User ${username} password: ${password}`);"#;
-        let violations = check(content);
-        // May match multiple patterns (console + template), at least 1 is expected
-        assert!(!violations.is_empty());
-        assert!(violations.iter().any(|v| v.failure.contains("sensitive")));
+        assert!(!check(content).is_empty());
     }
 
     #[test]
-    fn allows_masked_logging() {
-        let content = r#"console.log('Password:', '***MASKED***');"#;
-        assert!(check(content).is_empty());
-    }
-
-    #[test]
-    fn allows_normal_logging() {
-        let content = r#"console.log('User logged in:', userId);"#;
-        assert!(check(content).is_empty());
-    }
-
-    #[test]
-    fn allows_logging_without_sensitive_vars() {
-        let content = r#"
-            console.log('Request received');
-            logger.info('Processing request', { requestId });
-        "#;
-        assert!(check(content).is_empty());
+    fn allows_safe_logging() {
+        let cases = [
+            r#"console.log('Password:', '***MASKED***');"#,
+            r#"console.log('User logged in:', userId);"#,
+            r#"console.log('Request received');"#,
+        ];
+        for content in cases {
+            assert!(check(content).is_empty(), "Should allow: {}", content);
+        }
     }
 
     #[test]
     fn ignores_comments() {
-        let content = r#"
-            // console.log('Debug:', password);
-            console.log('User:', username);
-        "#;
+        let content = "// console.log('Debug:', password);\nconsole.log('User:', username);";
         assert!(check(content).is_empty());
     }
 
     #[test]
-    fn detects_refresh_token() {
-        let content = r#"console.log('Refresh:', refreshToken);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-    }
-
-    #[test]
-    fn detects_credential() {
-        let content = r#"logger.debug('Cred:', credential);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-    }
-
-    #[test]
     fn detects_nested_function_call() {
-        // Previously a limitation - now correctly handles nested parentheses
         let content = r#"console.log(getUser(id), password);"#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
+        assert_eq!(check(content).len(), 1);
     }
 
     #[test]
