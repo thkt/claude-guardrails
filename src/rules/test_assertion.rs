@@ -3,9 +3,6 @@ use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-// Note: Pattern covers common test syntaxes. Variants like it.skip, test.only,
-// and function() syntax are intentionally not supported - these are less common
-// and would add regex complexity without significant benefit.
 static RE_TEST_START: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(it|test)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{"#)
         .expect("RE_TEST_START: invalid regex")

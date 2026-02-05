@@ -64,7 +64,6 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(&temp_dir);
 
-    // Note: file_path is assumed from trusted source (Claude Code tool invocations)
     if let Err(e) = std::fs::create_dir_all(dir) {
         eprintln!(
             "guardrails: biome: failed to create directory {:?}: {}",

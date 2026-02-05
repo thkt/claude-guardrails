@@ -54,13 +54,11 @@ impl<'a> StringScanner<'a> {
     }
 
     /// Returns true when bracket matching should be skipped.
-    /// Includes strings, comments, and interpolation-closing braces.
-    /// Use this for counting `{}` or `()` to find code block boundaries.
+    /// Includes strings, comments, and interpolation-closing braces (depth 1 + `}`).
     pub fn skip_for_bracket_matching(&self) -> bool {
         if self.in_string_or_comment() {
             return true;
         }
-        // Skip interpolation-closing brace: depth 1 + current `}` = syntax, not code
         if let Some(&depth) = self.template_interp_depth.last() {
             if depth == 1 && self.current() == Some(b'}') {
                 return true;

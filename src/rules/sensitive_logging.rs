@@ -3,9 +3,6 @@ use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-// Note: Pattern covers common logging calls. Bracket notation (console["log"]) and
-// optional chaining (console?.log) are intentionally not supported - these patterns
-// are rare and would add complexity without significant benefit.
 static RE_CONSOLE_CALL: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"console\.(log|warn|error|info|debug)\s*\(")
         .expect("RE_CONSOLE_CALL: invalid regex")
