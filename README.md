@@ -248,6 +248,24 @@ mkdir -p ~/.config/guardrails
 2. `./config.json` (current directory)
 3. `$XDG_CONFIG_HOME/guardrails/config.json` or `~/.config/guardrails/config.json`
 
+## Known Limitations
+
+### Line-based rules (architecture, security, cryptoWeak, etc.)
+
+These rules use `starts_with_comment` helper which only checks line beginnings:
+
+- **Multi-line block comments**: Lines inside block comments may not be recognized as comments.
+- **Mid-line block comment endings**: Code after `*/` on the same line may be missed.
+- **Asterisk at line start**: Lines starting with `* ` are treated as JSDoc continuations.
+
+### Scanner-based rules (sensitiveLogging, testAssertion)
+
+These rules use `StringScanner` which tracks comment state across lines:
+
+- **JavaScript regex literals**: Patterns containing `//` or `/*` (e.g., `/https:\/\//`) may be misidentified as comment starts.
+
+These trade-offs are acceptable for guardrails use cases where false positives are preferable to false negatives.
+
 ## License
 
 MIT

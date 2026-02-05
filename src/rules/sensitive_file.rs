@@ -1,9 +1,6 @@
-use super::{Rule, Severity, Violation};
+use super::{Rule, Severity, Violation, RE_ALL_FILES};
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-static RE_ALL_FILES: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r".*").expect("RE_ALL_FILES: invalid regex"));
 
 static SENSITIVE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![
@@ -23,16 +20,14 @@ pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_ALL_FILES.clone(),
         checker: Box::new(|_content: &str, file_path: &str| {
-            for pattern in SENSITIVE_PATTERNS.iter() {
-                if pattern.is_match(file_path) {
-                    return vec![Violation {
-                        rule: "sensitive-file".to_string(),
-                        severity: Severity::Critical,
-                        failure: "Do not write to sensitive files. Use environment variables or secret management.".to_string(),
-                        file: file_path.to_string(),
-                        line: None,
-                    }];
-                }
+            if SENSITIVE_PATTERNS.iter().any(|p| p.is_match(file_path)) {
+                return vec![Violation {
+                    rule: "sensitive-file".to_string(),
+                    severity: Severity::Critical,
+                    failure: "Do not write to sensitive files. Use environment variables or secret management.".to_string(),
+                    file: file_path.to_string(),
+                    line: None,
+                }];
             }
             Vec::new()
         }),
@@ -77,9 +72,8 @@ mod tests {
     }
 
     #[test]
-    fn allows_env_example() {
-        // .env.example is often committed as a template
-        // But we block it for safety - users can disable the rule if needed
+    fn blocks_env_example_for_safety() {
+        // .env.example is often committed as a template, but we block it for safety
         assert_eq!(check("/project/.env.example").len(), 1);
     }
 }

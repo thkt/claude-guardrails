@@ -129,32 +129,65 @@ impl Config {
     }
 
     fn config_path() -> PathBuf {
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+        Self::config_search_paths(std::env::current_exe().ok().as_deref())
+            .into_iter()
+            .find(|p| p.exists())
+            .unwrap_or_default()
+    }
 
-        let mut search_paths = Vec::new();
+    /// Generate config search paths without filesystem access (testable).
+    fn config_search_paths(exe_path: Option<&std::path::Path>) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
 
-        if let Some(dir) = exe_dir {
-            search_paths.push(dir.join("../../config.json"));
-            search_paths.push(dir.join("../config.json"));
-            search_paths.push(dir.join("config.json"));
+        if let Some(exe_dir) = exe_path.and_then(|p| p.parent()) {
+            paths.push(exe_dir.join("../../config.json"));
+            paths.push(exe_dir.join("../config.json"));
+            paths.push(exe_dir.join("config.json"));
         }
 
-        // Fallback: current directory
-        search_paths.push(PathBuf::from("config.json"));
+        paths.push(PathBuf::from("config.json"));
 
-        // Fallback: XDG config home or ~/.config
         if let Some(config_dir) = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         {
-            search_paths.push(config_dir.join("guardrails/config.json"));
+            paths.push(config_dir.join("guardrails/config.json"));
         }
 
-        search_paths
-            .into_iter()
-            .find(|p| p.exists())
-            .unwrap_or_default()
+        paths
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_search_paths_with_exe() {
+        let paths = Config::config_search_paths(Some(std::path::Path::new("/usr/bin/guardrails")));
+        assert!(paths.iter().any(|p| p.ends_with("config.json")));
+        assert!(paths.iter().any(|p| p.to_string_lossy().contains("/usr/")));
+    }
+
+    #[test]
+    fn config_search_paths_without_exe() {
+        let paths = Config::config_search_paths(None);
+        assert!(paths.iter().any(|p| p == &PathBuf::from("config.json")));
+    }
+
+    #[test]
+    fn default_config_all_rules_enabled() {
+        let config = Config::default();
+        assert!(config.enabled);
+        assert!(config.rules.sensitive_file);
+        assert!(config.rules.biome);
+    }
+
+    #[test]
+    fn default_severity_blocks_critical_and_high() {
+        let config = Config::default();
+        assert!(config.severity.block_on.contains(&Severity::Critical));
+        assert!(config.severity.block_on.contains(&Severity::High));
+        assert!(!config.severity.block_on.contains(&Severity::Medium));
     }
 }

@@ -2,6 +2,7 @@ mod biome;
 mod config;
 mod reporter;
 mod rules;
+mod scanner;
 
 use config::Config;
 use reporter::{format_violations, format_warnings};
@@ -79,11 +80,13 @@ fn main() {
         }
     };
 
+    // Fail fast on truncation - truncated JSON would produce misleading parse errors.
     if bytes_read as u64 == MAX_INPUT_SIZE {
         eprintln!(
-            "guardrails: warning: input truncated at {} bytes",
+            "guardrails: error: input too large (>={} bytes), aborting",
             MAX_INPUT_SIZE
         );
+        std::process::exit(1);
     }
 
     let input: ToolInput = match serde_json::from_str(&input_str) {
@@ -104,7 +107,6 @@ fn main() {
 
     let mut violations: Vec<Violation> = Vec::new();
 
-    // Run biome check if enabled
     if config.rules.biome && is_js_ts_file(&file_path) {
         if biome::is_available() {
             violations.extend(biome::check(&content, &file_path));
@@ -113,7 +115,6 @@ fn main() {
         }
     }
 
-    // Run custom rules
     let rules = rules::load_rules(&config);
     for rule in &rules {
         if !rule.file_pattern.is_match(&file_path) {

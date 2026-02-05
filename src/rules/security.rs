@@ -113,3 +113,57 @@ pub fn rule() -> Rule {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(content: &str, path: &str) -> Vec<Violation> {
+        rule().check(content, path)
+    }
+
+    #[test]
+    fn detects_html_injection() {
+        let inner = "el.innerHTML = x;";
+        let outer = "el.outerHTML = x;";
+        assert!(!check(inner, "/src/component.tsx").is_empty());
+        assert!(!check(outer, "/src/component.tsx").is_empty());
+    }
+
+    #[test]
+    fn detects_code_injection() {
+        let cases = ["setTimeout('alert(1)', 100);", "setInterval('fn()', 1000);"];
+        for content in cases {
+            assert_eq!(check(content, "/src/utils.ts").len(), 1);
+        }
+    }
+
+    #[test]
+    fn detects_insecure_postmessage() {
+        let content = r#"window.postMessage(data, '*');"#;
+        assert_eq!(check(content, "/src/messenger.ts").len(), 1);
+    }
+
+    #[test]
+    fn detects_sensitive_storage() {
+        let cases = [
+            "localStorage.setItem('token', jwt);",
+            "sessionStorage.setItem('password', p);",
+        ];
+        for content in cases {
+            assert_eq!(check(content, "/src/auth.ts").len(), 1);
+        }
+    }
+
+    #[test]
+    fn allows_safe_patterns() {
+        let cases = [
+            ("el.textContent = userInput;", "/src/component.tsx"),
+            ("setTimeout(() => fn(), 100);", "/src/utils.ts"),
+            ("localStorage.setItem('theme', 'dark');", "/src/utils.ts"),
+        ];
+        for (content, path) in cases {
+            assert!(check(content, path).is_empty());
+        }
+    }
+}

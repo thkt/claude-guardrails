@@ -1,9 +1,6 @@
-use super::{find_non_comment_match, Rule, Severity, Violation};
+use super::{find_non_comment_match, Rule, Severity, Violation, RE_TEST_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-static RE_TEST_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
 struct FlakyPattern {
     pattern: &'static Lazy<Regex>,
@@ -87,71 +84,24 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match("/src/utils.test.ts") {
-            return Vec::new();
+        rule().check(content, "/src/utils.test.ts")
+    }
+
+    #[test]
+    fn detects_flaky_patterns() {
+        let cases = [
+            ("setTimeout(() => done(), 1000);", "setTimeout"),
+            ("await sleep(500);", "sleep"),
+            ("const value = Math.random();", "Math.random"),
+            ("const now = Date.now();", "Date.now"),
+            ("const date = new Date();", "new Date"),
+        ];
+        for (code, expected) in cases {
+            let content = format!("it('test', () => {{ {} }});", code);
+            let violations = check(&content);
+            assert_eq!(violations.len(), 1, "Should detect: {}", expected);
+            assert!(violations[0].failure.contains(expected));
         }
-        r.check(content, "/src/utils.test.ts")
-    }
-
-    #[test]
-    fn detects_set_timeout() {
-        let content = r#"
-            it('should wait', async () => {
-                setTimeout(() => done(), 1000);
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("setTimeout"));
-    }
-
-    #[test]
-    fn detects_sleep() {
-        let content = r#"
-            it('should wait', async () => {
-                await sleep(500);
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("sleep"));
-    }
-
-    #[test]
-    fn detects_math_random() {
-        let content = r#"
-            it('should generate random', () => {
-                const value = Math.random();
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("Math.random"));
-    }
-
-    #[test]
-    fn detects_date_now() {
-        let content = r#"
-            it('should check time', () => {
-                const now = Date.now();
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("Date.now"));
-    }
-
-    #[test]
-    fn detects_new_date() {
-        let content = r#"
-            it('should format date', () => {
-                const date = new Date();
-            });
-        "#;
-        let violations = check(content);
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].failure.contains("new Date"));
     }
 
     #[test]

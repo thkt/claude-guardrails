@@ -1,7 +1,3 @@
-// Design note: Each rule module follows a similar pattern (struct + regex array + iteration).
-// This duplication is intentional - it keeps rules independent and easy to modify without
-// affecting others. The cost of abstraction outweighs the benefit for this use case.
-
 mod architecture;
 mod bundle_size;
 mod crypto_weak;
@@ -25,29 +21,43 @@ use serde::Deserialize;
 pub static RE_JS_FILE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
 
+pub static RE_TEST_FILE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
+
+pub static RE_ALL_FILES: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
+
 /// Returns true if the line starts with a comment marker (does not detect inline comments).
+/// Note: For JSDoc-style block comments, only matches `* ` (with space) or bare `*` lines
+/// to avoid false positives on multiplication expressions like `x * y`.
+#[inline]
 fn starts_with_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*")
+    trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with("* ")
+        || trimmed == "*"
+}
+
+/// Returns non-comment lines with 1-based line numbers.
+#[inline]
+pub(crate) fn non_comment_lines(content: &str) -> impl Iterator<Item = (u32, &str)> {
+    content
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !starts_with_comment(line))
+        .map(|(idx, line)| ((idx + 1) as u32, line))
 }
 
 pub fn find_non_comment_match(content: &str, pattern: &Regex) -> Option<u32> {
-    for (line_num, line) in content.lines().enumerate() {
-        if starts_with_comment(line) {
-            continue;
-        }
-        if pattern.is_match(line) {
-            return Some((line_num + 1) as u32);
-        }
-    }
-    None
+    non_comment_lines(content)
+        .find(|(_, line)| pattern.is_match(line))
+        .map(|(line_num, _)| line_num)
 }
 
 pub fn count_non_comment_matches(content: &str, pattern: &Regex) -> usize {
-    content
-        .lines()
-        .filter(|line| !starts_with_comment(line))
-        .filter(|line| pattern.is_match(line))
+    non_comment_lines(content)
+        .filter(|(_, line)| pattern.is_match(line))
         .count()
 }
 

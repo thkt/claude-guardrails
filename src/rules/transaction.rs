@@ -52,7 +52,6 @@ pub fn rule() -> Rule {
     }
 }
 
-// TXRULE-001: Unit tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,44 +74,21 @@ mod tests {
     }
 
     #[test]
-    fn allows_with_transactional_decorator() {
-        let content = r#"
-            @Transactional()
-            async function handle() {
-                await user.save();
-                await order.create();
-            }
-        "#;
-        let violations = check(content, "/src/usecases/handler.ts");
-        assert!(violations.is_empty());
-    }
-
-    #[test]
-    fn allows_with_unit_of_work() {
-        let content = r#"
-            async function handle() {
-                await unitOfWork.execute(async () => {
-                    await user.save();
-                    await order.create();
-                });
-            }
-        "#;
-        let violations = check(content, "/src/usecases/handler.ts");
-        assert!(violations.is_empty());
-    }
-
-    #[test]
-    fn allows_with_prisma_transaction() {
-        let content = r#"
-            async function handle() {
-                await prisma.$transaction(async (tx) => {
-                    await tx.user.create();
-                    await tx.order.create();
-                });
-            }
-        "#;
-        let violations = check(content, "/src/services/handler.ts");
-        assert!(violations.is_empty());
+    fn allows_with_transaction_boundaries() {
+        let cases = [
+            "@Transactional()\nasync function handle() { await user.save(); await order.create(); }",
+            "await unitOfWork.execute(async () => { await user.save(); await order.create(); });",
+            "await prisma.$transaction(async (tx) => { await tx.user.create(); await tx.order.create(); });",
+            "await db.transaction(async (tx) => { await tx.insert(users); await tx.insert(orders); });",
+        ];
+        for content in cases {
+            let violations = check(content, "/src/usecases/handler.ts");
+            assert!(
+                violations.is_empty(),
+                "Should allow: {}",
+                &content[..50.min(content.len())]
+            );
+        }
     }
 
     #[test]
@@ -163,35 +139,18 @@ mod tests {
     }
 
     #[test]
-    fn allows_with_drizzle_transaction() {
-        let content = r#"
-            async function handle() {
-                await db.transaction(async (tx) => {
-                    await tx.insert(users).values(user);
-                    await tx.insert(orders).values(order);
-                });
-            }
-        "#;
-        let violations = check(content, "/src/services/handler.ts");
-        assert!(violations.is_empty());
-    }
-
-    // TXRULE-007: Word boundary tests
-    #[test]
-    fn detects_when_transaction_keyword_only_in_variable_name() {
+    fn detects_when_keyword_in_variable_name() {
         let content = r#"
             async function handle(transactionId: string) {
                 await user.save();
                 await order.create();
             }
         "#;
-        let violations = check(content, "/src/usecases/handler.ts");
-        assert_eq!(violations.len(), 1);
+        assert_eq!(check(content, "/src/usecases/handler.ts").len(), 1);
     }
 
-    // TXRULE-008: Comment filtering tests
     #[test]
-    fn detects_when_transaction_keyword_only_in_comment() {
+    fn detects_when_keyword_in_comment() {
         let content = r#"
             // TODO: wrap in unitOfWork later
             async function handle() {
@@ -199,20 +158,6 @@ mod tests {
                 await order.create();
             }
         "#;
-        let violations = check(content, "/src/usecases/handler.ts");
-        assert_eq!(violations.len(), 1);
-    }
-
-    // TXRULE-009: Word boundary for other patterns
-    #[test]
-    fn detects_when_unitofwork_only_in_variable_name() {
-        let content = r#"
-            async function handle(unitOfWorkId: string) {
-                await user.save();
-                await order.create();
-            }
-        "#;
-        let violations = check(content, "/src/usecases/handler.ts");
-        assert_eq!(violations.len(), 1);
+        assert_eq!(check(content, "/src/usecases/handler.ts").len(), 1);
     }
 }

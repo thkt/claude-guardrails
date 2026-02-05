@@ -1,9 +1,7 @@
-use super::{Rule, Severity, Violation};
+use super::{Rule, Severity, Violation, RE_TEST_FILE};
+use crate::scanner::{build_line_offsets, offset_to_line, StringScanner};
 use once_cell::sync::Lazy;
 use regex::Regex;
-
-static RE_TEST_FILE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
 
 static RE_TEST_START: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(it|test)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{"#)
@@ -17,20 +15,25 @@ static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
 
 fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
+    let mut scanner = StringScanner::new(bytes, start);
     let mut depth = 1;
-    let mut pos = start;
 
-    while pos < bytes.len() && depth > 0 {
-        match bytes[pos] {
-            b'{' => depth += 1,
-            b'}' => depth -= 1,
-            _ => {}
+    while scanner.pos < bytes.len() && depth > 0 {
+        let byte = scanner.current();
+        let in_context = scanner.skip_for_bracket_matching();
+        scanner.advance();
+
+        if !in_context {
+            match byte {
+                Some(b'{') => depth += 1,
+                Some(b'}') => depth -= 1,
+                _ => {}
+            }
         }
-        pos += 1;
     }
 
     if depth == 0 {
-        Some(&content[start..pos - 1])
+        Some(&content[start..scanner.pos - 1])
     } else {
         None
     }
@@ -41,6 +44,7 @@ pub fn rule() -> Rule {
         file_pattern: RE_TEST_FILE.clone(),
         checker: Box::new(|content: &str, file_path: &str| {
             let mut violations = Vec::new();
+            let line_offsets = build_line_offsets(content);
 
             for caps in RE_TEST_START.captures_iter(content) {
                 let test_name = caps.get(2).map(|m| m.as_str()).unwrap_or("unknown");
@@ -58,7 +62,7 @@ pub fn rule() -> Rule {
                 }
 
                 let test_start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                let line_num = content[..test_start].lines().count() + 1;
+                let line_num = offset_to_line(&line_offsets, test_start);
 
                 violations.push(Violation {
                     rule: "test-assertion".to_string(),
@@ -82,11 +86,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match("/src/utils.test.ts") {
-            return Vec::new();
-        }
-        r.check(content, "/src/utils.test.ts")
+        rule().check(content, "/src/utils.test.ts")
     }
 
     #[test]
@@ -167,5 +167,110 @@ mod tests {
         "#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn handles_braces_in_string_literals() {
+        let content = r#"
+            it('should handle string with braces', () => {
+                const s = "{ not a real brace }";
+                expect(s).toBe("{ not a real brace }");
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_braces_in_single_quotes() {
+        let content = r#"
+            it('should handle single quoted braces', () => {
+                const s = '{ brace }';
+                expect(s).toBeDefined();
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_braces_in_template_literals() {
+        let content = r#"
+            it('should handle template literal braces', () => {
+                const s = `{ template ${brace} }`;
+                expect(s).toBeTruthy();
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_braces_in_comments() {
+        let content = r#"
+            it('should handle comment braces', () => {
+                // { this is a comment }
+                /* { block comment } */
+                expect(true).toBe(true);
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn detects_missing_assertion_with_string_braces() {
+        let content = r#"
+            it('should fail without assertion', () => {
+                const s = "{ fake brace }";
+                console.log(s);
+            });
+        "#;
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn handles_template_literal_interpolation_with_braces() {
+        let content = r#"
+            it('should handle interpolation with arrow function', () => {
+                const fn = () => { return 42; };
+                const s = `result: ${fn()}`;
+                expect(s).toBe("result: 42");
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_nested_template_interpolation() {
+        let content = r#"
+            it('should handle nested interpolation', () => {
+                const obj = { a: 1 };
+                const s = `value: ${obj.a > 0 ? 'positive' : 'negative'}`;
+                expect(s).toBeDefined();
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn detects_missing_assertion_with_template_interpolation() {
+        let content = r#"
+            it('should fail without assertion', () => {
+                const fn = () => { return 42; };
+                const s = `result: ${fn()}`;
+                console.log(s);
+            });
+        "#;
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn handles_string_inside_interpolation() {
+        let content = r#"
+            it('should handle string with braces inside interpolation', () => {
+                const s = `value: ${"a{b}c"}`;
+                expect(s).toBeDefined();
+            });
+        "#;
+        assert!(check(content).is_empty());
     }
 }
