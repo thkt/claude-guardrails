@@ -72,6 +72,7 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
             "guardrails: biome: failed to create directory {:?}: {}",
             dir, e
         );
+        return vec![];
     }
 
     let temp_file = match NamedTempFile::with_suffix_in(format!(".{}", extension), dir) {
@@ -137,7 +138,8 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         }
     };
 
-    // Pre-compute line offsets once for all diagnostics
+    // Pre-compute line offsets once for all diagnostics.
+    // Assumption: biome lints a single file, so all diagnostics share the same source_code.
     let source_code = biome_output
         .diagnostics
         .first()
@@ -183,6 +185,10 @@ fn build_line_offsets(source: &str) -> Vec<usize> {
         .collect()
 }
 
+/// Convert byte offset to 1-based line number.
+/// Biome spans point to the start of problematic tokens, which are never on newline chars.
+/// Both Ok (exact match, unlikely) and Err (between newlines) return the same result:
+/// the count of newlines before this offset, plus 1 for 1-based indexing.
 fn offset_to_line(line_offsets: &[usize], offset: usize) -> u32 {
     match line_offsets.binary_search(&offset) {
         Ok(idx) | Err(idx) => (idx + 1) as u32,
