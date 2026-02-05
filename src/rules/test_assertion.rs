@@ -15,17 +15,86 @@ static RE_ASSERTION: Lazy<Regex> = Lazy::new(|| {
         .expect("RE_ASSERTION: invalid regex")
 });
 
+/// Extract brace content while properly handling string literals and comments.
+/// This prevents false positives from braces inside strings like `const s = "{"`.
 fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
     let bytes = content.as_bytes();
     let mut depth = 1;
     let mut pos = start;
 
+    // State tracking for strings and comments
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_template = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+
     while pos < bytes.len() && depth > 0 {
-        match bytes[pos] {
+        let byte = bytes[pos];
+        let next_byte = bytes.get(pos + 1).copied();
+
+        // Handle line comment end
+        if in_line_comment {
+            if byte == b'\n' {
+                in_line_comment = false;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Handle block comment end
+        if in_block_comment {
+            if byte == b'*' && next_byte == Some(b'/') {
+                in_block_comment = false;
+                pos += 2;
+                continue;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Handle string literals
+        if in_single_quote || in_double_quote || in_template {
+            // Check for escape sequences
+            if byte == b'\\' && pos + 1 < bytes.len() {
+                pos += 2; // Skip escaped character
+                continue;
+            }
+            // Check for string end
+            if in_single_quote && byte == b'\'' {
+                in_single_quote = false;
+            } else if in_double_quote && byte == b'"' {
+                in_double_quote = false;
+            } else if in_template && byte == b'`' {
+                in_template = false;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Detect comment start
+        if byte == b'/' {
+            if next_byte == Some(b'/') {
+                in_line_comment = true;
+                pos += 2;
+                continue;
+            } else if next_byte == Some(b'*') {
+                in_block_comment = true;
+                pos += 2;
+                continue;
+            }
+        }
+
+        // Detect string start
+        match byte {
+            b'\'' => in_single_quote = true,
+            b'"' => in_double_quote = true,
+            b'`' => in_template = true,
             b'{' => depth += 1,
             b'}' => depth -= 1,
             _ => {}
         }
+
         pos += 1;
     }
 
@@ -165,6 +234,66 @@ mod tests {
                 }
             });
         "#;
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+    }
+
+    // Tests for improved brace extraction
+    #[test]
+    fn handles_braces_in_string_literals() {
+        let content = r#"
+            it('should handle string with braces', () => {
+                const s = "{ not a real brace }";
+                expect(s).toBe("{ not a real brace }");
+            });
+        "#;
+        // Should pass because there IS an expect() assertion
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_braces_in_single_quotes() {
+        let content = r#"
+            it('should handle single quoted braces', () => {
+                const s = '{ brace }';
+                expect(s).toBeDefined();
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_braces_in_template_literals() {
+        let content = r#"
+            it('should handle template literal braces', () => {
+                const s = `{ template ${brace} }`;
+                expect(s).toBeTruthy();
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn handles_braces_in_comments() {
+        let content = r#"
+            it('should handle comment braces', () => {
+                // { this is a comment }
+                /* { block comment } */
+                expect(true).toBe(true);
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn detects_missing_assertion_with_string_braces() {
+        let content = r#"
+            it('should fail without assertion', () => {
+                const s = "{ fake brace }";
+                console.log(s);
+            });
+        "#;
+        // Should detect missing assertion even with string containing braces
         let violations = check(content);
         assert_eq!(violations.len(), 1);
     }

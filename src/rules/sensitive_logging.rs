@@ -2,6 +2,11 @@ use super::{find_non_comment_match, Rule, Severity, Violation, RE_JS_FILE};
 use once_cell::sync::Lazy;
 use regex::Regex;
 
+// Known limitation: nested parentheses cause early pattern termination.
+// Example: `console.log(getUser(id), password)` may not be detected because `[^)]*`
+// stops at the first `)` from `getUser(id)`.
+// This is an acceptable trade-off to avoid false positives from complex expressions.
+// For comprehensive detection, consider using a proper JS parser.
 static RE_CONSOLE_SENSITIVE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"console\.(log|warn|error|info|debug)\s*\([^)]*\b(password|secret|token|apiKey|api_key|credential|auth|private_key|privateKey|accessToken|access_token|refreshToken|refresh_token)\b")
         .expect("RE_CONSOLE_SENSITIVE: invalid regex")

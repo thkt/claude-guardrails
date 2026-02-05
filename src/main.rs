@@ -79,11 +79,13 @@ fn main() {
         }
     };
 
+    // Fail fast on truncation - truncated JSON would produce misleading parse errors.
     if bytes_read as u64 == MAX_INPUT_SIZE {
         eprintln!(
-            "guardrails: warning: input truncated at {} bytes",
+            "guardrails: error: input too large (>{} bytes), aborting",
             MAX_INPUT_SIZE
         );
+        std::process::exit(1);
     }
 
     let input: ToolInput = match serde_json::from_str(&input_str) {
