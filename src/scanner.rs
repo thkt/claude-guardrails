@@ -63,7 +63,6 @@ impl<'a> StringScanner<'a> {
         let byte = self.bytes[self.pos];
         let next = self.peek();
 
-        // Line comment handling
         if self.in_line_comment {
             if byte == b'\n' {
                 self.in_line_comment = false;
@@ -72,7 +71,6 @@ impl<'a> StringScanner<'a> {
             return true;
         }
 
-        // Block comment handling
         if self.in_block_comment {
             if byte == b'*' && next == Some(b'/') {
                 self.in_block_comment = false;
@@ -83,7 +81,6 @@ impl<'a> StringScanner<'a> {
             return true;
         }
 
-        // Template interpolation content (inside ${...})
         if !self.template_interp_depth.is_empty() {
             if (self.in_single_quote || self.in_double_quote)
                 && byte == b'\\'
@@ -125,7 +122,6 @@ impl<'a> StringScanner<'a> {
             return true;
         }
 
-        // String literal handling
         if self.in_single_quote || self.in_double_quote || self.in_template {
             if byte == b'\\' {
                 self.pos += if self.pos + 1 < self.bytes.len() {
@@ -153,7 +149,6 @@ impl<'a> StringScanner<'a> {
             return true;
         }
 
-        // Normal code - check for string/comment start
         match byte {
             b'\'' => self.in_single_quote = true,
             b'"' => self.in_double_quote = true,

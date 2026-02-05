@@ -74,7 +74,6 @@ fn extract_code_portions(content: &str) -> String {
             && !scanner.in_single_quote
             && !scanner.in_double_quote;
 
-        // Skip string literals and comments, but include interpolation content
         let skip = (scanner.in_single_quote
             || scanner.in_double_quote
             || scanner.in_template
