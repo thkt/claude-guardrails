@@ -77,9 +77,8 @@ mod tests {
     }
 
     #[test]
-    fn allows_env_example() {
-        // .env.example is often committed as a template
-        // But we block it for safety - users can disable the rule if needed
+    fn blocks_env_example_for_safety() {
+        // .env.example is often committed as a template, but we block it for safety
         assert_eq!(check("/project/.env.example").len(), 1);
     }
 }
