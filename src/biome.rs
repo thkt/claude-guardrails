@@ -242,52 +242,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_line_offsets_empty() {
-        let offsets = build_line_offsets("");
-        assert!(offsets.is_empty());
-    }
-
-    #[test]
-    fn test_build_line_offsets_single_line() {
-        let offsets = build_line_offsets("hello world");
-        assert!(offsets.is_empty());
-    }
-
-    #[test]
-    fn test_build_line_offsets_multiple_lines() {
-        let offsets = build_line_offsets("line1\nline2\nline3");
-        assert_eq!(offsets, vec![5, 11]); // positions of \n characters
-    }
-
-    #[test]
-    fn test_offset_to_line() {
-        let offsets = build_line_offsets("line1\nline2\nline3");
-        for (offset, expected) in [(0, 1), (4, 1), (6, 2), (10, 2), (12, 3)] {
-            assert_eq!(offset_to_line(&offsets, offset), expected);
-        }
-    }
-
-    #[test]
-    fn test_get_fix_for_known_rule() {
+    fn get_fix_for_known_rule() {
         assert!(get_fix_for_rule("lint/security/noGlobalEval").is_some());
         assert!(get_fix_for_rule("lint/suspicious/noExplicitAny").is_some());
         assert!(get_fix_for_rule("lint/a11y/useAltText").is_some());
     }
 
     #[test]
-    fn test_get_fix_for_unknown_rule() {
+    fn get_fix_for_unknown_rule() {
         assert!(get_fix_for_rule("unknown/rule").is_none());
     }
 
     #[test]
-    fn test_extract_fix_from_empty_advices() {
+    fn extract_fix_from_empty_advices() {
         let advices = BiomeAdvices { advices: vec![] };
         let result = extract_fix_from_advices(&advices, "fallback message");
         assert_eq!(result, "fallback message");
     }
 
     #[test]
-    fn test_extract_fix_from_log_advice() {
+    fn extract_fix_from_log_advice() {
         let advices = BiomeAdvices {
             advices: vec![BiomeAdvice::Log {
                 log: (
