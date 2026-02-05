@@ -24,9 +24,37 @@ fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut in_template = false;
+    // Track brace depth for template interpolations: ${...}
+    let mut template_interp_depth: Vec<i32> = Vec::new();
 
     while pos < bytes.len() && depth > 0 {
         let byte = bytes[pos];
+        let next_byte = bytes.get(pos + 1).copied();
+
+        // Handle template interpolation content (inside ${...})
+        if !template_interp_depth.is_empty() {
+            match byte {
+                b'{' => {
+                    *template_interp_depth.last_mut().unwrap() += 1;
+                }
+                b'}' => {
+                    let interp_depth = template_interp_depth.last_mut().unwrap();
+                    *interp_depth -= 1;
+                    if *interp_depth == 0 {
+                        template_interp_depth.pop();
+                        in_template = true; // Back to template literal
+                    }
+                }
+                b'\'' => in_single_quote = true,
+                b'"' => in_double_quote = true,
+                b'`' => in_template = true,
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
+            }
+            pos += 1;
+            continue;
+        }
 
         // Handle string literals
         if in_single_quote || in_double_quote || in_template {
@@ -38,8 +66,16 @@ fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
                 in_single_quote = false;
             } else if in_double_quote && byte == b'"' {
                 in_double_quote = false;
-            } else if in_template && byte == b'`' {
-                in_template = false;
+            } else if in_template {
+                if byte == b'`' {
+                    in_template = false;
+                } else if byte == b'$' && next_byte == Some(b'{') {
+                    // Enter template interpolation
+                    in_template = false;
+                    template_interp_depth.push(1);
+                    pos += 2;
+                    continue;
+                }
             }
             pos += 1;
             continue;
@@ -65,20 +101,94 @@ fn extract_paren_content(content: &str, start: usize) -> Option<&str> {
 }
 
 fn is_in_line_comment(content: &str, pos: usize) -> bool {
-    // Find the start of the line containing this position
     let line_start = content[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let line_before_pos = &content[line_start..pos];
-    // Check if there's a // before this position on the same line
-    line_before_pos.contains("//")
+    let bytes = content.as_bytes();
+    let mut i = line_start;
+
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_template = false;
+
+    while i + 1 < pos {
+        let b = bytes[i];
+
+        if in_single_quote || in_double_quote || in_template {
+            if b == b'\\' && i + 1 < pos {
+                i += 2;
+                continue;
+            }
+            if in_single_quote && b == b'\'' {
+                in_single_quote = false;
+            } else if in_double_quote && b == b'"' {
+                in_double_quote = false;
+            } else if in_template && b == b'`' {
+                in_template = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'\'' => in_single_quote = true,
+            b'"' => in_double_quote = true,
+            b'`' => in_template = true,
+            b'/' if bytes.get(i + 1) == Some(&b'/') => return true,
+            _ => {}
+        }
+
+        i += 1;
+    }
+
+    false
+}
+
+/// Find the position of line comment start, ignoring "//" inside strings.
+fn find_line_comment_start(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut in_template = false;
+
+    while i + 1 < bytes.len() {
+        let b = bytes[i];
+
+        if in_single_quote || in_double_quote || in_template {
+            if b == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if in_single_quote && b == b'\'' {
+                in_single_quote = false;
+            } else if in_double_quote && b == b'"' {
+                in_double_quote = false;
+            } else if in_template && b == b'`' {
+                in_template = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'\'' => in_single_quote = true,
+            b'"' => in_double_quote = true,
+            b'`' => in_template = true,
+            b'/' if bytes.get(i + 1) == Some(&b'/') => return Some(i),
+            _ => {}
+        }
+
+        i += 1;
+    }
+
+    None
 }
 
 fn contains_sensitive_keyword(content: &str) -> bool {
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with("//") {
-            continue;
-        }
-        let code = line.find("//").map(|idx| &line[..idx]).unwrap_or(line);
+        let code = find_line_comment_start(line)
+            .map(|idx| &line[..idx])
+            .unwrap_or(line);
         if RE_SENSITIVE_KEYWORD.is_match(code) {
             return true;
         }
@@ -215,5 +325,19 @@ mod tests {
         let content = r#"console.log(password, secret);"#;
         let violations = check(content);
         assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn detects_sensitive_in_template_interpolation() {
+        // Function calls inside ${...} should be parsed correctly
+        let content = r#"console.log(`value: ${getPassword(password)}`);"#;
+        assert_eq!(check(content).len(), 1);
+    }
+
+    #[test]
+    fn url_in_string_not_treated_as_comment() {
+        // URL contains "//" but should not be treated as line comment
+        let content = r#"console.log("https://example.com", password);"#;
+        assert_eq!(check(content).len(), 1);
     }
 }

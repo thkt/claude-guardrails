@@ -86,6 +86,11 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         return vec![];
     }
 
+    if let Err(e) = temp_file.as_file().flush() {
+        eprintln!("guardrails: biome: failed to flush temp file: {}", e);
+        return vec![];
+    }
+
     let temp_path_str = match temp_file.path().to_str() {
         Some(s) => s,
         None => {
