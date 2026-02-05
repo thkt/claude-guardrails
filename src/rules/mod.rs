@@ -35,6 +35,7 @@ fn starts_with_comment(line: &str) -> bool {
 
 /// Returns an iterator over non-comment lines with their 1-based line numbers.
 /// Use this when you need to perform multiple pattern matches on the same content.
+/// Note: u32 is safe because MAX_INPUT_SIZE (10MB) limits line count well below u32::MAX.
 #[inline]
 pub(crate) fn non_comment_lines(content: &str) -> impl Iterator<Item = (u32, &str)> {
     content

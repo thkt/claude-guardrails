@@ -104,9 +104,17 @@ impl<'a> StringScanner<'a> {
                 return true;
             }
             match byte {
-                b'{' => *self.template_interp_depth.last_mut().unwrap() += 1,
+                b'{' => {
+                    *self
+                        .template_interp_depth
+                        .last_mut()
+                        .expect("in interpolation branch") += 1
+                }
                 b'}' => {
-                    let depth = self.template_interp_depth.last_mut().unwrap();
+                    let depth = self
+                        .template_interp_depth
+                        .last_mut()
+                        .expect("in interpolation branch");
                     *depth -= 1;
                     if *depth == 0 {
                         self.template_interp_depth.pop();
