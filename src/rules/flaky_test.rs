@@ -84,11 +84,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match("/src/utils.test.ts") {
-            return Vec::new();
-        }
-        r.check(content, "/src/utils.test.ts")
+        rule().check(content, "/src/utils.test.ts")
     }
 
     #[test]

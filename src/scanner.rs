@@ -5,6 +5,16 @@
 //! - Comments (line `//` and block `/* */`)
 //! - Template interpolations `${...}`
 //!
+//! # Limitations
+//!
+//! **Regex literals are not supported.** A forward slash `/` triggers comment
+//! detection when followed by `/` or `*`. This affects patterns like:
+//! - `const pattern = /\d+/g;` — misidentified as line comment
+//! - Division followed by `/` or `*` may trigger false detection
+//!
+//! Fully disambiguating regex from division requires context-aware parsing
+//! beyond the scope of this scanner.
+//!
 //! Note: Tracks ASCII delimiters only. UTF-8 content is handled correctly
 //! since multi-byte sequences never contain ASCII delimiter bytes.
 

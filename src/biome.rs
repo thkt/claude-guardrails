@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use tempfile::NamedTempFile;
+use tempfile::Builder;
 
 #[derive(Debug, Deserialize)]
 struct BiomeOutput {
@@ -74,7 +74,10 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
         return vec![];
     }
 
-    let temp_file = match NamedTempFile::with_suffix_in(format!(".{}", extension), dir) {
+    let temp_file = match Builder::new()
+        .suffix(&format!(".{}", extension))
+        .tempfile_in(dir)
+    {
         Ok(f) => f,
         Err(e) => {
             eprintln!("guardrails: biome: failed to create temp file: {}", e);
