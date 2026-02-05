@@ -63,7 +63,9 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
                 continue;
             }
             // Check for interpolation start: ${
+            // Exit template mode to process interpolation content as code
             if byte == b'$' && next_byte == Some(b'{') {
+                in_template = false;
                 template_interp_depth.push(1);
                 pos += 2;
                 continue;
@@ -77,11 +79,26 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
 
         // Handle being inside template interpolation ${...}
         if !template_interp_depth.is_empty() {
+            // First, handle strings inside interpolation
+            if in_single_quote || in_double_quote {
+                if byte == b'\\' && pos + 1 < bytes.len() {
+                    pos += 2;
+                    continue;
+                }
+                if in_single_quote && byte == b'\'' {
+                    in_single_quote = false;
+                } else if in_double_quote && byte == b'"' {
+                    in_double_quote = false;
+                }
+                pos += 1;
+                continue;
+            }
+
             if byte == b'\\' && pos + 1 < bytes.len() {
                 pos += 2;
                 continue;
             }
-            // Nested strings inside interpolation
+            // Enter nested strings inside interpolation
             if byte == b'\'' {
                 in_single_quote = true;
                 pos += 1;
@@ -103,6 +120,8 @@ fn extract_brace_content(content: &str, start: usize) -> Option<&str> {
                     *d -= 1;
                     if *d == 0 {
                         template_interp_depth.pop();
+                        // Return to template mode after interpolation closes
+                        in_template = true;
                         pos += 1;
                         continue;
                     }
@@ -368,6 +387,30 @@ mod tests {
             it('should handle nested interpolation', () => {
                 const obj = { a: 1 };
                 const s = `value: ${obj.a > 0 ? 'positive' : 'negative'}`;
+                expect(s).toBeDefined();
+            });
+        "#;
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn detects_missing_assertion_with_template_interpolation() {
+        let content = r#"
+            it('should fail without assertion', () => {
+                const fn = () => { return 42; };
+                const s = `result: ${fn()}`;
+                console.log(s);
+            });
+        "#;
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn handles_string_inside_interpolation() {
+        let content = r#"
+            it('should handle string with braces inside interpolation', () => {
+                const s = `value: ${"a{b}c"}`;
                 expect(s).toBeDefined();
             });
         "#;
