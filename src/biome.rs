@@ -123,7 +123,6 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
     let biome_output: BiomeOutput = match serde_json::from_str(&stdout) {
         Ok(o) => o,
         Err(_) => {
-            // Fallback: find first line starting with '{' (JSON object)
             let json_str = stdout
                 .lines()
                 .find(|line| line.trim_start().starts_with('{'))
@@ -193,22 +192,18 @@ pub fn check(content: &str, file_path: &str) -> Vec<Violation> {
 
 fn get_fix_for_rule(category: &str) -> Option<&'static str> {
     match category {
-        // security
         "lint/security/noGlobalEval" => {
             Some("Use JSON.parse() for data, or restructure to avoid dynamic code execution")
         }
-        // suspicious
         "lint/suspicious/noExplicitAny" => {
             Some("Use `unknown` with type guards, or define a specific type/interface")
         }
         "lint/suspicious/noDebugger" => Some("Remove debugger statement"),
         "lint/suspicious/noConsole" => Some("Remove console.log or use a proper logger"),
-        // correctness
         "lint/correctness/noUnusedVariables" => {
             Some("Remove the variable, or prefix with _ if intentional")
         }
         "lint/correctness/noUnusedImports" => Some("Remove the unused import"),
-        // a11y
         "lint/a11y/useAltText" => Some("Add alt attribute to img element"),
         "lint/a11y/useButtonType" => Some("Add type attribute to button element"),
         "lint/a11y/noBlankTarget" => {

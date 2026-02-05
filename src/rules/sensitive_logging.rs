@@ -76,12 +76,11 @@ fn extract_code_portions(content: &str) -> String {
     while scanner.pos < bytes.len() {
         let byte = scanner.current();
 
-        // Template interpolation content is code
         let in_interpolation = !scanner.template_interp_depth.is_empty()
             && !scanner.in_single_quote
             && !scanner.in_double_quote;
 
-        // Skip if in string literal or comment (but not interpolation)
+        // Skip string literals and comments, but include interpolation content
         let skip = (scanner.in_single_quote
             || scanner.in_double_quote
             || scanner.in_template

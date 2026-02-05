@@ -73,7 +73,6 @@ impl<'a> StringScanner<'a> {
 
         // Template interpolation content (inside ${...})
         if !self.template_interp_depth.is_empty() {
-            // Handle escape in strings inside interpolation
             if (self.in_single_quote || self.in_double_quote)
                 && byte == b'\\'
                 && self.pos + 1 < self.bytes.len()
@@ -116,7 +115,6 @@ impl<'a> StringScanner<'a> {
 
         // String literal handling
         if self.in_single_quote || self.in_double_quote || self.in_template {
-            // Bounds-checked escape handling
             if byte == b'\\' {
                 self.pos += if self.pos + 1 < self.bytes.len() {
                     2
