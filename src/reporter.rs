@@ -49,10 +49,26 @@ pub fn format_violations(violations: &[&Violation]) -> String {
     lines.join("\n")
 }
 
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Decision {
+    Allow,
+    Block,
+}
+
+impl Decision {
+    pub fn exit_code(self) -> i32 {
+        match self {
+            Decision::Allow => 0,
+            Decision::Block => 2,
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct JsonReport<'a> {
     pub violations: Vec<&'a Violation>,
-    pub decision: &'static str,
+    pub decision: Decision,
     pub exit_code: i32,
 }
 
@@ -63,20 +79,20 @@ pub fn build_json_report<'a>(
     let mut violations = Vec::with_capacity(blocking.len() + warnings.len());
     violations.extend(blocking.iter().copied());
     violations.extend(warnings.iter().copied());
-    let (decision, exit_code) = if blocking.is_empty() {
-        ("allow", 0)
+    let decision = if blocking.is_empty() {
+        Decision::Allow
     } else {
-        ("block", 2)
+        Decision::Block
     };
     JsonReport {
         violations,
         decision,
-        exit_code,
+        exit_code: decision.exit_code(),
     }
 }
 
 pub fn format_json_report(report: &JsonReport<'_>) -> String {
-    serde_json::to_string(report).unwrap_or_else(|_| String::from("{}"))
+    serde_json::to_string(report).expect("JsonReport serialization is infallible")
 }
 
 pub fn format_warnings(violations: &[&Violation]) -> String {
@@ -184,7 +200,7 @@ mod tests {
     fn json_report_block_when_blocking_present() {
         let v = make_violation("eval", Severity::High, "Use JSON.parse()");
         let report = build_json_report(&[&v], &[]);
-        assert_eq!(report.decision, "block");
+        assert_eq!(report.decision, Decision::Block);
         assert_eq!(report.exit_code, 2);
         assert_eq!(report.violations.len(), 1);
     }
@@ -192,7 +208,7 @@ mod tests {
     #[test]
     fn json_report_allow_when_no_blocking() {
         let report = build_json_report(&[], &[]);
-        assert_eq!(report.decision, "allow");
+        assert_eq!(report.decision, Decision::Allow);
         assert_eq!(report.exit_code, 0);
         assert!(report.violations.is_empty());
     }
@@ -201,7 +217,7 @@ mod tests {
     fn json_report_allow_when_warnings_only() {
         let v = make_violation("dom-access", Severity::Medium, "use ref");
         let report = build_json_report(&[], &[&v]);
-        assert_eq!(report.decision, "allow");
+        assert_eq!(report.decision, Decision::Allow);
         assert_eq!(report.exit_code, 0);
         assert_eq!(report.violations.len(), 1);
     }

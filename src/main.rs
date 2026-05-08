@@ -235,6 +235,27 @@ fn show_config_hint(config: &Config) {
     }
 }
 
+fn json_mode_enabled() -> bool {
+    env::var_os("GUARDRAILS_JSON").is_some()
+}
+
+fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
+    if !warnings.is_empty() {
+        eprintln!("{}", format_warnings(warnings));
+    }
+    if !blocking.is_empty() {
+        eprintln!("{}", format_violations(blocking));
+    }
+}
+
+fn emit_json_if_enabled(blocking: &[&Violation], warnings: &[&Violation]) {
+    if !json_mode_enabled() {
+        return;
+    }
+    let report = build_json_report(blocking, warnings);
+    println!("{}", format_json_report(&report));
+}
+
 fn run_prefetch() -> i32 {
     match download::ensure_oxlint() {
         Some(path) => {
@@ -274,6 +295,7 @@ fn main() {
                 input.tool_name
             );
         }
+        emit_json_if_enabled(&[], &[]);
         process::exit(0);
     };
 
@@ -291,35 +313,16 @@ fn main() {
     show_config_hint(&config);
 
     if !config.enabled {
+        emit_json_if_enabled(&[], &[]);
         process::exit(0);
     }
 
     let violations = collect_violations(&file_path, &content, &config);
     let (blocking, warnings) = partition_violations(&violations, &config);
 
-    if env::var_os("GUARDRAILS_JSON").is_some() {
-        let report = build_json_report(&blocking, &warnings);
-        let exit_code = report.exit_code;
-        println!("{}", format_json_report(&report));
-        if !warnings.is_empty() {
-            eprintln!("{}", format_warnings(&warnings));
-        }
-        if !blocking.is_empty() {
-            eprintln!("{}", format_violations(&blocking));
-        }
-        process::exit(exit_code);
-    }
-
-    if !warnings.is_empty() {
-        eprintln!("{}", format_warnings(&warnings));
-    }
-
-    if !blocking.is_empty() {
-        eprintln!("{}", format_violations(&blocking));
-        process::exit(2);
-    }
-
-    process::exit(0);
+    emit_json_if_enabled(&blocking, &warnings);
+    emit_human_violations(&blocking, &warnings);
+    process::exit(if blocking.is_empty() { 0 } else { 2 });
 }
 
 #[cfg(test)]

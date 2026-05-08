@@ -3,17 +3,26 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-fn run_guardrails(input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
+fn run_guardrails_with(input: &[u8], cwd: Option<&Path>, envs: &[(&str, &str)]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_guardrails"));
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("failed to spawn guardrails");
-
     child.stdin.take().unwrap().write_all(input).unwrap();
-
     child.wait_with_output().unwrap()
+}
+
+fn run_guardrails(input: &[u8]) -> Output {
+    run_guardrails_with(input, None, &[])
 }
 
 fn run_guardrails_json(json: &str) -> Output {
@@ -21,33 +30,11 @@ fn run_guardrails_json(json: &str) -> Output {
 }
 
 fn run_guardrails_with_env(input: &[u8], env_key: &str, env_val: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
-        .env(env_key, env_val)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn guardrails");
-    child.stdin.take().unwrap().write_all(input).unwrap();
-    child.wait_with_output().unwrap()
+    run_guardrails_with(input, None, &[(env_key, env_val)])
 }
 
 fn run_guardrails_in_dir(json: &str, dir: &Path) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
-        .current_dir(dir)
-        .env("NO_COLOR", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn guardrails");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(json.as_bytes())
-        .unwrap();
-    child.wait_with_output().unwrap()
+    run_guardrails_with(json.as_bytes(), Some(dir), &[("NO_COLOR", "1")])
 }
 
 #[test]
@@ -444,6 +431,39 @@ fn json_mode_warning_only_emits_allow_with_violations() {
         stderr.contains("warning") || stderr.contains("⚠"),
         "stderr must keep warning text in: {stderr}"
     );
+}
+
+#[test]
+fn json_mode_unsupported_tool_emits_allow() {
+    let json = serde_json::json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hi"}
+    });
+    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
+    assert_eq!(parsed["decision"], "allow");
+    assert_eq!(parsed["exit_code"], 0);
+    assert!(parsed["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn json_mode_missing_content_emits_allow() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/src/app.ts"}
+    });
+    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
+    assert_eq!(parsed["decision"], "allow");
+    assert_eq!(parsed["exit_code"], 0);
 }
 
 #[test]
