@@ -1,5 +1,6 @@
 use crate::color;
 use crate::rules::Violation;
+use serde::Serialize;
 
 const HEADER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 const FOOTER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
@@ -46,6 +47,52 @@ pub fn format_violations(violations: &[&Violation]) -> String {
     )));
 
     lines.join("\n")
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Decision {
+    Allow,
+    Block,
+}
+
+impl Decision {
+    pub fn exit_code(self) -> i32 {
+        match self {
+            Decision::Allow => 0,
+            Decision::Block => 2,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct JsonReport<'a> {
+    pub violations: Vec<&'a Violation>,
+    pub decision: Decision,
+    pub exit_code: i32,
+}
+
+pub fn build_json_report<'a>(
+    blocking: &[&'a Violation],
+    warnings: &[&'a Violation],
+) -> JsonReport<'a> {
+    let mut violations = Vec::with_capacity(blocking.len() + warnings.len());
+    violations.extend(blocking.iter().copied());
+    violations.extend(warnings.iter().copied());
+    let decision = if blocking.is_empty() {
+        Decision::Allow
+    } else {
+        Decision::Block
+    };
+    JsonReport {
+        violations,
+        decision,
+        exit_code: decision.exit_code(),
+    }
+}
+
+pub fn format_json_report(report: &JsonReport<'_>) -> String {
+    serde_json::to_string(report).expect("JsonReport serialization is infallible")
 }
 
 pub fn format_warnings(violations: &[&Violation]) -> String {
@@ -147,5 +194,61 @@ mod tests {
         assert!(output.contains("⚠"));
         assert!(output.contains("eslint(no-console) (oxlint) [LOW]"));
         assert!(output.contains("fix: Remove console.log"));
+    }
+
+    #[test]
+    fn json_report_block_when_blocking_present() {
+        let v = make_violation("eval", Severity::High, "Use JSON.parse()");
+        let report = build_json_report(&[&v], &[]);
+        assert_eq!(report.decision, Decision::Block);
+        assert_eq!(report.exit_code, 2);
+        assert_eq!(report.violations.len(), 1);
+    }
+
+    #[test]
+    fn json_report_allow_when_no_blocking() {
+        let report = build_json_report(&[], &[]);
+        assert_eq!(report.decision, Decision::Allow);
+        assert_eq!(report.exit_code, 0);
+        assert!(report.violations.is_empty());
+    }
+
+    #[test]
+    fn json_report_allow_when_warnings_only() {
+        let v = make_violation("dom-access", Severity::Medium, "use ref");
+        let report = build_json_report(&[], &[&v]);
+        assert_eq!(report.decision, Decision::Allow);
+        assert_eq!(report.exit_code, 0);
+        assert_eq!(report.violations.len(), 1);
+    }
+
+    #[test]
+    fn format_json_report_emits_lowercase_severity() {
+        let v = make_violation("eval", Severity::High, "Use JSON.parse()");
+        let report = build_json_report(&[&v], &[]);
+        let json: serde_json::Value =
+            serde_json::from_str(&format_json_report(&report)).expect("valid JSON");
+        assert_eq!(json["decision"], "block");
+        assert_eq!(json["exit_code"], 2);
+        assert_eq!(json["violations"][0]["severity"], "high");
+        assert_eq!(json["violations"][0]["rule"], "eval");
+        assert_eq!(json["violations"][0]["fix"], "Use JSON.parse()");
+        assert_eq!(json["violations"][0]["file"], "/src/app.ts");
+        assert_eq!(json["violations"][0]["line"], 1);
+    }
+
+    #[test]
+    fn format_json_report_emits_null_for_missing_line() {
+        let v = Violation {
+            rule: "security".to_owned(),
+            severity: Severity::Critical,
+            fix: "fix it".to_owned(),
+            file: "/src/app.ts".to_owned(),
+            line: None,
+        };
+        let report = build_json_report(&[&v], &[]);
+        let json: serde_json::Value =
+            serde_json::from_str(&format_json_report(&report)).expect("valid JSON");
+        assert!(json["violations"][0]["line"].is_null());
     }
 }

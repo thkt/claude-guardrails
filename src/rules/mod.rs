@@ -21,7 +21,7 @@ mod transaction;
 
 use crate::config::Config;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -124,7 +124,7 @@ pub fn count_matches_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> usize {
         .count()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Critical,
@@ -155,7 +155,7 @@ impl fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Violation {
     pub rule: String,
     pub severity: Severity,
