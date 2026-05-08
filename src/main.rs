@@ -11,6 +11,7 @@ mod rules;
 mod scanner;
 mod tempfile_util;
 
+use clap::{Parser, Subcommand};
 use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
 use reporter::{build_json_report, format_json_report, format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
@@ -21,6 +22,37 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 const MAX_INPUT_SIZE: u64 = 10_000_000;
+const SYSEXIT_USAGE: i32 = 64;
+
+#[derive(Parser)]
+#[command(
+    name = "guardrails",
+    version,
+    about = "Pre-write guardrails for Claude Code (PreToolUse hook)",
+    after_help = "\
+Hook mode (no subcommand): reads tool input JSON from stdin and emits violations.
+With --json: emits a structured JSON report on stdout, human-readable on stderr.
+
+Exit codes:
+  0   Pass (no blocking violations) or successful subcommand
+  1   I/O error / invalid JSON input / prefetch failure
+  2   Blocking violations found (Claude Code halts the tool call)
+  64  Usage error (clap parse failure)"
+)]
+struct Cli {
+    /// Emit violations as a structured JSON report on stdout (hook mode only).
+    #[arg(long, global = true)]
+    json: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Download oxlint binary into the cache (no-op if already present).
+    Prefetch,
+}
 
 mod tool_name {
     pub const WRITE: &str = "Write";
@@ -235,10 +267,6 @@ fn show_config_hint(config: &Config) {
     }
 }
 
-fn json_mode_enabled() -> bool {
-    env::var_os("GUARDRAILS_JSON").is_some()
-}
-
 fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
     if !warnings.is_empty() {
         eprintln!("{}", format_warnings(warnings));
@@ -248,8 +276,8 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
     }
 }
 
-fn emit_json_if_enabled(blocking: &[&Violation], warnings: &[&Violation]) {
-    if !json_mode_enabled() {
+fn emit_json_if_enabled(json_mode: bool, blocking: &[&Violation], warnings: &[&Violation]) {
+    if !json_mode {
         return;
     }
     let report = build_json_report(blocking, warnings);
@@ -269,14 +297,10 @@ fn run_prefetch() -> i32 {
     }
 }
 
-fn main() {
-    if env::args().nth(1).as_deref() == Some("prefetch") {
-        process::exit(run_prefetch());
-    }
-
+fn run_hook(json_mode: bool) -> i32 {
     let input = match parse_stdin() {
         Ok(v) => v,
-        Err(code) => process::exit(code),
+        Err(code) => return code,
     };
 
     let Some((file_path, content)) = get_file_and_content(&input) else {
@@ -295,8 +319,8 @@ fn main() {
                 input.tool_name
             );
         }
-        emit_json_if_enabled(&[], &[]);
-        process::exit(0);
+        emit_json_if_enabled(json_mode, &[], &[]);
+        return 0;
     };
 
     let config = match Config::default().with_project_overrides() {
@@ -313,16 +337,41 @@ fn main() {
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(&[], &[]);
-        process::exit(0);
+        emit_json_if_enabled(json_mode, &[], &[]);
+        return 0;
     }
 
     let violations = collect_violations(&file_path, &content, &config);
     let (blocking, warnings) = partition_violations(&violations, &config);
 
-    emit_json_if_enabled(&blocking, &warnings);
+    emit_json_if_enabled(json_mode, &blocking, &warnings);
     emit_human_violations(&blocking, &warnings);
-    process::exit(if blocking.is_empty() { 0 } else { 2 });
+    if blocking.is_empty() {
+        0
+    } else {
+        2
+    }
+}
+
+fn main() {
+    let cli = match Cli::try_parse() {
+        Ok(c) => c,
+        Err(e) => {
+            use clap::error::ErrorKind;
+            let _ = e.print();
+            let code = match e.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => 0,
+                _ => SYSEXIT_USAGE,
+            };
+            process::exit(code);
+        }
+    };
+
+    let exit_code = match cli.command {
+        Some(Commands::Prefetch) => run_prefetch(),
+        None => run_hook(cli.json),
+    };
+    process::exit(exit_code);
 }
 
 #[cfg(test)]

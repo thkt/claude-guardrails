@@ -3,8 +3,14 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-fn run_guardrails_with(input: &[u8], cwd: Option<&Path>, envs: &[(&str, &str)]) -> Output {
+fn run_guardrails_with(
+    input: &[u8],
+    cwd: Option<&Path>,
+    envs: &[(&str, &str)],
+    args: &[&str],
+) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_guardrails"));
+    cmd.args(args);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
@@ -22,19 +28,19 @@ fn run_guardrails_with(input: &[u8], cwd: Option<&Path>, envs: &[(&str, &str)]) 
 }
 
 fn run_guardrails(input: &[u8]) -> Output {
-    run_guardrails_with(input, None, &[])
+    run_guardrails_with(input, None, &[], &[])
 }
 
 fn run_guardrails_json(json: &str) -> Output {
     run_guardrails(json.as_bytes())
 }
 
-fn run_guardrails_with_env(input: &[u8], env_key: &str, env_val: &str) -> Output {
-    run_guardrails_with(input, None, &[(env_key, env_val)])
+fn run_guardrails_with_args(input: &[u8], args: &[&str]) -> Output {
+    run_guardrails_with(input, None, &[], args)
 }
 
 fn run_guardrails_in_dir(json: &str, dir: &Path) -> Output {
-    run_guardrails_with(json.as_bytes(), Some(dir), &[("NO_COLOR", "1")])
+    run_guardrails_with(json.as_bytes(), Some(dir), &[("NO_COLOR", "1")], &[])
 }
 
 #[test]
@@ -353,7 +359,7 @@ fn json_mode_violation_emits_block_decision() {
             "content": "eval(userInput);"
         }
     });
-    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     assert_eq!(output.status.code(), Some(2));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -386,7 +392,7 @@ fn json_mode_clean_emits_allow_decision() {
             "content": "export function main() {}\n"
         }
     });
-    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -406,7 +412,7 @@ fn json_mode_warning_only_emits_allow_with_violations() {
             "content": "const el = document.getElementById('foo');\nexport default el;\n"
         }
     });
-    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -439,7 +445,7 @@ fn json_mode_unsupported_tool_emits_allow() {
         "tool_name": "Bash",
         "tool_input": {"command": "echo hi"}
     });
-    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -456,7 +462,7 @@ fn json_mode_missing_content_emits_allow() {
         "tool_name": "Write",
         "tool_input": {"file_path": "/src/app.ts"}
     });
-    let output = run_guardrails_with_env(json.to_string().as_bytes(), "GUARDRAILS_JSON", "1");
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     assert_eq!(output.status.code(), Some(0));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -467,7 +473,7 @@ fn json_mode_missing_content_emits_allow() {
 }
 
 #[test]
-fn json_mode_disabled_when_env_unset() {
+fn json_mode_disabled_without_flag() {
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
@@ -480,8 +486,48 @@ fn json_mode_disabled_when_env_unset() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.is_empty(),
-        "stdout must remain empty when GUARDRAILS_JSON unset, got: {stdout}"
+        "stdout must remain empty without --json flag, got: {stdout}"
     );
+}
+
+#[test]
+fn parse_error_exits_64_with_stderr_message() {
+    let output = run_guardrails_with_args(b"", &["--bogus-flag"]);
+    assert_eq!(
+        output.status.code(),
+        Some(64),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--bogus-flag") || stderr.contains("unexpected"),
+        "expected clap error in stderr: {stderr}"
+    );
+}
+
+#[test]
+fn help_flag_exits_zero_and_lists_subcommands() {
+    let output = run_guardrails_with_args(b"", &["--help"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("prefetch"),
+        "help missing prefetch: {stdout}"
+    );
+    assert!(stdout.contains("--json"), "help missing --json: {stdout}");
+    assert!(
+        stdout.contains("Exit codes"),
+        "help missing Exit codes section"
+    );
+}
+
+#[test]
+fn version_flag_exits_zero() {
+    let output = run_guardrails_with_args(b"", &["--version"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("guardrails"), "version output: {stdout}");
 }
 
 // Keep in sync with OXLINT_VERSION in src/download.rs.

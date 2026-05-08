@@ -171,20 +171,41 @@ Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the A
 | `err-stack-exposure`      | High     | Error stack traces leaked in HTTP responses (res.json/res.send) |
 | `non-literal-fs-path`     | Medium   | Non-literal file paths in fs.\* calls (path traversal risk)     |
 
+## Subcommands
+
+```text
+guardrails [--json] [COMMAND]
+
+Commands:
+  prefetch  Download oxlint binary into the cache (no-op if already present)
+  help      Print help for a subcommand
+
+Options:
+      --json     Emit violations as a structured JSON report on stdout (hook mode only)
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+Calling `guardrails` with no subcommand enters **hook mode** (reads tool input JSON from stdin). `guardrails --help` shows the full description including exit codes.
+
 ## Exit Codes
 
-| Code | Meaning                          |
-| ---- | -------------------------------- |
-| 0    | All checks passed                |
-| 2    | Issues found (operation blocked) |
+| Code | Meaning                                     |
+| ---- | ------------------------------------------- |
+| 0    | Pass (no blocking violations) or successful subcommand |
+| 1    | I/O error / invalid JSON input / prefetch failure |
+| 2    | Blocking violations found (Claude Code halts the tool call) |
+| 64   | Usage error (clap parse failure, sysexits.h `EX_USAGE`) |
 
 ## JSON Output Mode
 
-Set `GUARDRAILS_JSON=1` to emit a structured JSON report on stdout. Human-readable output stays on stderr, and exit codes are unchanged (`0` / `2`). Designed for agents (e.g., Claude Code) that need a stable, parseable contract.
+Pass `--json` to emit a structured JSON report on stdout. Human-readable output stays on stderr; exit codes are unchanged. Designed for agents (e.g., Claude Code) that need a stable, parseable contract.
 
 ```sh
-GUARDRAILS_JSON=1 guardrails < tool-call.json
+guardrails --json < tool-call.json
 ```
+
+> **BREAKING (v0.15+)**: the `GUARDRAILS_JSON=1` env from v0.14 is removed. Use `--json` instead. To keep JSON output on every hook call, add the flag to your hook command (see [As Claude Code Hook](#as-claude-code-hook)).
 
 ```json
 {
@@ -210,7 +231,7 @@ GUARDRAILS_JSON=1 guardrails < tool-call.json
 | `decision`   | `"block"` / `"allow"`                      | `block` only when at least one entry matches `severity.blockOn`  |
 | `exit_code`  | `0` / `2`                                  | Matches the process exit code                                    |
 
-When the env var is not set, output is byte-for-byte identical to the default mode.
+Without `--json`, output is byte-for-byte identical to the human-readable default mode.
 
 ## Configuration
 
