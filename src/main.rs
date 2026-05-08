@@ -235,7 +235,24 @@ fn show_config_hint(config: &Config) {
     }
 }
 
+fn run_prefetch() -> i32 {
+    match download::ensure_oxlint() {
+        Some(path) => {
+            eprintln!("guardrails: oxlint ready at {}", path.display());
+            0
+        }
+        None => {
+            eprintln!("guardrails: prefetch failed (network or unsupported platform)");
+            1
+        }
+    }
+}
+
 fn main() {
+    if env::args().nth(1).as_deref() == Some("prefetch") {
+        process::exit(run_prefetch());
+    }
+
     let input = match parse_stdin() {
         Ok(v) => v,
         Err(code) => process::exit(code),

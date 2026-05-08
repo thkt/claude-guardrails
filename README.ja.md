@@ -101,6 +101,25 @@ cd .. && rm -rf guardrails
 
 プロジェクト設定ファイル（`oxlintrc.json`）がある場合は自動的に使用されます。
 
+### Prefetch
+
+`guardrails prefetch` は解決チェーンのステップ 3–4 を先取り実行します。oxlint がキャッシュ済み or PATH 上にあればネットワーク通信なしで終了し、なければ GitHub Releases からダウンロードします。
+
+```bash
+guardrails prefetch
+```
+
+用途:
+
+- インストール時に先取りして、初回 `Write`/`Edit` のダウンロード待ちを回避
+- CI でテスト実行前にキャッシュを温める
+- エアギャップ環境向けの事前ステージング（接続環境で実行 → `~/.cache/guardrails/bin/` をコピー）
+
+| 結果                                          | Exit |
+| --------------------------------------------- | ---- |
+| キャッシュ済み or ダウンロード成功            | 0    |
+| ダウンロード失敗（ネットワーク or 非対応OS） | 1    |
+
 ### AI向けdenyルール
 
 guardrailsはAIコード生成で重要な以下のルールを `--deny` で有効化します（oxlintデフォルトではOFF）。

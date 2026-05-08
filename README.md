@@ -99,6 +99,25 @@ If all resolution steps fail (e.g., no network), guardrails continues with custo
 
 Project config files (`oxlintrc.json`) are automatically used when present.
 
+### Prefetch
+
+`guardrails prefetch` runs steps 3–4 of the resolution chain eagerly: if oxlint is already cached or PATH-resolvable, it exits without network activity; otherwise it downloads from GitHub Releases.
+
+```bash
+guardrails prefetch
+```
+
+Use it to:
+
+- Pre-stage oxlint at install time so the first `Write`/`Edit` doesn't pay the download latency
+- Warm the cache in CI before tests run
+- Pre-stage on a connected machine for air-gap deployment (then copy `~/.cache/guardrails/bin/`)
+
+| Outcome                                              | Exit |
+| ---------------------------------------------------- | ---- |
+| Already cached or downloaded successfully            | 0    |
+| Download failed (network or unsupported platform)    | 1    |
+
 ### AI-Tuned Deny Rules
 
 guardrails enables these oxlint rules via `--deny` (off by default in oxlint, important for AI-generated code):
