@@ -12,7 +12,7 @@ mod scanner;
 mod tempfile_util;
 
 use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
-use reporter::{format_violations, format_warnings};
+use reporter::{build_json_report, format_json_report, format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
 use std::env;
 use std::fs;
@@ -296,6 +296,19 @@ fn main() {
 
     let violations = collect_violations(&file_path, &content, &config);
     let (blocking, warnings) = partition_violations(&violations, &config);
+
+    if env::var_os("GUARDRAILS_JSON").is_some() {
+        let report = build_json_report(&blocking, &warnings);
+        let exit_code = report.exit_code;
+        println!("{}", format_json_report(&report));
+        if !warnings.is_empty() {
+            eprintln!("{}", format_warnings(&warnings));
+        }
+        if !blocking.is_empty() {
+            eprintln!("{}", format_violations(&blocking));
+        }
+        process::exit(exit_code);
+    }
 
     if !warnings.is_empty() {
         eprintln!("{}", format_warnings(&warnings));

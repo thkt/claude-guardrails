@@ -178,6 +178,40 @@ Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the A
 | 0    | All checks passed                |
 | 2    | Issues found (operation blocked) |
 
+## JSON Output Mode
+
+Set `GUARDRAILS_JSON=1` to emit a structured JSON report on stdout. Human-readable output stays on stderr, and exit codes are unchanged (`0` / `2`). Designed for agents (e.g., Claude Code) that need a stable, parseable contract.
+
+```sh
+GUARDRAILS_JSON=1 guardrails < tool-call.json
+```
+
+```json
+{
+  "violations": [
+    {
+      "rule": "eval",
+      "severity": "high",
+      "fix": "Avoid eval(). Use JSON.parse() for data or safe alternatives.",
+      "file": "/src/app.ts",
+      "line": 1
+    }
+  ],
+  "decision": "block",
+  "exit_code": 2
+}
+```
+
+| Field        | Type                                       | Notes                                                            |
+| ------------ | ------------------------------------------ | ---------------------------------------------------------------- |
+| `violations` | array                                      | Both blocking and warning entries; distinguish via `severity`    |
+| `severity`   | `"critical"` / `"high"` / `"medium"` / `"low"` | Lowercase                                                        |
+| `line`       | integer or `null`                          | `null` when location is unknown                                  |
+| `decision`   | `"block"` / `"allow"`                      | `block` only when at least one entry matches `severity.blockOn`  |
+| `exit_code`  | `0` / `2`                                  | Matches the process exit code                                    |
+
+When the env var is not set, output is byte-for-byte identical to the default mode.
+
 ## Configuration
 
 Add a `guardrails` key to `.claude/tools.json` at your project root. All fields are optional — only specify what you want to override.

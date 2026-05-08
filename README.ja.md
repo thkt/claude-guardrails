@@ -180,6 +180,40 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | 0      | すべてのチェックに合格     |
 | 2      | 問題検出（操作をブロック） |
 
+## JSON 出力モード
+
+`GUARDRAILS_JSON=1` を設定すると、stdout に構造化された JSON レポートを出力します。人間向けの出力は stderr に残り、終了コードも従来通り（`0` / `2`）です。Claude Code などのエージェントが安定したパース可能な契約を必要とするケースを想定しています。
+
+```sh
+GUARDRAILS_JSON=1 guardrails < tool-call.json
+```
+
+```json
+{
+  "violations": [
+    {
+      "rule": "eval",
+      "severity": "high",
+      "fix": "Avoid eval(). Use JSON.parse() for data or safe alternatives.",
+      "file": "/src/app.ts",
+      "line": 1
+    }
+  ],
+  "decision": "block",
+  "exit_code": 2
+}
+```
+
+| フィールド   | 型                                            | 補足                                                                  |
+| ------------ | --------------------------------------------- | --------------------------------------------------------------------- |
+| `violations` | 配列                                          | ブロッキングと警告の両方を含む。`severity` で区別可能                 |
+| `severity`   | `"critical"` / `"high"` / `"medium"` / `"low"` | 小文字                                                                |
+| `line`       | 整数または `null`                             | 位置が不明な場合は `null`                                             |
+| `decision`   | `"block"` / `"allow"`                         | `severity.blockOn` に一致するエントリが 1 件以上ある場合のみ `block`  |
+| `exit_code`  | `0` / `2`                                     | プロセスの終了コードと一致                                            |
+
+env を設定しない場合、出力はデフォルトモードとバイト単位で完全互換です。
+
 ## 設定
 
 プロジェクトルートの `.claude/tools.json` に `guardrails` キーを追加します。すべてのフィールドはオプションで、オーバーライドしたいもののみ指定してください。
