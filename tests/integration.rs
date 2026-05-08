@@ -344,3 +344,33 @@ fn no_hint_when_no_claude_dir() {
         "unexpected config hint without .claude/ dir: {stderr}"
     );
 }
+
+// Keep in sync with OXLINT_VERSION in src/download.rs.
+const OXLINT_VERSION: &str = "1.56.0";
+
+#[test]
+fn prefetch_returns_zero_when_oxlint_already_cached() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache = tmp.path().join("guardrails/bin");
+    fs::create_dir_all(&cache).unwrap();
+    let bin = cache.join(format!("oxlint-{OXLINT_VERSION}"));
+    fs::write(&bin, "fake").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_guardrails"))
+        .arg("prefetch")
+        .env("XDG_CACHE_HOME", tmp.path())
+        .output()
+        .expect("failed to spawn guardrails");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(bin.to_str().unwrap()),
+        "expected cached binary path in stderr: {stderr}"
+    );
+}
