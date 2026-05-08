@@ -173,20 +173,41 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `err-stack-exposure`      | High   | HTTPレスポンス（res.json/res.send）でのエラースタックトレース漏洩 |
 | `non-literal-fs-path`     | Medium | fs.\*呼び出しでの非リテラルファイルパス（パストラバーサルリスク） |
 
+## サブコマンド
+
+```text
+guardrails [--json] [COMMAND]
+
+Commands:
+  prefetch  Download oxlint binary into the cache (no-op if already present)
+  help      Print help for a subcommand
+
+Options:
+      --json     Emit violations as a structured JSON report on stdout (hook mode only)
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+サブコマンドなしで `guardrails` を呼ぶと **hook モード**（stdin から tool_input JSON を読む）になります。`guardrails --help` で終了コードを含む完全な説明を表示できます。
+
 ## 終了コード
 
-| コード | 意味                       |
-| ------ | -------------------------- |
-| 0      | すべてのチェックに合格     |
-| 2      | 問題検出（操作をブロック） |
+| コード | 意味                                                                         |
+| ------ | ---------------------------------------------------------------------------- |
+| 0      | チェック合格、またはサブコマンド成功                                         |
+| 1      | I/O エラー / 不正な JSON 入力 / prefetch 失敗                                |
+| 2      | ブロッキング違反検出（Claude Code が tool 呼び出しを停止）                   |
+| 64     | 使用方法エラー（clap parse 失敗、sysexits.h `EX_USAGE`）                     |
 
 ## JSON 出力モード
 
-`GUARDRAILS_JSON=1` を設定すると、stdout に構造化された JSON レポートを出力します。人間向けの出力は stderr に残り、終了コードも従来通り（`0` / `2`）です。Claude Code などのエージェントが安定したパース可能な契約を必要とするケースを想定しています。
+`--json` フラグを渡すと stdout に構造化された JSON レポートを出力します。人間向けの出力は stderr に残り、終了コードも変わりません。Claude Code などのエージェントが安定したパース可能な契約を必要とするケースを想定しています。
 
 ```sh
-GUARDRAILS_JSON=1 guardrails < tool-call.json
+guardrails --json < tool-call.json
 ```
+
+> **BREAKING (v0.15+)**: v0.14 で利用できた `GUARDRAILS_JSON=1` env は削除されました。代わりに `--json` を使ってください。すべての hook 呼び出しで JSON を出力したい場合は、hook の `command` にフラグを追加してください ([Claude Code Hookとして](#claude-code-hookとして)参照)。
 
 ```json
 {
@@ -212,7 +233,7 @@ GUARDRAILS_JSON=1 guardrails < tool-call.json
 | `decision`   | `"block"` / `"allow"`                         | `severity.blockOn` に一致するエントリが 1 件以上ある場合のみ `block`  |
 | `exit_code`  | `0` / `2`                                     | プロセスの終了コードと一致                                            |
 
-env を設定しない場合、出力はデフォルトモードとバイト単位で完全互換です。
+`--json` を付けない場合、出力は人間向けデフォルトモードとバイト単位で完全互換です。
 
 ## 設定
 
