@@ -229,23 +229,28 @@ mod tests {
         assert!(check(content, "/src/component.tsx").is_empty());
     }
 
-    // T-007: detects_dangerously_set_inner_html_in_tsx
+    // T-007/T-008: detects_dangerously_set_inner_html_in_tsx_and_jsx
     #[test]
-    fn detects_dangerously_set_inner_html_in_tsx() {
-        let content = r#"<div dangerouslySetInnerHTML={{ __html: x }} />"#;
-        let v = check(content, "/src/Component.tsx");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, super::super::rule_id::DANGEROUS_INNER_HTML);
-        assert_eq!(v[0].severity, Severity::High);
-    }
-
-    // T-008: detects_dangerously_set_inner_html_in_jsx
-    #[test]
-    fn detects_dangerously_set_inner_html_in_jsx() {
-        let content = r#"<Component dangerouslySetInnerHTML={{ __html: y }} />"#;
-        let v = check(content, "/src/Component.jsx");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, super::super::rule_id::DANGEROUS_INNER_HTML);
+    fn detects_dangerously_set_inner_html_in_tsx_and_jsx() {
+        for (content, path) in [
+            (
+                r#"<div dangerouslySetInnerHTML={{ __html: x }} />"#,
+                "/src/Component.tsx",
+            ),
+            (
+                r#"<Component dangerouslySetInnerHTML={{ __html: y }} />"#,
+                "/src/Component.jsx",
+            ),
+        ] {
+            let v = check(content, path);
+            assert_eq!(v.len(), 1, "failed for: {path}");
+            assert_eq!(
+                v[0].rule,
+                super::super::rule_id::DANGEROUS_INNER_HTML,
+                "failed for: {path}"
+            );
+            assert_eq!(v[0].severity, Severity::High, "failed for: {path}");
+        }
     }
 
     // T-009: allows_dangerously_set_inner_html_in_ts_string

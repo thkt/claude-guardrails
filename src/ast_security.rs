@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::rules::{rule_id, Severity, Violation};
+use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BinaryOperator, CallExpression, Expression,
     LogicalExpression, LogicalOperator, ObjectPropertyKind, Program, RegExpLiteral,
@@ -43,6 +43,7 @@ pub fn check_program(
         violations: Vec::new(),
         file_path,
         line_offsets,
+        is_test_file: RE_TEST_FILE.is_match(file_path),
     };
     visitor.visit_program(program);
     visitor.violations
@@ -70,6 +71,7 @@ struct SecurityVisitor<'s> {
     violations: Vec<Violation>,
     file_path: &'s str,
     line_offsets: &'s [usize],
+    is_test_file: bool,
 }
 
 impl SecurityVisitor<'_> {
@@ -217,7 +219,7 @@ impl SecurityVisitor<'_> {
     }
 
     fn check_math_random_insecure(&mut self, call: &CallExpression) {
-        if is_test_file(self.file_path) {
+        if self.is_test_file {
             return;
         }
         let Expression::StaticMemberExpression(method) = &call.callee else {
@@ -274,15 +276,6 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     }
 }
 
-fn is_test_file(path: &str) -> bool {
-    path.ends_with(".test.ts")
-        || path.ends_with(".test.tsx")
-        || path.ends_with(".spec.ts")
-        || path.ends_with(".spec.tsx")
-}
-
-// Matches `process.env.NAME`: outer = process.env.NAME, inner = process.env.
-// Returns NAME on match, None otherwise.
 fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
     let Expression::StaticMemberExpression(outer) = expr else {
         return None;
@@ -914,18 +907,16 @@ mod tests {
     // T-012: math_random_insecure_test_file_excluded
     #[test]
     fn math_random_insecure_test_file_excluded() {
-        let v = check("const t = Math.random().toString(36);", "/src/util.test.ts");
-        assert_eq!(v.len(), 0);
-    }
-
-    // T-012: math_random_insecure_spec_file_excluded
-    #[test]
-    fn math_random_insecure_spec_file_excluded() {
-        let v = check(
-            "const t = Math.random().toString(36);",
+        for path in [
+            "/src/util.test.ts",
             "/src/util.spec.tsx",
-        );
-        assert_eq!(v.len(), 0);
+            "/src/util.test.js",
+            "/src/util.test.jsx",
+            "/src/util.spec.js",
+        ] {
+            let v = check("const t = Math.random().toString(36);", path);
+            assert_eq!(v.len(), 0, "expected 0 violations for {path}");
+        }
     }
 
     // T-013: math_random_multiplied_allowed
