@@ -53,6 +53,7 @@ pub(crate) mod rule_id {
     pub const UNSAFE_REGEX: &str = "unsafe-regex";
     pub const NON_LITERAL_REQUIRE: &str = "non-literal-require";
     pub const ENV_VAR_FALLBACK: &str = "env-var-fallback";
+    pub const DANGEROUS_INNER_HTML: &str = "dangerous-inner-html";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =

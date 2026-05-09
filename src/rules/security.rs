@@ -1,4 +1,4 @@
-use super::{Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE};
+use super::{rule_id, Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE, RE_REACT_FILE};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -31,62 +31,81 @@ static RE_SESSION_STORAGE_SENSITIVE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"sessionStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#)
         .expect("RE_SESSION_STORAGE_SENSITIVE: invalid regex")
 });
+static RE_DANGEROUS_INNER_HTML: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"dangerouslySetInnerHTML\s*=\s*\{").expect("RE_DANGEROUS_INNER_HTML: invalid regex")
+});
 
 struct SecurityIssue {
     pattern: &'static LazyLock<Regex>,
     file_pattern: &'static LazyLock<Regex>,
+    rule_id: &'static str,
     fix: &'static str,
     severity: Severity,
 }
 
-static SECURITY_ISSUES: [SecurityIssue; 8] = [
+static SECURITY_ISSUES: [SecurityIssue; 9] = [
     SecurityIssue {
         pattern: &RE_DOC_WRITE,
         file_pattern: &RE_HTML_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use createElement/appendChild instead",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_INNER_HTML,
         file_pattern: &RE_HTML_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use textContent or DOMPurify.sanitize() instead",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_SET_TIMEOUT_STR,
         file_pattern: &RE_JS_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use function reference: setTimeout(() => { ... }, delay)",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_SET_INTERVAL_STR,
         file_pattern: &RE_JS_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use function reference: setInterval(() => { ... }, delay)",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_POST_MESSAGE_STAR,
         file_pattern: &RE_JS_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Specify exact target origin instead of '*'",
         severity: Severity::High,
     },
     SecurityIssue {
         pattern: &RE_OUTER_HTML,
         file_pattern: &RE_HTML_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use DOM methods instead",
         severity: Severity::Medium,
     },
     SecurityIssue {
         pattern: &RE_LOCAL_STORAGE_SENSITIVE,
         file_pattern: &RE_JS_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use httpOnly cookies for sensitive data",
         severity: Severity::Medium,
     },
     SecurityIssue {
         pattern: &RE_SESSION_STORAGE_SENSITIVE,
         file_pattern: &RE_JS_FILE,
+        rule_id: rule_id::SECURITY,
         fix: "Use httpOnly cookies for sensitive data",
         severity: Severity::Medium,
+    },
+    SecurityIssue {
+        pattern: &RE_DANGEROUS_INNER_HTML,
+        file_pattern: &RE_REACT_FILE,
+        rule_id: rule_id::DANGEROUS_INNER_HTML,
+        fix: "Sanitize with DOMPurify.sanitize() before assigning to dangerouslySetInnerHTML",
+        severity: Severity::High,
     },
 ];
 
@@ -103,7 +122,7 @@ pub fn rule() -> Rule {
                 for &(line_num, line) in lines {
                     if issue.pattern.is_match(line) {
                         violations.push(Violation {
-                            rule: super::rule_id::SECURITY.to_owned(),
+                            rule: issue.rule_id.to_owned(),
                             severity: issue.severity,
                             fix: issue.fix.to_owned(),
                             file: file_path.to_owned(),
@@ -208,5 +227,45 @@ mod tests {
     fn innerhtml_empty_string_concat_not_detected() {
         let content = r#"el.innerHTML = "" + userInput;"#;
         assert!(check(content, "/src/component.tsx").is_empty());
+    }
+
+    // T-007: detects_dangerously_set_inner_html_in_tsx
+    #[test]
+    fn detects_dangerously_set_inner_html_in_tsx() {
+        let content = r#"<div dangerouslySetInnerHTML={{ __html: x }} />"#;
+        let v = check(content, "/src/Component.tsx");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, super::super::rule_id::DANGEROUS_INNER_HTML);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-008: detects_dangerously_set_inner_html_in_jsx
+    #[test]
+    fn detects_dangerously_set_inner_html_in_jsx() {
+        let content = r#"<Component dangerouslySetInnerHTML={{ __html: y }} />"#;
+        let v = check(content, "/src/Component.jsx");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, super::super::rule_id::DANGEROUS_INNER_HTML);
+    }
+
+    // T-009: allows_dangerously_set_inner_html_in_ts_string
+    #[test]
+    fn allows_dangerously_set_inner_html_in_ts_string() {
+        let content = r#"const s = "dangerouslySetInnerHTML={x}";"#;
+        let v = check(content, "/src/text.ts");
+        assert!(
+            v.is_empty(),
+            "expected 0 violations in .ts file, got {}",
+            v.len()
+        );
+    }
+
+    // T-007: detects_dangerously_set_inner_html_with_whitespace
+    #[test]
+    fn detects_dangerously_set_inner_html_with_whitespace() {
+        let content = r#"<div dangerouslySetInnerHTML = { dangerousObject } />"#;
+        let v = check(content, "/src/Component.tsx");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, super::super::rule_id::DANGEROUS_INNER_HTML);
     }
 }
