@@ -2,10 +2,21 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BinaryOperator, CallExpression, Expression,
-    ObjectPropertyKind, Program, RegExpLiteral,
+    LogicalExpression, LogicalOperator, ObjectPropertyKind, Program, RegExpLiteral,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
+
+// SECRET_KEY / SESSION_SECRET 等は SECRET の substring match で網羅される。
+// KEY 単体は PUBLIC_KEY / SORT_KEY 等を誤検知するため除外し API_KEY のみ採用。
+const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "API_KEY",
+    "JWT",
+    "CREDENTIAL",
+];
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
 fn is_bidi_char(ch: char) -> bool {
@@ -177,6 +188,33 @@ impl SecurityVisitor<'_> {
             );
         }
     }
+
+    fn check_env_var_fallback(&mut self, expr: &LogicalExpression) {
+        if !matches!(
+            expr.operator,
+            LogicalOperator::Coalesce | LogicalOperator::Or
+        ) {
+            return;
+        }
+        let Expression::StringLiteral(s) = &expr.right else {
+            return;
+        };
+        if s.value.is_empty() {
+            return;
+        }
+        let Some(name) = process_env_access_name(&expr.left) else {
+            return;
+        };
+        if !SENSITIVE_ENV_KEYWORDS.iter().any(|kw| name.contains(kw)) {
+            return;
+        }
+        self.push_violation(
+            rule_id::ENV_VAR_FALLBACK,
+            Severity::High,
+            "Throw an error when required env var is missing. Never fall back to a hardcoded secret.",
+            expr.span,
+        );
+    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -192,6 +230,26 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_unsafe_regex(re);
         walk::walk_reg_exp_literal(self, re);
     }
+
+    fn visit_logical_expression(&mut self, it: &LogicalExpression<'a>) {
+        self.check_env_var_fallback(it);
+        walk::walk_logical_expression(self, it);
+    }
+}
+
+// Matches `process.env.NAME`: outer = process.env.NAME, inner = process.env.
+// Returns NAME on match, None otherwise.
+fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
+    let Expression::StaticMemberExpression(outer) = expr else {
+        return None;
+    };
+    let Expression::StaticMemberExpression(inner) = &outer.object else {
+        return None;
+    };
+    if !is_ident(&inner.object, "process") || inner.property.name != "env" {
+        return None;
+    }
+    Some(outer.property.name.as_str())
 }
 
 fn is_ident(expr: &Expression, name: &str) -> bool {
@@ -723,6 +781,76 @@ mod tests {
         assert!(v.len() >= 5, "expected at least 5, got {}", v.len());
     }
 
+    // T-001: env_var_fallback_nullish_coalescing_jwt_secret_blocked
+    #[test]
+    fn env_var_fallback_nullish_coalescing_jwt_secret_blocked() {
+        let v = check_js(r#"const s = process.env.JWT_SECRET ?? "fallback";"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-002: env_var_fallback_short_circuit_or_api_key_blocked
+    #[test]
+    fn env_var_fallback_short_circuit_or_api_key_blocked() {
+        let v = check_js(r#"const k = process.env.API_KEY || "default";"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
+    }
+
+    // T-003: env_var_fallback_sensitive_keywords_all_blocked
+    #[test]
+    fn env_var_fallback_sensitive_keywords_all_blocked() {
+        for code in [
+            r#"const a = process.env.SECRET ?? "x";"#,
+            r#"const b = process.env.AUTH_TOKEN ?? "x";"#,
+            r#"const c = process.env.USER_PASSWORD ?? "x";"#,
+            r#"const d = process.env.API_KEY ?? "x";"#,
+            r#"const e = process.env.JWT ?? "x";"#,
+            r#"const f = process.env.AWS_CREDENTIAL ?? "x";"#,
+            r#"const g = process.env.SECRET_KEY ?? "x";"#,
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK, "failed for: {code}");
+        }
+    }
+
+    // T-004: env_var_fallback_log_level_allowed
+    #[test]
+    fn env_var_fallback_log_level_allowed() {
+        let v = check_js(r#"const l = process.env.LOG_LEVEL ?? "info";"#);
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-005: env_var_fallback_public_and_sort_keys_allowed
+    #[test]
+    fn env_var_fallback_public_and_sort_keys_allowed() {
+        for code in [
+            r#"const k = process.env.PUBLIC_KEY ?? "";"#,
+            r#"const s = process.env.SORT_KEY || "asc";"#,
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 0, "failed for: {code}");
+        }
+    }
+
+    // T-006: env_var_fallback_multiline_logical_expression_blocked
+    #[test]
+    fn env_var_fallback_multiline_logical_expression_blocked() {
+        let v = check_js("const s = process.env.JWT_SECRET\n  ?? \"fallback\";");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
+    }
+
+    // T-016: env_var_fallback_fail_open_on_invalid_syntax
+    #[test]
+    fn env_var_fallback_fail_open_on_invalid_syntax() {
+        let v = check_js("function { invalid !!!");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-018: nfr001_performance_under_10ms
     #[test]
     fn nfr001_performance_under_10ms() {
         let content = concat!(
@@ -736,6 +864,7 @@ mod tests {
             "fs.readFile(userInput, cb);\n",
             "res.json({ error: 'oops' });\n",
             "res.json({ stack: err.stack });\n",
+            "const s = process.env.JWT_SECRET ?? 'fallback';\n",
         );
         let start = Instant::now();
         let iterations = 100;
