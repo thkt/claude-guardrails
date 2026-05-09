@@ -215,6 +215,42 @@ impl SecurityVisitor<'_> {
             expr.span,
         );
     }
+
+    fn check_math_random_insecure(&mut self, call: &CallExpression) {
+        if is_test_file(self.file_path) {
+            return;
+        }
+        let Expression::StaticMemberExpression(method) = &call.callee else {
+            return;
+        };
+        if method.property.name != "toString" {
+            return;
+        }
+        let [arg] = call.arguments.as_slice() else {
+            return;
+        };
+        let Argument::NumericLiteral(n) = arg else {
+            return;
+        };
+        if (n.value - 36.0).abs() > f64::EPSILON {
+            return;
+        }
+        let Expression::CallExpression(inner) = &method.object else {
+            return;
+        };
+        let Expression::StaticMemberExpression(rand) = &inner.callee else {
+            return;
+        };
+        if !is_ident(&rand.object, "Math") || rand.property.name != "random" {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::Medium,
+            "Math.random() is not cryptographically secure. Use crypto.randomBytes() for tokens/IDs.",
+            call.span,
+        );
+    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -223,6 +259,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_child_process(it);
         self.check_fs_path(it);
         self.check_non_literal_require(it);
+        self.check_math_random_insecure(it);
         walk::walk_call_expression(self, it);
     }
 
@@ -235,6 +272,13 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_env_var_fallback(it);
         walk::walk_logical_expression(self, it);
     }
+}
+
+fn is_test_file(path: &str) -> bool {
+    path.ends_with(".test.ts")
+        || path.ends_with(".test.tsx")
+        || path.ends_with(".spec.ts")
+        || path.ends_with(".spec.tsx")
 }
 
 // Matches `process.env.NAME`: outer = process.env.NAME, inner = process.env.
@@ -850,6 +894,68 @@ mod tests {
         assert_eq!(v.len(), 0);
     }
 
+    // T-011: math_random_insecure_to_string_36_blocked
+    #[test]
+    fn math_random_insecure_to_string_36_blocked() {
+        let v = check_js("const t = Math.random().toString(36).substring(2);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-011: math_random_insecure_to_string_36_no_chain_blocked
+    #[test]
+    fn math_random_insecure_to_string_36_no_chain_blocked() {
+        let v = check_js("const t = Math.random().toString(36);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+    }
+
+    // T-012: math_random_insecure_test_file_excluded
+    #[test]
+    fn math_random_insecure_test_file_excluded() {
+        let v = check("const t = Math.random().toString(36);", "/src/util.test.ts");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-012: math_random_insecure_spec_file_excluded
+    #[test]
+    fn math_random_insecure_spec_file_excluded() {
+        let v = check(
+            "const t = Math.random().toString(36);",
+            "/src/util.spec.tsx",
+        );
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-013: math_random_multiplied_allowed
+    #[test]
+    fn math_random_multiplied_allowed() {
+        let v = check_js("const x = Math.random() * 100;");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-014: math_random_react_key_allowed
+    #[test]
+    fn math_random_react_key_allowed() {
+        let v = check("<li key={Math.random()}>x</li>", "/src/List.tsx");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-015: math_random_set_timeout_jitter_allowed
+    #[test]
+    fn math_random_set_timeout_jitter_allowed() {
+        let v = check_js("setTimeout(fn, 100 + Math.random() * 50);");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-016: math_random_insecure_fail_open_on_invalid_syntax
+    #[test]
+    fn math_random_insecure_fail_open_on_invalid_syntax() {
+        let v = check_js("function { Math.random().toString(36) !!!");
+        assert_eq!(v.len(), 0);
+    }
+
     // T-018: nfr001_performance_under_10ms
     #[test]
     fn nfr001_performance_under_10ms() {
@@ -865,6 +971,7 @@ mod tests {
             "res.json({ error: 'oops' });\n",
             "res.json({ stack: err.stack });\n",
             "const s = process.env.JWT_SECRET ?? 'fallback';\n",
+            "const id = Math.random().toString(36).substring(2);\n",
         );
         let start = Instant::now();
         let iterations = 100;
