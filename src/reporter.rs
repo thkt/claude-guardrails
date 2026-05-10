@@ -56,20 +56,10 @@ pub enum Decision {
     Block,
 }
 
-impl Decision {
-    pub fn exit_code(self) -> i32 {
-        match self {
-            Decision::Allow => 0,
-            Decision::Block => 2,
-        }
-    }
-}
-
 #[derive(Serialize)]
 pub struct JsonReport<'a> {
     pub violations: Vec<&'a Violation>,
     pub decision: Decision,
-    pub exit_code: i32,
 }
 
 pub fn build_json_report<'a>(
@@ -87,12 +77,7 @@ pub fn build_json_report<'a>(
     JsonReport {
         violations,
         decision,
-        exit_code: decision.exit_code(),
     }
-}
-
-pub fn format_json_report(report: &JsonReport<'_>) -> String {
-    serde_json::to_string(report).expect("JsonReport serialization is infallible")
 }
 
 pub fn format_warnings(violations: &[&Violation]) -> String {
@@ -201,7 +186,6 @@ mod tests {
         let v = make_violation("eval", Severity::High, "Use JSON.parse()");
         let report = build_json_report(&[&v], &[]);
         assert_eq!(report.decision, Decision::Block);
-        assert_eq!(report.exit_code, 2);
         assert_eq!(report.violations.len(), 1);
     }
 
@@ -209,7 +193,6 @@ mod tests {
     fn json_report_allow_when_no_blocking() {
         let report = build_json_report(&[], &[]);
         assert_eq!(report.decision, Decision::Allow);
-        assert_eq!(report.exit_code, 0);
         assert!(report.violations.is_empty());
     }
 
@@ -218,7 +201,6 @@ mod tests {
         let v = make_violation("dom-access", Severity::Medium, "use ref");
         let report = build_json_report(&[], &[&v]);
         assert_eq!(report.decision, Decision::Allow);
-        assert_eq!(report.exit_code, 0);
         assert_eq!(report.violations.len(), 1);
     }
 
@@ -227,9 +209,12 @@ mod tests {
         let v = make_violation("eval", Severity::High, "Use JSON.parse()");
         let report = build_json_report(&[&v], &[]);
         let json: serde_json::Value =
-            serde_json::from_str(&format_json_report(&report)).expect("valid JSON");
+            serde_json::from_str(&serde_json::to_string(&report).unwrap()).expect("valid JSON");
         assert_eq!(json["decision"], "block");
-        assert_eq!(json["exit_code"], 2);
+        assert!(
+            json.get("exit_code").is_none(),
+            "exit_code field should be removed (process exit is the source of truth)"
+        );
         assert_eq!(json["violations"][0]["severity"], "high");
         assert_eq!(json["violations"][0]["rule"], "eval");
         assert_eq!(json["violations"][0]["fix"], "Use JSON.parse()");
@@ -248,7 +233,7 @@ mod tests {
         };
         let report = build_json_report(&[&v], &[]);
         let json: serde_json::Value =
-            serde_json::from_str(&format_json_report(&report)).expect("valid JSON");
+            serde_json::from_str(&serde_json::to_string(&report).unwrap()).expect("valid JSON");
         assert!(json["violations"][0]["line"].is_null());
     }
 }

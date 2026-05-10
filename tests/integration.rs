@@ -365,10 +365,17 @@ fn json_mode_violation_emits_block_decision() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-    assert_eq!(parsed["decision"], "block");
-    assert_eq!(parsed["exit_code"], 2);
+    assert_eq!(parsed["data"]["decision"], "block");
     assert!(
-        parsed["violations"]
+        parsed["exit_code"].is_null(),
+        "envelope drops top-level exit_code"
+    );
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    assert!(
+        parsed["data"]["violations"]
             .as_array()
             .unwrap()
             .iter()
@@ -398,9 +405,12 @@ fn json_mode_clean_emits_allow_decision() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-    assert_eq!(parsed["decision"], "allow");
-    assert_eq!(parsed["exit_code"], 0);
-    assert!(parsed["violations"].as_array().unwrap().is_empty());
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    assert!(parsed["data"]["violations"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -418,9 +428,14 @@ fn json_mode_warning_only_emits_allow_with_violations() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-    assert_eq!(parsed["decision"], "allow");
-    assert_eq!(parsed["exit_code"], 0);
-    let violations = parsed["violations"].as_array().expect("violations array");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    let violations = parsed["data"]["violations"]
+        .as_array()
+        .expect("violations array");
     assert!(
         !violations.is_empty(),
         "expected at least one warning-level violation in: {parsed}"
@@ -451,9 +466,12 @@ fn json_mode_unsupported_tool_emits_allow() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
-    assert_eq!(parsed["decision"], "allow");
-    assert_eq!(parsed["exit_code"], 0);
-    assert!(parsed["violations"].as_array().unwrap().is_empty());
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    assert!(parsed["data"]["violations"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -468,8 +486,56 @@ fn json_mode_missing_content_emits_allow() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
-    assert_eq!(parsed["decision"], "allow");
-    assert_eq!(parsed["exit_code"], 0);
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+}
+
+#[test]
+fn json_mode_invalid_json_emits_error_envelope() {
+    let output = run_guardrails_with_args(b"not json", &["--json"]);
+    assert_eq!(output.status.code(), Some(1));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(
+        parsed["error"]["code"], "DATA_ERROR",
+        "envelope should classify invalid JSON as DATA_ERROR; got: {parsed}"
+    );
+    assert!(
+        parsed["error"]["next_step"].is_string(),
+        "envelope should carry next_step hint; got: {parsed}"
+    );
+    assert_eq!(parsed["error"]["retryable"], false);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid JSON"),
+        "stderr must keep human-readable message in: {stderr}"
+    );
+}
+
+#[test]
+fn json_mode_oversized_input_emits_error_envelope() {
+    let huge = vec![b'a'; 10_000_001];
+    let output = run_guardrails_with_args(&huge, &["--json"]);
+    assert_eq!(output.status.code(), Some(2));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(parsed["error"]["code"], "DATA_ERROR");
+    assert!(
+        parsed["error"]["next_step"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Reduce input size"),
+        "envelope should suggest size reduction; got: {parsed}"
+    );
+    assert_eq!(parsed["error"]["retryable"], false);
 }
 
 #[test]

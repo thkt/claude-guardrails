@@ -3,6 +3,7 @@ mod ast_security;
 mod color;
 mod config;
 mod download;
+mod envelope;
 mod oxlint;
 mod parse_json;
 mod reporter;
@@ -13,8 +14,10 @@ mod tempfile_util;
 
 use clap::{Parser, Subcommand};
 use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
-use reporter::{build_json_report, format_json_report, format_violations, format_warnings};
+use envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelope};
+use reporter::{build_json_report, format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
+use serde::Serialize;
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -111,9 +114,13 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
     Some((file_path, content))
 }
 
-fn lint_with_external_tools(content: &str, file_path: &str, config: &Config) -> Vec<Violation> {
+fn lint_with_external_tools(
+    content: &str,
+    file_path: &str,
+    config: &Config,
+) -> (Vec<Violation>, Option<String>) {
     if !config.rules.oxlint {
-        return Vec::new();
+        return (Vec::new(), None);
     }
 
     let Some(bin) = oxlint::resolve(file_path) else {
@@ -123,14 +130,27 @@ fn lint_with_external_tools(content: &str, file_path: &str, config: &Config) -> 
                 file_path
             );
         }
-        return Vec::new();
+        return (
+            Vec::new(),
+            Some(String::from("oxlint not found, JS lint skipped")),
+        );
     };
 
-    oxlint::check(content, file_path, &bin, &config.oxlint_config).unwrap_or_default()
+    match oxlint::check(content, file_path, &bin, &config.oxlint_config) {
+        Some(violations) => (violations, None),
+        None => (
+            Vec::new(),
+            Some(String::from("oxlint check failed, JS lint skipped")),
+        ),
+    }
 }
 
-fn lint_with_ast(content: &str, file_path: &str, config: &Config) -> Vec<Violation> {
-    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+fn lint_with_ast(
+    content: &str,
+    file_path: &str,
+    config: &Config,
+) -> (Vec<Violation>, Option<String>) {
+    let result = ast::with_parsed_program(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
         if config.rules.ast_security {
             if let Some(v) = ast_security::check_bidi(content, file_path, line_offsets) {
@@ -150,16 +170,31 @@ fn lint_with_ast(content: &str, file_path: &str, config: &Config) -> Vec<Violati
             ));
         }
         found
-    })
-    .unwrap_or_default()
+    });
+    match result {
+        Some(v) => (v, None),
+        None => (
+            Vec::new(),
+            Some(String::from("AST parse failed, structural rules skipped")),
+        ),
+    }
 }
 
-fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Violation> {
+fn collect_violations(
+    file_path: &str,
+    content: &str,
+    config: &Config,
+) -> (Vec<Violation>, Vec<String>) {
     let mut violations = Vec::new();
+    let mut notes = Vec::new();
     let is_js = RE_JS_FILE.is_match(file_path);
 
     if is_js {
-        violations.extend(lint_with_external_tools(content, file_path, config));
+        let (vs, note) = lint_with_external_tools(content, file_path, config);
+        violations.extend(vs);
+        if let Some(n) = note {
+            notes.push(n);
+        }
     }
 
     let lines = non_comment_lines(content);
@@ -173,10 +208,14 @@ fn collect_violations(file_path: &str, content: &str, config: &Config) -> Vec<Vi
 
     let has_ast_rules = config.rules.ast_security || config.rules.no_use_effect;
     if is_js && has_ast_rules {
-        violations.extend(lint_with_ast(content, file_path, config));
+        let (vs, note) = lint_with_ast(content, file_path, config);
+        violations.extend(vs);
+        if let Some(n) = note {
+            notes.push(n);
+        }
     }
 
-    violations
+    (violations, notes)
 }
 
 fn partition_violations<'a>(
@@ -188,28 +227,58 @@ fn partition_violations<'a>(
         .partition(|v| config.severity.block_on.contains(&v.severity))
 }
 
+fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit: i32) -> i32 {
+    eprintln!("guardrails: {}", message);
+    emit_error_envelope_if_enabled(
+        json_mode,
+        ErrorPayload {
+            code,
+            message,
+            next_step: Some(String::from(next_step)),
+            candidates: vec![],
+            retryable: false,
+        },
+    );
+    exit
+}
+
 // Fail-closed: reject oversized input rather than silently truncating.
-fn parse_stdin() -> Result<ToolInput, i32> {
+fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
     let mut input_str = String::new();
     let bytes_read = io::stdin()
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
         .map_err(|e| {
-            eprintln!("guardrails: failed to read stdin: {}", e);
-            1
+            fail(
+                json_mode,
+                ErrorCode::IoError,
+                format!("failed to read stdin: {}", e),
+                "Pass valid Claude Code hook JSON via stdin",
+                1,
+            )
         })?;
 
     if bytes_read as u64 > MAX_INPUT_SIZE {
-        eprintln!(
-            "guardrails: input too large (>{} bytes), blocking as precaution",
-            MAX_INPUT_SIZE
-        );
-        return Err(2);
+        return Err(fail(
+            json_mode,
+            ErrorCode::DataError,
+            format!(
+                "input too large (>{} bytes), blocking as precaution",
+                MAX_INPUT_SIZE
+            ),
+            "Reduce input size or split into smaller hook calls",
+            2,
+        ));
     }
 
     serde_json::from_str(&input_str).map_err(|e| {
-        eprintln!("guardrails: invalid JSON input: {}", e);
-        1
+        fail(
+            json_mode,
+            ErrorCode::DataError,
+            format!("invalid JSON input: {}", e),
+            "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
+            1,
+        )
     })
 }
 
@@ -276,12 +345,29 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
     }
 }
 
-fn emit_json_if_enabled(json_mode: bool, blocking: &[&Violation], warnings: &[&Violation]) {
+fn print_json_line<T: Serialize>(value: &T) {
+    let json = serde_json::to_string(value).expect("envelope serialization is infallible");
+    println!("{}", json);
+}
+
+fn emit_json_if_enabled(
+    json_mode: bool,
+    blocking: &[&Violation],
+    warnings: &[&Violation],
+    notes: Vec<String>,
+) {
     if !json_mode {
         return;
     }
     let report = build_json_report(blocking, warnings);
-    println!("{}", format_json_report(&report));
+    print_json_line(&SuccessEnvelope::with_notes(report, notes));
+}
+
+fn emit_error_envelope_if_enabled(json_mode: bool, payload: ErrorPayload) {
+    if !json_mode {
+        return;
+    }
+    print_json_line(&ErrorEnvelope { error: payload });
 }
 
 fn run_prefetch() -> i32 {
@@ -298,7 +384,7 @@ fn run_prefetch() -> i32 {
 }
 
 fn run_hook(json_mode: bool) -> i32 {
-    let input = match parse_stdin() {
+    let input = match parse_stdin(json_mode) {
         Ok(v) => v,
         Err(code) => return code,
     };
@@ -319,7 +405,7 @@ fn run_hook(json_mode: bool) -> i32 {
                 input.tool_name
             );
         }
-        emit_json_if_enabled(json_mode, &[], &[]);
+        emit_json_if_enabled(json_mode, &[], &[], Vec::new());
         return 0;
     };
 
@@ -337,14 +423,14 @@ fn run_hook(json_mode: bool) -> i32 {
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(json_mode, &[], &[]);
+        emit_json_if_enabled(json_mode, &[], &[], Vec::new());
         return 0;
     }
 
-    let violations = collect_violations(&file_path, &content, &config);
+    let (violations, notes) = collect_violations(&file_path, &content, &config);
     let (blocking, warnings) = partition_violations(&violations, &config);
 
-    emit_json_if_enabled(json_mode, &blocking, &warnings);
+    emit_json_if_enabled(json_mode, &blocking, &warnings, notes);
     emit_human_violations(&blocking, &warnings);
     if blocking.is_empty() {
         0
@@ -510,14 +596,15 @@ mod tests {
     #[test]
     fn collect_violations_detects_eval() {
         let config = Config::default();
-        let violations = collect_violations("/src/app.ts", "eval(userInput);", &config);
+        let (violations, _notes) = collect_violations("/src/app.ts", "eval(userInput);", &config);
         assert!(violations.iter().any(|v| v.rule == "eval"));
     }
 
     #[test]
     fn collect_violations_clean_code() {
         let config = Config::default();
-        let violations = collect_violations("/src/app.ts", "export function main() {}\n", &config);
+        let (violations, _notes) =
+            collect_violations("/src/app.ts", "export function main() {}\n", &config);
         assert!(
             violations.is_empty(),
             "unexpected violations: {:?}",
@@ -529,21 +616,21 @@ mod tests {
     fn collect_violations_disabled_rule_skipped() {
         let mut config = Config::default();
         config.rules.eval = false;
-        let violations = collect_violations("/src/app.ts", "eval(userInput);", &config);
+        let (violations, _notes) = collect_violations("/src/app.ts", "eval(userInput);", &config);
         assert!(!violations.iter().any(|v| v.rule == "eval"));
     }
 
     #[test]
     fn collect_violations_non_js_skips_js_rules() {
         let config = Config::default();
-        let violations = collect_violations("/README.md", "eval(userInput);", &config);
+        let (violations, _notes) = collect_violations("/README.md", "eval(userInput);", &config);
         assert!(!violations.iter().any(|v| v.rule == "eval"));
     }
 
     #[test]
     fn collect_violations_ast_security_detects_injection() {
         let config = Config::default();
-        let violations = collect_violations("/src/app.ts", "exec(userInput);", &config);
+        let (violations, _notes) = collect_violations("/src/app.ts", "exec(userInput);", &config);
         assert!(violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));
@@ -553,7 +640,7 @@ mod tests {
     fn collect_violations_ast_security_disabled() {
         let mut config = Config::default();
         config.rules.ast_security = false;
-        let violations = collect_violations("/src/app.ts", "exec(userInput);", &config);
+        let (violations, _notes) = collect_violations("/src/app.ts", "exec(userInput);", &config);
         assert!(!violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));
@@ -562,7 +649,7 @@ mod tests {
     #[test]
     fn collect_violations_no_use_effect_detects_in_tsx() {
         let config = Config::default();
-        let violations = collect_violations(
+        let (violations, _notes) = collect_violations(
             "/src/App.tsx",
             "useEffect(() => { fetchData(); }, []);",
             &config,
@@ -574,7 +661,7 @@ mod tests {
     fn collect_violations_no_use_effect_disabled() {
         let mut config = Config::default();
         config.rules.no_use_effect = false;
-        let violations = collect_violations(
+        let (violations, _notes) = collect_violations(
             "/src/App.tsx",
             "useEffect(() => { fetchData(); }, []);",
             &config,
