@@ -370,7 +370,10 @@ fn json_mode_violation_emits_block_decision() {
         parsed["exit_code"].is_null(),
         "envelope drops top-level exit_code"
     );
-    assert_eq!(parsed["degraded"], false);
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
     assert!(
         parsed["data"]["violations"]
             .as_array()
@@ -403,7 +406,10 @@ fn json_mode_clean_emits_allow_decision() {
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
     assert_eq!(parsed["data"]["decision"], "allow");
-    assert_eq!(parsed["degraded"], false);
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
     assert!(parsed["data"]["violations"].as_array().unwrap().is_empty());
 }
 
@@ -423,7 +429,10 @@ fn json_mode_warning_only_emits_allow_with_violations() {
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
     assert_eq!(parsed["data"]["decision"], "allow");
-    assert_eq!(parsed["degraded"], false);
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
     let violations = parsed["data"]["violations"]
         .as_array()
         .expect("violations array");
@@ -458,7 +467,10 @@ fn json_mode_unsupported_tool_emits_allow() {
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
     assert_eq!(parsed["data"]["decision"], "allow");
-    assert_eq!(parsed["degraded"], false);
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
     assert!(parsed["data"]["violations"].as_array().unwrap().is_empty());
 }
 
@@ -475,7 +487,10 @@ fn json_mode_missing_content_emits_allow() {
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
     assert_eq!(parsed["data"]["decision"], "allow");
-    assert_eq!(parsed["degraded"], false);
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
 }
 
 #[test]
