@@ -209,29 +209,62 @@ guardrails --json < tool-call.json
 
 > **BREAKING (v0.15+)**: v0.14 で利用できた `GUARDRAILS_JSON=1` env は削除されました。代わりに `--json` を使ってください。すべての hook 呼び出しで JSON を出力したい場合は、hook の `command` にフラグを追加してください ([Claude Code Hookとして](#claude-code-hookとして)参照)。
 
+> **BREAKING (v0.15+)**: 成功時の出力は [ADR-0065](https://github.com/thkt/scout/blob/main/docs/decisions/0065-scout-json-output-schema-and-sysexits-exit-code-policy.md) に従って `SuccessEnvelope` (`{ data, degraded, notes }`) で wrap されます。旧 schema (`{ violations, decision, exit_code }`) は廃止 — hook 判定はプロセス終了コードを参照してください。
+
+### Success envelope
+
 ```json
 {
-  "violations": [
-    {
-      "rule": "eval",
-      "severity": "high",
-      "fix": "Avoid eval(). Use JSON.parse() for data or safe alternatives.",
-      "file": "/src/app.ts",
-      "line": 1
-    }
-  ],
-  "decision": "block",
-  "exit_code": 2
+  "data": {
+    "violations": [
+      {
+        "rule": "eval",
+        "severity": "high",
+        "fix": "Avoid eval(). Use JSON.parse() for data or safe alternatives.",
+        "file": "/src/app.ts",
+        "line": 1
+      }
+    ],
+    "decision": "block"
+  },
+  "degraded": false,
+  "notes": []
 }
 ```
 
-| フィールド   | 型                                            | 補足                                                                  |
-| ------------ | --------------------------------------------- | --------------------------------------------------------------------- |
-| `violations` | 配列                                          | ブロッキングと警告の両方を含む。`severity` で区別可能                 |
-| `severity`   | `"critical"` / `"high"` / `"medium"` / `"low"` | 小文字                                                                |
-| `line`       | 整数または `null`                             | 位置が不明な場合は `null`                                             |
-| `decision`   | `"block"` / `"allow"`                         | `severity.blockOn` に一致するエントリが 1 件以上ある場合のみ `block`  |
-| `exit_code`  | `0` / `2`                                     | プロセスの終了コードと一致                                            |
+| フィールド        | 型                                              | 補足                                                                  |
+| ----------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
+| `data.violations` | 配列                                            | ブロッキングと警告の両方を含む。`severity` で区別可能                 |
+| `data.decision`   | `"block"` / `"allow"`                           | `severity.blockOn` に一致するエントリが 1 件以上ある場合のみ `block`  |
+| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | 小文字                                                                |
+| `line`            | 整数または `null`                               | 位置が不明な場合は `null`                                             |
+| `degraded`        | bool                                            | ツール不在 (例: oxlint 未インストール) で `true`                      |
+| `notes`           | 文字列の配列                                    | degrade の理由。non-empty なら `degraded: true`                       |
+
+### Error envelope
+
+`--json` 設定時に stdin が不正 (malformed JSON / oversized / IO 失敗) な場合、stdout に `ErrorEnvelope` が出力されます。hook の終了コード (`1` / `2`) は維持されます。
+
+```json
+{
+  "error": {
+    "code": "DATA_ERROR",
+    "message": "invalid JSON input: ...",
+    "next_step": "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
+    "retryable": false
+  }
+}
+```
+
+| フィールド          | 型                                                                                | 補足                                       |
+| ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------ |
+| `error.code`        | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | ADR-0065 準拠の SCREAMING_SNAKE_CASE       |
+| `error.message`     | string                                                                            | 人間向けの詳細 (stderr にも出力される)     |
+| `error.next_step`   | string (optional)                                                                 | 復旧のための具体的なアクション             |
+| `error.candidates`  | 文字列の配列 (optional)                                                           | 復旧候補 (空なら省略)                      |
+| `error.retryable`   | bool                                                                              | 一時的な失敗の場合のみ `true`              |
+
+> **ケース混在**: `severity` は小文字 (v0.14 からの継承) で `error.code` は SCREAMING_SNAKE_CASE (ADR-0065)。意図的な混在で、両 shape は安定しています。
 
 `--json` を付けない場合、出力は人間向けデフォルトモードとバイト単位で完全互換です。
 

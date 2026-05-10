@@ -207,29 +207,62 @@ guardrails --json < tool-call.json
 
 > **BREAKING (v0.15+)**: the `GUARDRAILS_JSON=1` env from v0.14 is removed. Use `--json` instead. To keep JSON output on every hook call, add the flag to your hook command (see [As Claude Code Hook](#as-claude-code-hook)).
 
+> **BREAKING (v0.15+)**: success output is wrapped in a `SuccessEnvelope` (`{ data, degraded, notes }`) per [ADR-0065](https://github.com/thkt/scout/blob/main/docs/decisions/0065-scout-json-output-schema-and-sysexits-exit-code-policy.md). The pre-envelope shape (`{ violations, decision, exit_code }`) is gone — the process exit code remains the source of truth for hook decisions.
+
+### Success envelope
+
 ```json
 {
-  "violations": [
-    {
-      "rule": "eval",
-      "severity": "high",
-      "fix": "Avoid eval(). Use JSON.parse() for data or safe alternatives.",
-      "file": "/src/app.ts",
-      "line": 1
-    }
-  ],
-  "decision": "block",
-  "exit_code": 2
+  "data": {
+    "violations": [
+      {
+        "rule": "eval",
+        "severity": "high",
+        "fix": "Avoid eval(). Use JSON.parse() for data or safe alternatives.",
+        "file": "/src/app.ts",
+        "line": 1
+      }
+    ],
+    "decision": "block"
+  },
+  "degraded": false,
+  "notes": []
 }
 ```
 
-| Field        | Type                                       | Notes                                                            |
-| ------------ | ------------------------------------------ | ---------------------------------------------------------------- |
-| `violations` | array                                      | Both blocking and warning entries; distinguish via `severity`    |
-| `severity`   | `"critical"` / `"high"` / `"medium"` / `"low"` | Lowercase                                                        |
-| `line`       | integer or `null`                          | `null` when location is unknown                                  |
-| `decision`   | `"block"` / `"allow"`                      | `block` only when at least one entry matches `severity.blockOn`  |
-| `exit_code`  | `0` / `2`                                  | Matches the process exit code                                    |
+| Field             | Type                                            | Notes                                                            |
+| ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
+| `data.violations` | array                                           | Both blocking and warning entries; distinguish via `severity`    |
+| `data.decision`   | `"block"` / `"allow"`                           | `block` only when at least one entry matches `severity.blockOn`  |
+| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | Lowercase                                                        |
+| `line`            | integer or `null`                               | `null` when location is unknown                                  |
+| `degraded`        | boolean                                         | `true` when a tool was unavailable (e.g. oxlint not installed)   |
+| `notes`           | array of strings                                | Reasons for degradation; non-empty implies `degraded: true`      |
+
+### Error envelope
+
+When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO failure), guardrails emits an `ErrorEnvelope` on stdout. Hook exit codes (`1` / `2`) are preserved.
+
+```json
+{
+  "error": {
+    "code": "DATA_ERROR",
+    "message": "invalid JSON input: ...",
+    "next_step": "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
+    "retryable": false
+  }
+}
+```
+
+| Field             | Type                                            | Notes                                                            |
+| ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
+| `error.code`      | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | SCREAMING_SNAKE_CASE per ADR-0065 |
+| `error.message`   | string                                          | Human-readable detail (also printed on stderr)                   |
+| `error.next_step` | string (optional)                               | Concrete action to recover                                       |
+| `error.candidates`| array of strings (optional)                     | Recovery candidates (omitted when empty)                         |
+| `error.retryable` | boolean                                         | `true` only when the cause is a transient failure                |
+
+> **Case mixing**: `severity` is lowercase (legacy from v0.14) and `error.code` is SCREAMING_SNAKE_CASE (ADR-0065). The mix is intentional — both shapes are stable.
 
 Without `--json`, output is byte-for-byte identical to the human-readable default mode.
 
