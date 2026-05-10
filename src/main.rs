@@ -17,6 +17,7 @@ use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
 use envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelope};
 use reporter::{build_json_report, format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
+use serde::Serialize;
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -135,9 +136,13 @@ fn lint_with_external_tools(
         );
     };
 
-    let violations =
-        oxlint::check(content, file_path, &bin, &config.oxlint_config).unwrap_or_default();
-    (violations, None)
+    match oxlint::check(content, file_path, &bin, &config.oxlint_config) {
+        Some(violations) => (violations, None),
+        None => (
+            Vec::new(),
+            Some(String::from("oxlint check failed, JS lint skipped")),
+        ),
+    }
 }
 
 fn lint_with_ast(
@@ -222,70 +227,58 @@ fn partition_violations<'a>(
         .partition(|v| config.severity.block_on.contains(&v.severity))
 }
 
+fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit: i32) -> i32 {
+    eprintln!("guardrails: {}", message);
+    emit_error_envelope_if_enabled(
+        json_mode,
+        ErrorPayload {
+            code,
+            message,
+            next_step: Some(String::from(next_step)),
+            candidates: vec![],
+            retryable: false,
+        },
+    );
+    exit
+}
+
 // Fail-closed: reject oversized input rather than silently truncating.
-// Emits ErrorEnvelope on stdout when json_mode is enabled, and human-readable
-// messages on stderr regardless. Hook exit code (1 / 2) is preserved.
 fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
     let mut input_str = String::new();
-    let bytes_read = match io::stdin()
+    let bytes_read = io::stdin()
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
-    {
-        Ok(n) => n,
-        Err(e) => {
-            let message = format!("failed to read stdin: {}", e);
-            eprintln!("guardrails: {}", message);
-            emit_error_envelope_if_enabled(
+        .map_err(|e| {
+            fail(
                 json_mode,
-                ErrorPayload {
-                    code: ErrorCode::IoError,
-                    message,
-                    next_step: Some(String::from("Pass valid Claude Code hook JSON via stdin")),
-                    candidates: vec![],
-                    retryable: false,
-                },
-            );
-            return Err(1);
-        }
-    };
+                ErrorCode::IoError,
+                format!("failed to read stdin: {}", e),
+                "Pass valid Claude Code hook JSON via stdin",
+                1,
+            )
+        })?;
 
     if bytes_read as u64 > MAX_INPUT_SIZE {
-        let message = format!(
-            "input too large (>{} bytes), blocking as precaution",
-            MAX_INPUT_SIZE
-        );
-        eprintln!("guardrails: {}", message);
-        emit_error_envelope_if_enabled(
+        return Err(fail(
             json_mode,
-            ErrorPayload {
-                code: ErrorCode::DataError,
-                message,
-                next_step: Some(String::from(
-                    "Reduce input size or split into smaller hook calls",
-                )),
-                candidates: vec![],
-                retryable: false,
-            },
-        );
-        return Err(2);
+            ErrorCode::DataError,
+            format!(
+                "input too large (>{} bytes), blocking as precaution",
+                MAX_INPUT_SIZE
+            ),
+            "Reduce input size or split into smaller hook calls",
+            2,
+        ));
     }
 
     serde_json::from_str(&input_str).map_err(|e| {
-        let message = format!("invalid JSON input: {}", e);
-        eprintln!("guardrails: {}", message);
-        emit_error_envelope_if_enabled(
+        fail(
             json_mode,
-            ErrorPayload {
-                code: ErrorCode::DataError,
-                message,
-                next_step: Some(String::from(
-                    "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
-                )),
-                candidates: vec![],
-                retryable: false,
-            },
-        );
-        1
+            ErrorCode::DataError,
+            format!("invalid JSON input: {}", e),
+            "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
+            1,
+        )
     })
 }
 
@@ -352,6 +345,11 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
     }
 }
 
+fn print_json_line<T: Serialize>(value: &T) {
+    let json = serde_json::to_string(value).expect("envelope serialization is infallible");
+    println!("{}", json);
+}
+
 fn emit_json_if_enabled(
     json_mode: bool,
     blocking: &[&Violation],
@@ -362,19 +360,14 @@ fn emit_json_if_enabled(
         return;
     }
     let report = build_json_report(blocking, warnings);
-    let envelope = SuccessEnvelope::with_notes(report, notes);
-    let json = serde_json::to_string(&envelope).expect("envelope serialization is infallible");
-    println!("{}", json);
+    print_json_line(&SuccessEnvelope::with_notes(report, notes));
 }
 
 fn emit_error_envelope_if_enabled(json_mode: bool, payload: ErrorPayload) {
     if !json_mode {
         return;
     }
-    let envelope = ErrorEnvelope { error: payload };
-    let json =
-        serde_json::to_string(&envelope).expect("error envelope serialization is infallible");
-    println!("{}", json);
+    print_json_line(&ErrorEnvelope { error: payload });
 }
 
 fn run_prefetch() -> i32 {
