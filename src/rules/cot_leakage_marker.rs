@@ -11,6 +11,12 @@ pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_ALL_FILES.clone(),
         checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+            // Self-exclusion: this file legitimately contains every marker as literal
+            // for detection and tests. Without skipping, any future edit to this rule
+            // would be blocked by itself.
+            if file_path.ends_with("cot_leakage_marker.rs") {
+                return Vec::new();
+            }
             let mut violations = Vec::new();
             for (idx, line) in content.lines().enumerate() {
                 for marker in MARKERS {
@@ -161,5 +167,18 @@ mod tests {
         let content = "first\nsecond\n<thinking>";
         let v = check(content, "/src/app.ts");
         assert_eq!(v[0].line, Some(3));
+    }
+
+    // T-013: skips the rule's own source file (which contains markers as literals)
+    #[test]
+    fn skips_own_source_file() {
+        let v = check(
+            "<thinking>\nto=functions.run\n<|channel|>",
+            "/Users/x/repo/src/rules/cot_leakage_marker.rs",
+        );
+        assert!(
+            v.is_empty(),
+            "rule's own source file must be skipped to allow editing"
+        );
     }
 }
