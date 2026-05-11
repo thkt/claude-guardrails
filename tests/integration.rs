@@ -625,3 +625,63 @@ fn prefetch_returns_zero_when_oxlint_already_cached() {
         "expected cached binary path in stderr: {stderr}"
     );
 }
+
+#[test]
+fn prefetch_json_emits_success_envelope_when_cached() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache = tmp.path().join("guardrails/bin");
+    fs::create_dir_all(&cache).unwrap();
+    let bin = cache.join(format!("oxlint-{OXLINT_VERSION}"));
+    fs::write(&bin, "fake").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_guardrails"))
+        .args(["--json", "prefetch"])
+        .env("XDG_CACHE_HOME", tmp.path())
+        .output()
+        .expect("failed to spawn guardrails");
+
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert!(
+        parsed["data"]["path"]
+            .as_str()
+            .unwrap_or("")
+            .contains("oxlint"),
+        "envelope must carry path; got: {parsed}"
+    );
+    assert_eq!(parsed["degraded"], false, "cached path is not degraded");
+    assert_eq!(parsed["notes"], serde_json::json!([]));
+}
+
+#[test]
+fn prefetch_json_io_error_envelope_when_cache_unavailable() {
+    let output = Command::new(env!("CARGO_BIN_EXE_guardrails"))
+        .args(["--json", "prefetch"])
+        .env_remove("HOME")
+        .env_remove("XDG_CACHE_HOME")
+        .output()
+        .expect("failed to spawn guardrails");
+
+    assert_eq!(
+        output.status.code(),
+        Some(74),
+        "expected EX_IOERR; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(parsed["error"]["code"], "IO_ERROR");
+    assert!(
+        parsed["error"]["next_step"]
+            .as_str()
+            .unwrap_or("")
+            .contains("XDG_CACHE_HOME"),
+        "next_step must mention XDG_CACHE_HOME; got: {parsed}"
+    );
+    assert_eq!(parsed["error"]["retryable"], false);
+}

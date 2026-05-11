@@ -38,9 +38,11 @@ With --json: emits a structured JSON report on stdout, human-readable on stderr.
 
 Exit codes:
   0   Pass (no blocking violations) or successful subcommand
-  1   I/O error / invalid JSON input / prefetch failure
+  1   Hook I/O error or invalid JSON input
   2   Blocking violations found (Claude Code halts the tool call)
-  64  Usage error (clap parse failure)"
+  64  Usage error (clap parse failure)
+  65  Data error (prefetch: unsupported platform)
+  74  I/O error (prefetch: download / extract / cache failure)"
 )]
 struct Cli {
     /// Emit violations as a structured JSON report on stdout (hook mode only).
@@ -347,7 +349,8 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
 
 fn print_json_line<T: Serialize>(value: &T) {
     let json = serde_json::to_string(value).expect("envelope serialization is infallible");
-    println!("{}", json);
+    // Ignore write errors (e.g. BrokenPipe) so the caller's exit code is preserved.
+    let _ = writeln!(io::stdout().lock(), "{}", json);
 }
 
 fn emit_json_if_enabled(
@@ -370,15 +373,30 @@ fn emit_error_envelope_if_enabled(json_mode: bool, payload: ErrorPayload) {
     print_json_line(&ErrorEnvelope { error: payload });
 }
 
-fn run_prefetch() -> i32 {
+#[derive(Serialize)]
+struct PrefetchSuccess {
+    path: String,
+}
+
+fn run_prefetch(json_mode: bool) -> i32 {
     match download::ensure_oxlint() {
-        Some(path) => {
-            eprintln!("guardrails: oxlint ready at {}", path.display());
+        Ok(path) => {
+            let path_str = path.display().to_string();
+            eprintln!("guardrails: oxlint ready at {path_str}");
+            if json_mode {
+                print_json_line(&SuccessEnvelope::ok(PrefetchSuccess { path: path_str }));
+            }
             0
         }
-        None => {
-            eprintln!("guardrails: prefetch failed (network or unsupported platform)");
-            1
+        Err(e) => {
+            let (code, next_step) = e.classify();
+            fail(
+                json_mode,
+                code,
+                format!("prefetch failed: {e}"),
+                next_step,
+                i32::from(code.exit_code()),
+            )
         }
     }
 }
@@ -454,7 +472,7 @@ fn main() {
     };
 
     let exit_code = match cli.command {
-        Some(Commands::Prefetch) => run_prefetch(),
+        Some(Commands::Prefetch) => run_prefetch(cli.json),
         None => run_hook(cli.json),
     };
     process::exit(exit_code);
@@ -756,5 +774,40 @@ mod tests {
 
         let config = Config::default();
         assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);
+    }
+
+    #[test]
+    fn classify_unsupported_platform_maps_to_data_error() {
+        let e = download::OxlintError::UnsupportedPlatform {
+            os: "solaris",
+            arch: "sparc",
+        };
+        let (code, next_step) = e.classify();
+        assert_eq!(code, ErrorCode::DataError);
+        assert!(
+            next_step.contains("npm"),
+            "next_step should suggest npm fallback: {next_step}"
+        );
+    }
+
+    #[test]
+    fn classify_network_failure_maps_to_io_error() {
+        let e = download::OxlintError::NetworkFailure(String::from("dns lookup failed"));
+        let (code, _) = e.classify();
+        assert_eq!(code, ErrorCode::IoError);
+    }
+
+    #[test]
+    fn classify_extract_failure_maps_to_io_error() {
+        let e = download::OxlintError::ExtractFailure(String::from("disk full"));
+        let (code, _) = e.classify();
+        assert_eq!(code, ErrorCode::IoError);
+    }
+
+    #[test]
+    fn classify_cache_dir_unavailable_maps_to_io_error() {
+        let e = download::OxlintError::CacheDirUnavailable;
+        let (code, _) = e.classify();
+        assert_eq!(code, ErrorCode::IoError);
     }
 }
