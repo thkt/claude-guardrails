@@ -61,6 +61,7 @@ define_rule_config! {
     raw_html          => "rawHtml",
     open_redirect     => "openRedirect",
     ast_security      => "astSecurity",
+    cot_leakage_marker => "cotLeakageMarker",
 }
 
 #[derive(Debug, Clone, PartialEq)]
