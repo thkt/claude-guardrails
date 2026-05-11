@@ -1,5 +1,7 @@
+use crate::envelope::ErrorCode;
 use crate::resolve::run_with_timeout;
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -8,6 +10,61 @@ use std::process::Command;
 const OXLINT_VERSION: &str = "1.56.0";
 
 const DOWNLOAD_BASE: &str = "https://github.com/oxc-project/oxc/releases/download";
+
+#[derive(Debug)]
+pub enum OxlintError {
+    CacheDirUnavailable,
+    UnsupportedPlatform {
+        os: &'static str,
+        arch: &'static str,
+    },
+    NetworkFailure(String),
+    ExtractFailure(String),
+}
+
+impl OxlintError {
+    pub fn classify(&self) -> (ErrorCode, &'static str) {
+        match self {
+            Self::UnsupportedPlatform { .. } => (
+                ErrorCode::DataError,
+                "Install oxlint manually via npm install -g oxlint",
+            ),
+            Self::NetworkFailure(_) => (
+                ErrorCode::IoError,
+                "Check network connectivity or install oxlint manually via npm",
+            ),
+            Self::ExtractFailure(_) => (
+                ErrorCode::IoError,
+                "Check disk space and filesystem permissions in the cache dir",
+            ),
+            Self::CacheDirUnavailable => (
+                ErrorCode::IoError,
+                "Set XDG_CACHE_HOME or HOME environment variable",
+            ),
+        }
+    }
+}
+
+impl fmt::Display for OxlintError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CacheDirUnavailable => {
+                write!(
+                    f,
+                    "no cache directory available (set XDG_CACHE_HOME or HOME)"
+                )
+            }
+            Self::UnsupportedPlatform { os, arch } => {
+                write!(
+                    f,
+                    "unsupported platform for oxlint download (os={os}, arch={arch})"
+                )
+            }
+            Self::NetworkFailure(e) => write!(f, "oxlint download failed: {e}"),
+            Self::ExtractFailure(e) => write!(f, "oxlint extract failed: {e}"),
+        }
+    }
+}
 
 fn detect_platform() -> Option<&'static str> {
     match (env::consts::OS, env::consts::ARCH) {
@@ -35,29 +92,25 @@ fn default_cache_dir() -> Option<PathBuf> {
     Some(cache_base.join("guardrails/bin"))
 }
 
-pub fn ensure_oxlint() -> Option<PathBuf> {
-    let cache = default_cache_dir()?;
+pub fn ensure_oxlint() -> Result<PathBuf, OxlintError> {
+    let cache = default_cache_dir().ok_or(OxlintError::CacheDirUnavailable)?;
     ensure_oxlint_with(&cache, fetch_url)
 }
 
-fn ensure_oxlint_with<F>(cache: &Path, fetch: F) -> Option<PathBuf>
+fn ensure_oxlint_with<F>(cache: &Path, fetch: F) -> Result<PathBuf, OxlintError>
 where
-    F: FnOnce(&str) -> Option<Vec<u8>>,
+    F: FnOnce(&str) -> Result<Vec<u8>, OxlintError>,
 {
     let version = OXLINT_VERSION;
     let target = cache.join(format!("oxlint-{version}"));
 
     if target.exists() {
-        return Some(target);
+        return Ok(target);
     }
 
-    let platform = detect_platform().or_else(|| {
-        eprintln!(
-            "guardrails: unsupported platform for oxlint download (os={}, arch={})",
-            env::consts::OS,
-            env::consts::ARCH
-        );
-        None
+    let platform = detect_platform().ok_or(OxlintError::UnsupportedPlatform {
+        os: env::consts::OS,
+        arch: env::consts::ARCH,
     })?;
 
     let url = download_url(version, platform);
@@ -67,48 +120,38 @@ where
 
 const MAX_DOWNLOAD_SIZE: u64 = 50_000_000;
 
-fn fetch_url(url: &str) -> Option<Vec<u8>> {
+fn fetch_url(url: &str) -> Result<Vec<u8>, OxlintError> {
     eprintln!("guardrails: downloading oxlint v{OXLINT_VERSION}...");
     let resp = ureq::get(url)
         .call()
-        .map_err(|e| {
-            eprintln!("guardrails: oxlint download failed: {e}");
-        })
-        .ok()?;
+        .map_err(|e| OxlintError::NetworkFailure(e.to_string()))?;
 
     let mut bytes = Vec::new();
     resp.into_body()
         .into_reader()
         .take(MAX_DOWNLOAD_SIZE)
         .read_to_end(&mut bytes)
-        .map_err(|e| {
-            eprintln!("guardrails: oxlint download read error: {e}");
-        })
-        .ok()?;
-    Some(bytes)
+        .map_err(|e| OxlintError::NetworkFailure(e.to_string()))?;
+    Ok(bytes)
 }
 
-fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Option<PathBuf> {
-    fs::create_dir_all(cache)
-        .map_err(|e| {
-            eprintln!(
-                "guardrails: failed to create cache dir {}: {e}",
-                cache.display()
-            )
-        })
-        .ok()?;
+fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Result<PathBuf, OxlintError> {
+    fs::create_dir_all(cache).map_err(|e| {
+        OxlintError::ExtractFailure(format!(
+            "failed to create cache dir {}: {e}",
+            cache.display()
+        ))
+    })?;
 
     let tar_path = cache.join(format!("oxlint-{version}.tar.gz"));
     let target = cache.join(format!("oxlint-{version}"));
 
-    fs::write(&tar_path, bytes)
-        .map_err(|e| {
-            eprintln!(
-                "guardrails: failed to write archive {}: {e}",
-                tar_path.display()
-            )
-        })
-        .ok()?;
+    fs::write(&tar_path, bytes).map_err(|e| {
+        OxlintError::ExtractFailure(format!(
+            "failed to write archive {}: {e}",
+            tar_path.display()
+        ))
+    })?;
 
     let output = run_with_timeout(
         Command::new("tar")
@@ -121,21 +164,22 @@ fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Option<PathBuf
 
     let _ = fs::remove_file(&tar_path);
 
-    let output = output?;
+    let output = output.ok_or_else(|| {
+        OxlintError::ExtractFailure(String::from("tar invocation failed or timed out"))
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("guardrails: failed to extract oxlint archive: {stderr}");
-        return None;
+        return Err(OxlintError::ExtractFailure(format!(
+            "tar exited non-zero: {stderr}"
+        )));
     }
 
     let extracted = cache.join("oxlint");
     if extracted != target {
-        fs::rename(&extracted, &target)
-            .map_err(|e| {
-                eprintln!("guardrails: failed to rename oxlint binary: {e}");
-                let _ = fs::remove_file(&extracted);
-            })
-            .ok()?;
+        fs::rename(&extracted, &target).map_err(|e| {
+            let _ = fs::remove_file(&extracted);
+            OxlintError::ExtractFailure(format!("failed to rename oxlint binary: {e}"))
+        })?;
     }
 
     #[cfg(unix)]
@@ -146,7 +190,7 @@ fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Option<PathBuf
         }
     }
 
-    Some(target)
+    Ok(target)
 }
 
 #[cfg(test)]
@@ -205,15 +249,19 @@ mod tests {
         fs::write(&bin, "fake").unwrap();
 
         let result = ensure_oxlint_with(tmp.path(), |_| panic!("should not download"));
-        assert_eq!(result, Some(bin));
+        assert_eq!(result.unwrap(), bin);
     }
 
-    // T-005: network failure → None
+    // T-005: network failure → NetworkFailure error
     #[test]
-    fn returns_none_on_fetch_failure() {
+    fn returns_network_failure_on_fetch_error() {
         let tmp = TempDir::new().unwrap();
-        let result = ensure_oxlint_with(tmp.path(), |_| None);
-        assert!(result.is_none());
+        let result = ensure_oxlint_with(tmp.path(), |_| {
+            Err(OxlintError::NetworkFailure(String::from(
+                "simulated DNS error",
+            )))
+        });
+        assert!(matches!(result, Err(OxlintError::NetworkFailure(_))));
     }
 
     // T-004: download + extract + cache
@@ -243,9 +291,7 @@ mod tests {
             .success());
         let tar_bytes = fs::read(&tar).unwrap();
 
-        let result = ensure_oxlint_with(tmp.path(), |_| Some(tar_bytes));
-        assert!(result.is_some());
-
+        let result = ensure_oxlint_with(tmp.path(), |_| Ok(tar_bytes));
         let cached = result.unwrap();
         assert!(cached.exists());
         assert!(

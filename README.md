@@ -113,10 +113,15 @@ Use it to:
 - Warm the cache in CI before tests run
 - Pre-stage on a connected machine for air-gap deployment (then copy `~/.cache/guardrails/bin/`)
 
-| Outcome                                              | Exit |
-| ---------------------------------------------------- | ---- |
-| Already cached or downloaded successfully            | 0    |
-| Download failed (network or unsupported platform)    | 1    |
+| Outcome                                              | Exit | `error.code`     |
+| ---------------------------------------------------- | ---- | ---------------- |
+| Already cached or downloaded successfully            | 0    | (none)           |
+| Unsupported platform (e.g. Windows / non-amd64)      | 65   | `DATA_ERROR`     |
+| Network failure (download / read error)              | 74   | `IO_ERROR`       |
+| Extract failure (tar / cache write / rename)         | 74   | `IO_ERROR`       |
+| Cache directory unavailable (no `XDG_CACHE_HOME` / `HOME`) | 74   | `IO_ERROR`       |
+
+> **BREAKING (v0.15+)**: `prefetch` exit codes changed from `0` / `1` to sysexits.h values (`0` / `65` / `74`). Pass `--json` to receive a structured `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) on failure. The hook mode (`0` / `2`) contract is unaffected.
 
 ### AI-Tuned Deny Rules
 
@@ -190,12 +195,14 @@ Calling `guardrails` with no subcommand enters **hook mode** (reads tool input J
 
 ## Exit Codes
 
-| Code | Meaning                                     |
-| ---- | ------------------------------------------- |
-| 0    | Pass (no blocking violations) or successful subcommand |
-| 1    | I/O error / invalid JSON input / prefetch failure |
-| 2    | Blocking violations found (Claude Code halts the tool call) |
-| 64   | Usage error (clap parse failure, sysexits.h `EX_USAGE`) |
+| Code | Meaning                                                                            |
+| ---- | ---------------------------------------------------------------------------------- |
+| 0    | Pass (no blocking violations) or successful subcommand                             |
+| 1    | Hook stdin I/O / JSON parse failure                                                |
+| 2    | Blocking violations found (Claude Code halts the tool call) or oversized hook input |
+| 64   | Usage error (clap parse failure, sysexits.h `EX_USAGE`)                            |
+| 65   | Subcommand data error (e.g. `prefetch` on unsupported platform, `EX_DATAERR`)      |
+| 74   | Subcommand I/O error (e.g. `prefetch` network / extract failure, `EX_IOERR`)       |
 
 ## JSON Output Mode
 
