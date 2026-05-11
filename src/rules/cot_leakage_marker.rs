@@ -14,7 +14,7 @@ pub fn rule() -> Rule {
             // Self-exclusion: this file legitimately contains every marker as literal
             // for detection and tests. Without skipping, any future edit to this rule
             // would be blocked by itself.
-            if file_path.ends_with("cot_leakage_marker.rs") {
+            if file_path.ends_with("src/rules/cot_leakage_marker.rs") {
                 return Vec::new();
             }
             let mut violations = Vec::new();
@@ -25,7 +25,7 @@ pub fn rule() -> Rule {
                             rule: super::rule_id::COT_LEAKAGE_MARKER.to_owned(),
                             severity: Severity::High,
                             fix: format!(
-                                "AI CoT leakage marker '{}' detected (likely model output contamination). Remove before writing.",
+                                "AI CoT leakage marker '{}' detected. Remove before writing.",
                                 marker
                             ),
                             file: file_path.to_owned(),
@@ -55,7 +55,7 @@ mod tests {
     #[test]
     fn detects_to_functions_marker() {
         let v = check("to=functions.run", "/src/app.ts");
-        assert_eq!(v.len(), 1, "expected 1 violation, got: {:?}", v);
+        assert_eq!(v.len(), 1);
         assert_eq!(v[0].severity, Severity::High);
         assert_eq!(v[0].rule, "cot-leakage-marker");
     }
@@ -179,6 +179,17 @@ mod tests {
         assert!(
             v.is_empty(),
             "rule's own source file must be skipped to allow editing"
+        );
+    }
+
+    // T-014: bare filename match alone does not skip (full src/rules/ path required)
+    #[test]
+    fn does_not_skip_bare_filename_match() {
+        let v = check("<thinking>", "/some/other/path/cot_leakage_marker.rs");
+        assert_eq!(
+            v.len(),
+            1,
+            "files merely ending in cot_leakage_marker.rs (e.g. unrelated copies, fixtures, or other crates) must still be scanned"
         );
     }
 }
