@@ -4,6 +4,7 @@ mod cot_leakage_marker;
 mod crypto_weak;
 mod dom_access;
 mod eval;
+mod expression_injection;
 mod flaky_test;
 mod generated_file;
 mod hardcoded_secrets;
@@ -57,6 +58,7 @@ pub(crate) mod rule_id {
     pub const DANGEROUS_INNER_HTML: &str = "dangerous-inner-html";
     pub const MATH_RANDOM_INSECURE: &str = "math-random-insecure";
     pub const COT_LEAKAGE_MARKER: &str = "cot-leakage-marker";
+    pub const EXPRESSION_INJECTION: &str = "expression-injection";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
@@ -211,6 +213,7 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         raw_html          => raw_html,
         open_redirect     => open_redirect,
         cot_leakage_marker => cot_leakage_marker,
+        expression_injection => expression_injection,
     );
     rules
 }
@@ -348,7 +351,7 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 20);
+        assert_eq!(rules.len(), 21);
     }
 
     #[test]
