@@ -62,6 +62,7 @@ define_rule_config! {
     open_redirect     => "openRedirect",
     ast_security      => "astSecurity",
     cot_leakage_marker => "cotLeakageMarker",
+    expression_injection => "expressionInjection",
 }
 
 #[derive(Debug, Clone, PartialEq)]
