@@ -82,12 +82,12 @@ fn violation_exits_two() {
 }
 
 #[test]
-fn invalid_json_exits_one() {
+fn invalid_json_exits_input_error() {
     let output = run_guardrails_json("not json");
     assert_eq!(
         output.status.code(),
-        Some(1),
-        "stderr: {}",
+        Some(64),
+        "expected 64 for invalid hook JSON; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -242,7 +242,7 @@ fn non_js_file_skips_js_rules() {
 }
 
 #[test]
-fn oversized_input_exits_two() {
+fn oversized_input_exits_input_error() {
     let content = "x".repeat(10_000_000);
     let json = format!(
         r#"{{"tool_name":"Write","tool_input":{{"file_path":"/src/app.ts","content":"{}"}}}}"#,
@@ -251,8 +251,8 @@ fn oversized_input_exits_two() {
     let output = run_guardrails(json.as_bytes());
     assert_eq!(
         output.status.code(),
-        Some(2),
-        "stderr: {}",
+        Some(64),
+        "expected 64 for oversized hook input; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -298,7 +298,7 @@ fn unknown_tool_with_content_warns() {
 }
 
 #[test]
-fn warning_only_exits_zero_with_stderr() {
+fn warning_only_exits_advisory_with_stderr() {
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
@@ -309,8 +309,8 @@ fn warning_only_exits_zero_with_stderr() {
     let output = run_guardrails_json(&json.to_string());
     assert_eq!(
         output.status.code(),
-        Some(0),
-        "expected exit 0 for medium-severity-only, stderr: {}",
+        Some(1),
+        "expected 1 (warning only) when there are no blocking violations; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -510,7 +510,7 @@ fn json_mode_clean_emits_allow_decision() {
 }
 
 #[test]
-fn json_mode_warning_only_emits_allow_with_violations() {
+fn json_mode_warning_only_keeps_allow_decision() {
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
@@ -519,7 +519,11 @@ fn json_mode_warning_only_emits_allow_with_violations() {
         }
     });
     let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
-    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "expected 1 (warning only) — the JSON decision field still tracks blocking violations only, so it stays 'allow'"
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
@@ -592,7 +596,11 @@ fn json_mode_missing_content_emits_allow() {
 #[test]
 fn json_mode_invalid_json_emits_error_envelope() {
     let output = run_guardrails_with_args(b"not json", &["--json"]);
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        output.status.code(),
+        Some(64),
+        "expected 64 for invalid hook JSON"
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
@@ -618,7 +626,11 @@ fn json_mode_invalid_json_emits_error_envelope() {
 fn json_mode_oversized_input_emits_error_envelope() {
     let huge = vec![b'a'; 10_000_001];
     let output = run_guardrails_with_args(&huge, &["--json"]);
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        output.status.code(),
+        Some(64),
+        "expected 64 for oversized hook input"
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =

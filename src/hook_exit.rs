@@ -12,7 +12,6 @@
 //! human/agent-readable diagnostics; this enum maps to the process exit code
 //! Claude Code reads to decide between *allow / advisory / blocking*.
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookExitCode {
     Pass,

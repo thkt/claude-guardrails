@@ -121,7 +121,7 @@ Use it to:
 | Extract failure (tar / cache write / rename)         | 74   | `IO_ERROR`       |
 | Cache directory unavailable (no `XDG_CACHE_HOME` / `HOME`) | 74   | `IO_ERROR`       |
 
-> **BREAKING (v0.15+)**: `prefetch` exit codes changed from `0` / `1` to sysexits.h values (`0` / `65` / `74`). Pass `--json` to receive a structured `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) on failure. The hook mode (`0` / `2`) contract is unaffected.
+> **BREAKING (v0.15+)**: `prefetch` exit codes changed from `0` / `1` to sysexits.h values (`0` / `65` / `74`). Pass `--json` to receive a structured `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) on failure.
 
 ### AI-Tuned Deny Rules
 
@@ -195,14 +195,28 @@ Calling `guardrails` with no subcommand enters **hook mode** (reads tool input J
 
 ## Exit Codes
 
-| Code | Meaning                                                                            |
-| ---- | ---------------------------------------------------------------------------------- |
-| 0    | Pass (no blocking violations) or successful subcommand                             |
-| 1    | Hook stdin I/O / JSON parse failure                                                |
-| 2    | Blocking violations found (Claude Code halts the tool call) or oversized hook input |
-| 64   | Usage error (clap parse failure, sysexits.h `EX_USAGE`)                            |
-| 65   | Subcommand data error (e.g. `prefetch` on unsupported platform, `EX_DATAERR`)      |
-| 74   | Subcommand I/O error (e.g. `prefetch` network / extract failure, `EX_IOERR`)       |
+Claude Code reads the exit code to decide whether to pass, surface a warning to the AI, or halt the tool call.
+
+### Hook mode (no subcommand)
+
+| Code | Meaning                                                                       |
+| ---- | ----------------------------------------------------------------------------- |
+| 0    | Pass — no violations                                                                          |
+| 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI            |
+| 2    | Blocked — violations matching `severity.blockOn` (default: `critical`, `high`), tool halted   |
+| 64   | Hook input error — malformed JSON, oversized payload, or clap usage failure                   |
+| 70   | Internal error — panic or invariant violation (fail-closed)                                   |
+
+### Subcommands (`prefetch`)
+
+| Code | Meaning                                                              |
+| ---- | -------------------------------------------------------------------- |
+| 0    | Success                                                              |
+| 64   | Usage error (clap parse failure)                                     |
+| 65   | Data error (unsupported platform)                                    |
+| 74   | I/O error (network / extract / cache failure)                        |
+
+> **BREAKING (v0.16+)**: Non-blocking severity violations (not matching `severity.blockOn`) now exit `1` (was `0`). Hook stdin / JSON / oversized input failures now exit `64` (was `1` or `2`). Internal panics now exit `70`. The JSON `decision` field (`allow` / `block`) is unchanged — it still tracks blocking violations only.
 
 ## JSON Output Mode
 
@@ -248,7 +262,7 @@ guardrails --json < tool-call.json
 
 ### Error envelope
 
-When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO failure), guardrails emits an `ErrorEnvelope` on stdout. Hook exit codes (`1` / `2`) are preserved.
+When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO failure), guardrails emits an `ErrorEnvelope` on stdout and exits `64` (hook input error).
 
 ```json
 {

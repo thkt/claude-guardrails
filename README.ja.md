@@ -123,7 +123,7 @@ guardrails prefetch
 | 展開失敗 (tar / cache 書き込み / rename)                          | 74   | `IO_ERROR`       |
 | キャッシュディレクトリ未利用可 (`XDG_CACHE_HOME` / `HOME` 不在)   | 74   | `IO_ERROR`       |
 
-> **BREAKING (v0.15+)**: `prefetch` の終了コードが `0` / `1` から sysexits.h 値 (`0` / `65` / `74`) に変更されました。`--json` を渡すと失敗時に構造化 `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) が返されます。hook モード (`0` / `2`) には影響しません。
+> **BREAKING (v0.15+)**: `prefetch` の終了コードが `0` / `1` から sysexits.h 値 (`0` / `65` / `74`) に変更されました。`--json` を渡すと失敗時に構造化 `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) が返されます。
 
 ### AI向けdenyルール
 
@@ -197,14 +197,28 @@ Options:
 
 ## 終了コード
 
-| コード | 意味                                                                                  |
-| ------ | ------------------------------------------------------------------------------------- |
-| 0      | チェック合格、またはサブコマンド成功                                                  |
-| 1      | hook stdin の I/O / JSON parse 失敗                                                   |
-| 2      | ブロッキング違反検出（Claude Code が tool 呼び出しを停止） / hook 入力サイズ超過      |
-| 64     | 使用方法エラー（clap parse 失敗、sysexits.h `EX_USAGE`）                              |
-| 65     | サブコマンド データエラー（例: `prefetch` 非対応プラットフォーム、`EX_DATAERR`）      |
-| 74     | サブコマンド I/O エラー（例: `prefetch` ネットワーク / 展開失敗、`EX_IOERR`）         |
+Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警告を見せる / 停止する を決めます。
+
+### hook モード (サブコマンドなし)
+
+| コード | 意味                                                                              |
+| ------ | --------------------------------------------------------------------------------- |
+| 0      | 合格 — 違反なし                                                                              |
+| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される          |
+| 2      | ブロック — `severity.blockOn` (デフォルト: `critical`, `high`) に該当する違反、tool を停止   |
+| 64     | hook 入力エラー — JSON 不正、サイズ超過、または clap usage 失敗                              |
+| 70     | 内部エラー — panic / invariant 違反 (fail-closed)                                            |
+
+### サブコマンド (`prefetch`)
+
+| コード | 意味                                                              |
+| ------ | ----------------------------------------------------------------- |
+| 0      | 成功                                                              |
+| 64     | 使用方法エラー (clap parse 失敗)                                  |
+| 65     | データエラー (非対応プラットフォーム)                             |
+| 74     | I/O エラー (ネットワーク / 展開 / キャッシュ失敗)                 |
+
+> **BREAKING (v0.16+)**: 非 blocking severity 違反 (`severity.blockOn` に該当しないもの) は exit `1` を返すようになりました (旧 `0`)。hook stdin / JSON / サイズ超過 失敗は exit `64` (旧 `1` または `2`)。内部 panic は exit `70`。JSON の `decision` フィールド (`allow` / `block`) は変わりません — 引き続き blocking 違反のみを判定します。
 
 ## JSON 出力モード
 
@@ -250,7 +264,7 @@ guardrails --json < tool-call.json
 
 ### Error envelope
 
-`--json` 設定時に stdin が不正 (malformed JSON / oversized / IO 失敗) な場合、stdout に `ErrorEnvelope` が出力されます。hook の終了コード (`1` / `2`) は維持されます。
+`--json` 設定時に stdin が不正 (malformed JSON / oversized / IO 失敗) な場合、stdout に `ErrorEnvelope` が出力され、終了コード `64` (hook input error) で終了します。
 
 ```json
 {

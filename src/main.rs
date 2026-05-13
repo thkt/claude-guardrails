@@ -40,13 +40,18 @@ const SYSEXIT_USAGE: i32 = 64;
 Hook mode (no subcommand): reads tool input JSON from stdin and emits violations.
 With --json: emits a structured JSON report on stdout, human-readable on stderr.
 
-Exit codes:
-  0   Pass (no blocking violations) or successful subcommand
-  1   Hook I/O error or invalid JSON input
-  2   Blocking violations found (Claude Code halts the tool call)
-  64  Usage error (clap parse failure)
-  65  Data error (prefetch: unsupported platform)
-  74  I/O error (prefetch: download / extract / cache failure)"
+Exit codes (hook mode):
+  0   Pass — no violations
+  1   Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI
+  2   Blocked — violations matching severity.blockOn (default: critical, high), tool halted
+  64  Hook input error — invalid JSON, oversized payload, or clap usage failure
+  70  Internal error — panic / invariant violation, fail-closed
+
+Exit codes (prefetch subcommand):
+  0   Success
+  64  Usage error
+  65  Data error (unsupported platform)
+  74  I/O error (download / extract / cache failure)"
 )]
 struct Cli {
     /// Emit violations as a structured JSON report on stdout (hook mode only).
@@ -481,6 +486,7 @@ fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit
 
 // Fail-closed: reject oversized input rather than silently truncating.
 fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
+    let input_error_exit = i32::from(HookExitCode::InputError.code());
     let mut input_str = String::new();
     io::stdin()
         .take(MAX_INPUT_SIZE + 1)
@@ -491,7 +497,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
                 ErrorCode::IoError,
                 format!("failed to read stdin: {}", e),
                 "Pass valid Claude Code hook JSON via stdin",
-                1,
+                input_error_exit,
             )
         })?;
 
@@ -504,7 +510,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
                 MAX_INPUT_SIZE
             ),
             "Reduce input size or split into smaller hook calls",
-            2,
+            input_error_exit,
         ));
     }
 
@@ -514,7 +520,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
             ErrorCode::DataError,
             format!("invalid JSON input: {}", e),
             "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
-            1,
+            input_error_exit,
         )
     })
 }
@@ -701,11 +707,14 @@ fn run_hook(json_mode: bool) -> i32 {
 
     emit_json_if_enabled(json_mode, &blocking, &warnings, notes);
     emit_human_violations(&blocking, &warnings);
-    if blocking.is_empty() {
-        0
+    let outcome = if !blocking.is_empty() {
+        HookExitCode::Blocking
+    } else if !warnings.is_empty() {
+        HookExitCode::Advisory
     } else {
-        2
-    }
+        HookExitCode::Pass
+    };
+    i32::from(outcome.code())
 }
 
 fn install_panic_hook() {
