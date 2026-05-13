@@ -4,6 +4,9 @@ mod color;
 mod config;
 mod download;
 mod envelope;
+// Used by #55 (eval AST migration) — silence dead_code until wire-up lands.
+#[allow(dead_code)]
+mod import_map;
 mod oxlint;
 mod parse_json;
 mod reporter;
