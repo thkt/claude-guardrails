@@ -3,7 +3,7 @@ mod bundle_size;
 mod cot_leakage_marker;
 mod crypto_weak;
 mod dom_access;
-mod eval;
+pub(crate) mod eval;
 mod expression_injection;
 mod flaky_test;
 mod generated_file;
@@ -207,7 +207,6 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         test_assertion    => test_assertion,
         flaky_test        => flaky_test,
         sensitive_logging => sensitive_logging,
-        eval              => eval,
         hardcoded_secrets => hardcoded_secrets,
         http_resource     => http_resource,
         raw_html          => raw_html,
@@ -350,15 +349,15 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 20);
+        assert_eq!(rules.len(), 19);
     }
 
     #[test]
     fn load_rules_respects_disabled_rule() {
         let all_count = load_rules(&Config::default()).len();
         let mut config = Config::default();
-        config.rules.eval = false;
         config.rules.security = false;
+        config.rules.crypto_weak = false;
         let rules = load_rules(&config);
         assert_eq!(rules.len(), all_count - 2);
     }

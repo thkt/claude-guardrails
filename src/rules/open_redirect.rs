@@ -90,17 +90,6 @@ fn is_location_target(target: &AssignmentTarget) -> bool {
     }
 }
 
-fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
-    match expr {
-        Expression::StaticMemberExpression(sme) => Some((&sme.object, sme.property.name.as_str())),
-        Expression::ComputedMemberExpression(cme) => match &cme.expression {
-            Expression::StringLiteral(s) => Some((&cme.object, s.value.as_str())),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 fn matches_location_member(obj: &Expression, name: &str) -> bool {
     match name {
         "href" => is_location_expr(obj),
@@ -113,7 +102,8 @@ fn is_location_expr(expr: &Expression) -> bool {
     if matches!(expr, Expression::Identifier(id) if id.name == "location") {
         return true;
     }
-    member_name(expr).is_some_and(|(obj, name)| name == "location" && is_window_or_document(obj))
+    ast::member_name(expr)
+        .is_some_and(|(obj, name)| name == "location" && is_window_or_document(obj))
 }
 
 fn is_window_or_document(expr: &Expression) -> bool {
@@ -124,7 +114,7 @@ fn is_window_or_document(expr: &Expression) -> bool {
 }
 
 fn is_location_call(callee: &Expression) -> bool {
-    member_name(callee)
+    ast::member_name(callee)
         .is_some_and(|(obj, name)| matches!(name, "assign" | "replace") && is_location_expr(obj))
 }
 
