@@ -2,17 +2,6 @@ use super::{rule_id, Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE, RE_REA
 use regex::Regex;
 use std::sync::LazyLock;
 
-static RE_HTML_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.(jsx?|tsx?|html?)$").expect("RE_HTML_FILE: invalid regex"));
-
-static RE_DOC_WRITE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"document\.write\s*\(").expect("RE_DOC_WRITE: invalid regex"));
-static RE_INNER_HTML: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\.innerHTML\s*=\s*[^"'`\s;]"#).expect("RE_INNER_HTML: invalid regex")
-});
-static RE_OUTER_HTML: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\.outerHTML\s*=\s*[^"'`\s;]"#).expect("RE_OUTER_HTML: invalid regex")
-});
 static RE_SET_TIMEOUT_STR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"setTimeout\s*\(\s*['"`]"#).expect("RE_SET_TIMEOUT_STR: invalid regex")
 });
@@ -43,21 +32,7 @@ struct SecurityIssue {
     severity: Severity,
 }
 
-static SECURITY_ISSUES: [SecurityIssue; 9] = [
-    SecurityIssue {
-        pattern: &RE_DOC_WRITE,
-        file_pattern: &RE_HTML_FILE,
-        rule_id: rule_id::SECURITY,
-        fix: "Use createElement/appendChild instead",
-        severity: Severity::High,
-    },
-    SecurityIssue {
-        pattern: &RE_INNER_HTML,
-        file_pattern: &RE_HTML_FILE,
-        rule_id: rule_id::SECURITY,
-        fix: "Use textContent or DOMPurify.sanitize() instead",
-        severity: Severity::High,
-    },
+static SECURITY_ISSUES: [SecurityIssue; 6] = [
     SecurityIssue {
         pattern: &RE_SET_TIMEOUT_STR,
         file_pattern: &RE_JS_FILE,
@@ -78,13 +53,6 @@ static SECURITY_ISSUES: [SecurityIssue; 9] = [
         rule_id: rule_id::SECURITY,
         fix: "Specify exact target origin instead of '*'",
         severity: Severity::High,
-    },
-    SecurityIssue {
-        pattern: &RE_OUTER_HTML,
-        file_pattern: &RE_HTML_FILE,
-        rule_id: rule_id::SECURITY,
-        fix: "Use DOM methods instead",
-        severity: Severity::Medium,
     },
     SecurityIssue {
         pattern: &RE_LOCAL_STORAGE_SENSITIVE,
@@ -146,14 +114,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_html_injection() {
-        let inner = "el.innerHTML = x;";
-        let outer = "el.outerHTML = x;";
-        assert!(!check(inner, "/src/component.tsx").is_empty());
-        assert!(!check(outer, "/src/component.tsx").is_empty());
-    }
-
-    #[test]
     fn detects_code_injection() {
         let cases = ["setTimeout('alert(1)', 100);", "setInterval('fn()', 1000);"];
         for content in cases {
@@ -181,52 +141,12 @@ mod tests {
     #[test]
     fn allows_safe_patterns() {
         let cases = [
-            ("el.textContent = userInput;", "/src/component.tsx"),
             ("setTimeout(() => fn(), 100);", "/src/utils.ts"),
             ("localStorage.setItem('theme', 'dark');", "/src/utils.ts"),
         ];
         for (content, path) in cases {
             assert!(check(content, path).is_empty());
         }
-    }
-
-    #[test]
-    fn allows_innerhtml_string_literal() {
-        let content = r#"el.innerHTML = "<div>static</div>";"#;
-        assert!(check(content, "/src/component.tsx").is_empty());
-    }
-
-    #[test]
-    fn detects_innerhtml_variable() {
-        let content = "el.innerHTML = variable;";
-        assert!(!check(content, "/src/component.tsx").is_empty());
-    }
-
-    #[test]
-    fn allows_outerhtml_string_literal() {
-        let content = r#"el.outerHTML = "<span>text</span>";"#;
-        assert!(check(content, "/src/component.tsx").is_empty());
-    }
-
-    #[test]
-    fn detects_outerhtml_variable() {
-        let content = "el.outerHTML = variable;";
-        assert!(!check(content, "/src/component.tsx").is_empty());
-    }
-
-    #[test]
-    fn detects_document_write() {
-        let v = check("document.write(userInput);", "/src/render.tsx");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].severity, Severity::High);
-        assert!(v[0].fix.contains("createElement"));
-    }
-
-    // Known limitation: `"" + variable` starts with quote, so regex excludes it
-    #[test]
-    fn innerhtml_empty_string_concat_not_detected() {
-        let content = r#"el.innerHTML = "" + userInput;"#;
-        assert!(check(content, "/src/component.tsx").is_empty());
     }
 
     // T-007/T-008: detects_dangerously_set_inner_html_in_tsx_and_jsx

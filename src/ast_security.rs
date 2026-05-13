@@ -1,8 +1,9 @@
 use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BinaryOperator, CallExpression, Expression,
-    LogicalExpression, LogicalOperator, ObjectPropertyKind, Program, RegExpLiteral,
+    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
+    CallExpression, Expression, LogicalExpression, LogicalOperator, ObjectPropertyKind, Program,
+    RegExpLiteral,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -218,6 +219,50 @@ impl SecurityVisitor<'_> {
         );
     }
 
+    fn check_html_assignment(&mut self, expr: &AssignmentExpression) {
+        let AssignmentTarget::StaticMemberExpression(sme) = &expr.left else {
+            return;
+        };
+        let (severity, fix) = match sme.property.name.as_str() {
+            "innerHTML" => (
+                Severity::High,
+                "Use textContent or DOMPurify.sanitize() instead",
+            ),
+            "outerHTML" => (Severity::Medium, "Use DOM methods instead"),
+            _ => return,
+        };
+        if is_safe_html_value(&expr.right) {
+            return;
+        }
+        self.push_violation(rule_id::SECURITY, severity, fix, expr.span);
+    }
+
+    fn check_document_write(&mut self, call: &CallExpression) {
+        let Expression::StaticMemberExpression(sme) = &call.callee else {
+            return;
+        };
+        if !matches!(sme.property.name.as_str(), "write" | "writeln") {
+            return;
+        }
+        if !is_ident(&sme.object, "document") {
+            return;
+        }
+        if call
+            .arguments
+            .first()
+            .and_then(|a| a.as_expression())
+            .is_some_and(is_safe_html_value)
+        {
+            return;
+        }
+        self.push_violation(
+            rule_id::SECURITY,
+            Severity::High,
+            "Use createElement/appendChild instead",
+            call.span,
+        );
+    }
+
     fn check_math_random_insecure(&mut self, call: &CallExpression) {
         if self.is_test_file {
             return;
@@ -256,12 +301,18 @@ impl SecurityVisitor<'_> {
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        self.check_html_assignment(expr);
+        walk::walk_assignment_expression(self, expr);
+    }
+
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         self.check_err_stack(it);
         self.check_child_process(it);
         self.check_fs_path(it);
         self.check_non_literal_require(it);
         self.check_math_random_insecure(it);
+        self.check_document_write(it);
         walk::walk_call_expression(self, it);
     }
 
@@ -373,6 +424,19 @@ fn is_safe_path_arg(arg: &Argument) -> bool {
 
 fn is_static_template_literal(expr: &Expression) -> bool {
     matches!(expr, Expression::TemplateLiteral(tl) if tl.expressions.is_empty())
+}
+
+fn is_safe_html_value(expr: &Expression) -> bool {
+    match expr {
+        Expression::StringLiteral(_) => true,
+        _ if is_static_template_literal(expr) => true,
+        Expression::BinaryExpression(be) => {
+            matches!(be.operator, BinaryOperator::Addition)
+                && is_safe_html_value(&be.left)
+                && is_safe_html_value(&be.right)
+        }
+        _ => false,
+    }
 }
 
 fn is_static_path(expr: &Expression) -> bool {
@@ -971,6 +1035,113 @@ mod tests {
         assert_eq!(v.len(), 0);
     }
 
+    // T-019: detects_inner_html_variable_assignment
+    #[test]
+    fn detects_inner_html_variable_assignment() {
+        let v = check_js("el.innerHTML = userInput;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].severity, Severity::High);
+        assert!(v[0].fix.contains("textContent"));
+    }
+
+    // T-019: allows_inner_html_string_literal
+    #[test]
+    fn allows_inner_html_string_literal() {
+        assert!(check_js(r#"el.innerHTML = "<div>static</div>";"#).is_empty());
+    }
+
+    // T-019: allows_inner_html_static_template
+    #[test]
+    fn allows_inner_html_static_template() {
+        assert!(check_js("el.innerHTML = `<div>static</div>`;").is_empty());
+    }
+
+    // T-019: detects_inner_html_template_with_expression
+    #[test]
+    fn detects_inner_html_template_with_expression() {
+        let v = check_js("el.innerHTML = `<div>${userInput}</div>`;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+    }
+
+    // T-019: detects_inner_html_empty_string_concat (regex 版の known limitation を解消)
+    #[test]
+    fn detects_inner_html_empty_string_concat() {
+        let v = check_js(r#"el.innerHTML = "" + userInput;"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+    }
+
+    // T-019: allows_inner_html_concat_of_literals
+    #[test]
+    fn allows_inner_html_concat_of_literals() {
+        assert!(check_js(r#"el.innerHTML = "<div>" + "static" + "</div>";"#).is_empty());
+    }
+
+    // T-020: detects_outer_html_variable_assignment
+    #[test]
+    fn detects_outer_html_variable_assignment() {
+        let v = check_js("el.outerHTML = userInput;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].severity, Severity::Medium);
+        assert!(v[0].fix.contains("DOM methods"));
+    }
+
+    // T-020: allows_outer_html_string_literal
+    #[test]
+    fn allows_outer_html_string_literal() {
+        assert!(check_js(r#"el.outerHTML = "<span>text</span>";"#).is_empty());
+    }
+
+    // T-021: detects_document_write_variable
+    #[test]
+    fn detects_document_write_variable() {
+        let v = check_js("document.write(userInput);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].severity, Severity::High);
+        assert!(v[0].fix.contains("createElement"));
+    }
+
+    // T-021: detects_document_writeln_variable
+    #[test]
+    fn detects_document_writeln_variable() {
+        let v = check_js("document.writeln(userInput);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-021: allows_document_write_literal
+    #[test]
+    fn allows_document_write_literal() {
+        assert!(check_js(r#"document.write("<h1>hello</h1>");"#).is_empty());
+    }
+
+    // T-021: detects_document_write_concat_with_variable
+    #[test]
+    fn detects_document_write_concat_with_variable() {
+        let v = check_js(r#"document.write("<h1>" + title + "</h1>");"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+    }
+
+    // T-021: ignores_unrelated_document_method
+    #[test]
+    fn ignores_unrelated_document_method() {
+        assert!(check_js("document.getElementById('x');").is_empty());
+        assert!(check_js("document.createElement('div');").is_empty());
+    }
+
+    // T-021: ignores_non_document_write
+    #[test]
+    fn ignores_non_document_write() {
+        assert!(check_js("stream.write(userInput);").is_empty());
+        assert!(check_js("logger.write(userInput);").is_empty());
+    }
+
     // T-018: nfr001_performance_under_10ms
     #[test]
     fn nfr001_performance_under_10ms() {
@@ -987,6 +1158,9 @@ mod tests {
             "res.json({ stack: err.stack });\n",
             "const s = process.env.JWT_SECRET ?? 'fallback';\n",
             "const id = Math.random().toString(36).substring(2);\n",
+            "el.innerHTML = userInput;\n",
+            "el.outerHTML = `<span>${x}</span>`;\n",
+            "document.write(userInput);\n",
         );
         let start = Instant::now();
         let iterations = 100;
