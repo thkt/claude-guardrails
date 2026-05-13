@@ -1,4 +1,4 @@
-use crate::ast::{self, is_ident, is_static_template_literal};
+use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
@@ -144,7 +144,7 @@ impl SecurityVisitor<'_> {
             },
             _ => return,
         };
-        if !is_ident(obj, "fs") {
+        if !ast::is_ident(obj, "fs") {
             return;
         }
         let Some(first) = call.arguments.first() else {
@@ -244,7 +244,7 @@ impl SecurityVisitor<'_> {
         if !matches!(sme.property.name.as_str(), "write" | "writeln") {
             return;
         }
-        if !is_ident(&sme.object, "document") {
+        if !ast::is_ident(&sme.object, "document") {
             return;
         }
         if call
@@ -288,7 +288,7 @@ impl SecurityVisitor<'_> {
         let Expression::StaticMemberExpression(rand) = &inner.callee else {
             return;
         };
-        if !is_ident(&rand.object, "Math") || rand.property.name != "random" {
+        if !ast::is_ident(&rand.object, "Math") || rand.property.name != "random" {
             return;
         }
         self.push_violation(
@@ -334,7 +334,7 @@ fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
     let Expression::StaticMemberExpression(inner) = &outer.object else {
         return None;
     };
-    if !is_ident(&inner.object, "process") || inner.property.name != "env" {
+    if !ast::is_ident(&inner.object, "process") || inner.property.name != "env" {
         return None;
     }
     Some(outer.property.name.as_str())
@@ -352,7 +352,7 @@ fn is_response_call(callee: &Expression) -> bool {
     if method != "json" && method != "send" {
         return false;
     }
-    if is_ident(object, "res") || is_ident(object, "response") {
+    if ast::is_ident(object, "res") || ast::is_ident(object, "response") {
         return true;
     }
     let Expression::CallExpression(inner) = object else {
@@ -362,7 +362,7 @@ fn is_response_call(callee: &Expression) -> bool {
         return false;
     };
     inner_sme.property.name == "status"
-        && (is_ident(&inner_sme.object, "res") || is_ident(&inner_sme.object, "response"))
+        && (ast::is_ident(&inner_sme.object, "res") || ast::is_ident(&inner_sme.object, "response"))
 }
 
 fn arg_contains_stack(arg: &Argument) -> bool {
@@ -407,7 +407,9 @@ fn expr_contains_stack(expr: &Expression) -> bool {
 fn is_string_literal_arg(arg: &Argument) -> bool {
     match arg {
         Argument::StringLiteral(_) => true,
-        _ => arg.as_expression().is_some_and(is_static_template_literal),
+        _ => arg
+            .as_expression()
+            .is_some_and(ast::is_static_template_literal),
     }
 }
 
@@ -421,7 +423,7 @@ fn is_safe_path_arg(arg: &Argument) -> bool {
 fn is_safe_html_value(expr: &Expression) -> bool {
     match expr {
         Expression::StringLiteral(_) => true,
-        _ if is_static_template_literal(expr) => true,
+        _ if ast::is_static_template_literal(expr) => true,
         Expression::BinaryExpression(be) => {
             matches!(be.operator, BinaryOperator::Addition)
                 && is_safe_html_value(&be.left)
@@ -434,7 +436,7 @@ fn is_safe_html_value(expr: &Expression) -> bool {
 fn is_static_path(expr: &Expression) -> bool {
     match expr {
         Expression::StringLiteral(_) => true,
-        _ if is_static_template_literal(expr) => true,
+        _ if ast::is_static_template_literal(expr) => true,
         Expression::Identifier(id) => id.name == "__dirname" || id.name == "__filename",
         Expression::BinaryExpression(be) => {
             matches!(be.operator, BinaryOperator::Addition)
