@@ -162,6 +162,34 @@ fn edit_with_jsx_attribute_snippet_detects_via_full_file() {
 }
 
 #[test]
+fn edit_snippet_fallback_emits_degraded_true_in_json_envelope() {
+    // RC-001 regression: when full-file resolution fails (e.g., old_string not
+    // in file), the snippet fallback must mark the envelope as degraded so
+    // downstream consumers can distinguish full vs degraded analysis.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("file.ts");
+    fs::write(&path, "const a = 1;\n").unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": path.to_str().unwrap(),
+            "old_string": "pattern that does not match anywhere",
+            "new_string": "const safe = 2;"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(r#""degraded":true"#),
+        "expected degraded:true in JSON envelope, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Edit pattern not found"),
+        "expected reason note in envelope notes, got: {stdout}"
+    );
+}
+
+#[test]
 fn non_js_file_skips_js_rules() {
     let json = serde_json::json!({
         "tool_name": "Write",
