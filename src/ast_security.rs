@@ -1142,6 +1142,21 @@ mod tests {
         assert!(check_js("logger.write(userInput);").is_empty());
     }
 
+    // TC-007: document.write() with zero arguments is flagged. The absence of
+    // a safe literal arg means `is_some_and(is_safe_html_value)` returns false,
+    // matching the regex-parity behavior (regex also matched `document.write()`).
+    #[test]
+    fn detects_document_write_zero_args_intent() {
+        let v = check_js("document.write();");
+        assert_eq!(
+            v.len(),
+            1,
+            "zero-arg document.write() intentionally flagged"
+        );
+        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
     // T-018: nfr001_performance_under_10ms
     #[test]
     fn nfr001_performance_under_10ms() {
@@ -1161,6 +1176,9 @@ mod tests {
             "el.innerHTML = userInput;\n",
             "el.outerHTML = `<span>${x}</span>`;\n",
             "document.write(userInput);\n",
+            // TC-006: deeply-nested BinaryExpression to stress is_safe_html_value
+            // recursive descent on the safe-static path (all string literals).
+            "el.innerHTML = 'a' + 'b' + 'c' + 'd' + 'e' + 'f' + 'g' + 'h' + 'i' + 'j' + 'k' + 'l' + 'm' + 'n' + 'o' + 'p';\n",
         );
         let start = Instant::now();
         let iterations = 100;
