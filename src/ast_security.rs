@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::ast::{self, is_ident, is_static_template_literal};
 use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
@@ -340,10 +340,6 @@ fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
     Some(outer.property.name.as_str())
 }
 
-fn is_ident(expr: &Expression, name: &str) -> bool {
-    matches!(expr, Expression::Identifier(id) if id.name == name)
-}
-
 fn is_response_call(callee: &Expression) -> bool {
     let (object, method) = match callee {
         Expression::StaticMemberExpression(sme) => (&sme.object, sme.property.name.as_str()),
@@ -420,10 +416,6 @@ fn is_safe_path_arg(arg: &Argument) -> bool {
         Argument::StringLiteral(_) => true,
         _ => arg.as_expression().is_some_and(is_static_path),
     }
-}
-
-fn is_static_template_literal(expr: &Expression) -> bool {
-    matches!(expr, Expression::TemplateLiteral(tl) if tl.expressions.is_empty())
 }
 
 fn is_safe_html_value(expr: &Expression) -> bool {

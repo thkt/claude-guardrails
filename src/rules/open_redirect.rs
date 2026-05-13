@@ -99,7 +99,7 @@ fn matches_location_member(obj: &Expression, name: &str) -> bool {
 }
 
 fn is_location_expr(expr: &Expression) -> bool {
-    if matches!(expr, Expression::Identifier(id) if id.name == "location") {
+    if ast::is_ident(expr, "location") {
         return true;
     }
     ast::member_name(expr)
@@ -107,10 +107,7 @@ fn is_location_expr(expr: &Expression) -> bool {
 }
 
 fn is_window_or_document(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::Identifier(id) if id.name == "window" || id.name == "document"
-    )
+    ast::is_ident(expr, "window") || ast::is_ident(expr, "document")
 }
 
 fn is_location_call(callee: &Expression) -> bool {
