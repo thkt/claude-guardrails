@@ -4,8 +4,6 @@ mod color;
 mod config;
 mod download;
 mod envelope;
-// Used by #55 (eval AST migration) — silence dead_code until wire-up lands.
-#[allow(dead_code)]
 mod import_map;
 mod oxlint;
 mod parse_json;
@@ -181,6 +179,15 @@ fn lint_with_ast(
                 file_path,
             ));
         }
+        if config.rules.eval {
+            let import_map = import_map::ImportMap::build(program);
+            found.extend(rules::eval::check_program(
+                program,
+                line_offsets,
+                file_path,
+                &import_map,
+            ));
+        }
         found
     });
     match result {
@@ -218,8 +225,10 @@ fn collect_violations(
         violations.extend(rule.check(content, file_path, &lines));
     }
 
-    let has_ast_rules =
-        config.rules.ast_security || config.rules.no_use_effect || config.rules.open_redirect;
+    let has_ast_rules = config.rules.ast_security
+        || config.rules.no_use_effect
+        || config.rules.open_redirect
+        || config.rules.eval;
     if is_js && has_ast_rules {
         let (vs, note) = lint_with_ast(content, file_path, config);
         violations.extend(vs);

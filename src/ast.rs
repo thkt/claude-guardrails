@@ -1,6 +1,6 @@
 use crate::scanner;
 use oxc_allocator::Allocator;
-use oxc_ast::ast::Program;
+use oxc_ast::ast::{Expression, Program};
 use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
 
@@ -24,6 +24,18 @@ pub fn with_parsed_program<R>(
 #[allow(clippy::cast_possible_truncation)]
 pub fn span_to_line(offsets: &[usize], span: Span) -> u32 {
     scanner::offset_to_line(offsets, span.start as usize) as u32
+}
+
+/// Unwraps `obj.prop` and `obj["prop"]` (string-literal key only) to `(object, name)`.
+pub fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
+    match expr {
+        Expression::StaticMemberExpression(sme) => Some((&sme.object, sme.property.name.as_str())),
+        Expression::ComputedMemberExpression(cme) => match &cme.expression {
+            Expression::StringLiteral(s) => Some((&cme.object, s.value.as_str())),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 #[cfg(test)]
