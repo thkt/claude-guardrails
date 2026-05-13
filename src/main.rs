@@ -226,10 +226,16 @@ fn read_file_capped(file_path: &str) -> ContentResolution {
     if let Err(e) = file.take(MAX_INPUT_SIZE + 1).read_to_string(&mut buf) {
         return ContentResolution::Degraded(io_error_to_reason(&e));
     }
-    if buf.len() as u64 > MAX_INPUT_SIZE {
+    if !content_within_cap(&buf, MAX_INPUT_SIZE) {
         return ContentResolution::Degraded(DegradedReason::OversizedFile);
     }
     ContentResolution::Full(buf)
+}
+
+/// Pure size-cap predicate. Cap is parameterized so the boundary is
+/// testable with small fixtures (no 10MB allocation required).
+fn content_within_cap(content: &str, cap: u64) -> bool {
+    u64::try_from(content.len()).is_ok_and(|n| n <= cap)
 }
 
 fn io_error_to_reason(e: &io::Error) -> DegradedReason {
@@ -430,7 +436,7 @@ fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit
 // Fail-closed: reject oversized input rather than silently truncating.
 fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
     let mut input_str = String::new();
-    let bytes_read = io::stdin()
+    io::stdin()
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
         .map_err(|e| {
@@ -443,7 +449,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
             )
         })?;
 
-    if bytes_read as u64 > MAX_INPUT_SIZE {
+    if !content_within_cap(&input_str, MAX_INPUT_SIZE) {
         return Err(fail(
             json_mode,
             ErrorCode::DataError,
@@ -963,6 +969,32 @@ mod tests {
             read_file_capped(path.to_str().unwrap()),
             ContentResolution::Degraded(DegradedReason::NonUtf8Content)
         ));
+    }
+
+    #[test]
+    fn content_within_cap_accepts_empty() {
+        assert!(content_within_cap("", 100));
+    }
+
+    #[test]
+    fn content_within_cap_accepts_one_byte_under_cap() {
+        assert!(content_within_cap(&"a".repeat(99), 100));
+    }
+
+    #[test]
+    fn content_within_cap_accepts_at_exact_cap() {
+        assert!(content_within_cap(&"a".repeat(100), 100));
+    }
+
+    #[test]
+    fn content_within_cap_rejects_one_byte_over_cap() {
+        assert!(!content_within_cap(&"a".repeat(101), 100));
+    }
+
+    #[test]
+    fn content_within_cap_accepts_zero_cap_only_for_empty() {
+        assert!(content_within_cap("", 0));
+        assert!(!content_within_cap("a", 0));
     }
 
     #[test]
