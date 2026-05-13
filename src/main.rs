@@ -209,14 +209,33 @@ fn apply_edit(
     new_string: &str,
     replace_all: bool,
 ) -> Option<String> {
-    if old_string.is_empty() || !file_content.contains(old_string) {
+    if old_string.is_empty() {
         return None;
     }
-    Some(if replace_all {
-        file_content.replace(old_string, new_string)
+    if replace_all {
+        let mut matched = false;
+        let mut result = String::with_capacity(file_content.len());
+        let mut cursor = 0;
+        for (idx, _) in file_content.match_indices(old_string) {
+            matched = true;
+            result.push_str(&file_content[cursor..idx]);
+            result.push_str(new_string);
+            cursor = idx + old_string.len();
+        }
+        if !matched {
+            return None;
+        }
+        result.push_str(&file_content[cursor..]);
+        Some(result)
     } else {
-        file_content.replacen(old_string, new_string, 1)
-    })
+        let idx = file_content.find(old_string)?;
+        let mut result =
+            String::with_capacity(file_content.len() + new_string.len() - old_string.len());
+        result.push_str(&file_content[..idx]);
+        result.push_str(new_string);
+        result.push_str(&file_content[idx + old_string.len()..]);
+        Some(result)
+    }
 }
 
 /// Bound on-disk file read at MAX_INPUT_SIZE to mirror the stdin cap.
