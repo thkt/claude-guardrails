@@ -436,7 +436,7 @@ fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit
 // Fail-closed: reject oversized input rather than silently truncating.
 fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
     let mut input_str = String::new();
-    let bytes_read = io::stdin()
+    io::stdin()
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
         .map_err(|e| {
@@ -449,7 +449,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
             )
         })?;
 
-    if bytes_read as u64 > MAX_INPUT_SIZE {
+    if !content_within_cap(&input_str, MAX_INPUT_SIZE) {
         return Err(fail(
             json_mode,
             ErrorCode::DataError,
