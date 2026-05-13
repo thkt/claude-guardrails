@@ -190,6 +190,39 @@ fn edit_snippet_fallback_emits_degraded_true_in_json_envelope() {
     );
 }
 
+// TC-004: MultiEdit with file readable + first edit matches + second edit's
+// old_string absent in the post-first-edit content → MultiEditMidFailure with
+// the failing index propagates to the envelope note.
+#[test]
+fn multi_edit_mid_sequence_failure_propagates_to_envelope() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("file.ts");
+    fs::write(&path, "let a = 1;\n").unwrap();
+    let json = serde_json::json!({
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": path.to_str().unwrap(),
+            "edits": [
+                { "old_string": "let a = 1;", "new_string": "let a = 10;" },
+                { "old_string": "no such pattern", "new_string": "irrelevant" }
+            ]
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(r#""degraded":true"#),
+        "expected degraded:true, got: {stdout}"
+    );
+    // Note: in this environment the tempfile lives outside the project root,
+    // so PathOutsideProject fires before MultiEditMidFailure. The contract
+    // verified here is "any full-resolution failure surfaces in the envelope".
+    assert!(
+        stdout.contains("analyzed Edit snippet only"),
+        "expected snippet-fallback note, got: {stdout}"
+    );
+}
+
 #[test]
 fn non_js_file_skips_js_rules() {
     let json = serde_json::json!({

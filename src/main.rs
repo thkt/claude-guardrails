@@ -866,6 +866,29 @@ mod tests {
         assert!(apply_edit("foo", "", "X", true).is_none());
     }
 
+    // TC-001: self-referential new_string. Rust `str::replace` does NOT
+    // re-scan already-replaced output, so a `new_string` containing the
+    // `old_string` does not cascade. Documenting this invariant.
+    #[test]
+    fn apply_edit_self_referential_new_string_does_not_cascade() {
+        let got = apply_edit("a a", "a", "aa", false).unwrap();
+        assert_eq!(got, "aa a", "replacen replaces only first occurrence");
+        let got_all = apply_edit("a a", "a", "aa", true).unwrap();
+        assert_eq!(got_all, "aa aa", "replace does not re-scan output");
+    }
+
+    // TC-008: empty `new_string` is a valid deletion operation.
+    #[test]
+    fn apply_edit_deletion_with_empty_new_string() {
+        let got = apply_edit("foo bar", "foo ", "", false).unwrap();
+        assert_eq!(
+            got, "bar",
+            "deletes old_string including trailing whitespace"
+        );
+        let got_all = apply_edit("a-x-b-x-c", "x", "", true).unwrap();
+        assert_eq!(got_all, "a--b--c", "replace_all deletes every occurrence");
+    }
+
     #[test]
     fn edit_reads_full_file_and_applies_substitution() {
         let tmp = tempfile::TempDir::new().unwrap();
