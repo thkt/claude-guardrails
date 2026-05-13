@@ -11,7 +11,7 @@ mod hardcoded_secrets;
 mod http_resource;
 mod naming;
 pub(crate) mod no_use_effect;
-mod open_redirect;
+pub(crate) mod open_redirect;
 mod raw_html;
 mod security;
 mod sensitive_file;
@@ -211,7 +211,6 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         hardcoded_secrets => hardcoded_secrets,
         http_resource     => http_resource,
         raw_html          => raw_html,
-        open_redirect     => open_redirect,
         cot_leakage_marker => cot_leakage_marker,
         expression_injection => expression_injection,
     );
@@ -351,7 +350,7 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 21);
+        assert_eq!(rules.len(), 20);
     }
 
     #[test]

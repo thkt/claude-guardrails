@@ -1,58 +1,173 @@
-use super::{Rule, Severity, Violation, RE_JS_FILE};
-use regex::Regex;
-use std::sync::LazyLock;
+use super::{rule_id, Severity, Violation, RE_JS_FILE};
+use crate::ast;
+use oxc_ast::ast::{AssignmentExpression, AssignmentTarget, CallExpression, Expression, Program};
+use oxc_ast_visit::{walk, Visit};
+use oxc_span::Span;
 
-static RE_LOCATION_ASSIGN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(^|[^.\w])(window\.|document\.)?location(\.href)?\s*=\s*[a-zA-Z_$]"#)
-        .expect("RE_LOCATION_ASSIGN: invalid regex")
-});
+const FIX_MESSAGE: &str = "Validate URL before redirect. Use allowlist or ensure relative path.";
 
-static RE_LOCATION_CALL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(^|[^.\w])(window\.|document\.)?location\.(assign|replace)\s*\(\s*[a-zA-Z_$]"#)
-        .expect("RE_LOCATION_CALL: invalid regex")
-});
+#[cfg(test)]
+fn check(content: &str, file_path: &str) -> Vec<Violation> {
+    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+        check_program(program, line_offsets, file_path)
+    })
+    .unwrap_or_default()
+}
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
-
-            for &(line_num, line) in lines {
-                if RE_LOCATION_ASSIGN.is_match(line) || RE_LOCATION_CALL.is_match(line) {
-                    violations.push(Violation {
-                        rule: super::rule_id::OPEN_REDIRECT.to_owned(),
-                        severity: Severity::High,
-                        fix: "Validate URL before redirect. Use allowlist or ensure relative path."
-                            .to_owned(),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
-            }
-
-            violations
-        }),
+pub fn check_program(
+    program: &Program<'_>,
+    line_offsets: &[usize],
+    file_path: &str,
+) -> Vec<Violation> {
+    if !RE_JS_FILE.is_match(file_path) {
+        return Vec::new();
     }
+    let mut visitor = OpenRedirectVisitor {
+        violations: Vec::new(),
+        file_path,
+        line_offsets,
+    };
+    visitor.visit_program(program);
+    visitor.violations
+}
+
+struct OpenRedirectVisitor<'s> {
+    violations: Vec<Violation>,
+    file_path: &'s str,
+    line_offsets: &'s [usize],
+}
+
+impl OpenRedirectVisitor<'_> {
+    fn span_to_line(&self, span: Span) -> u32 {
+        ast::span_to_line(self.line_offsets, span)
+    }
+
+    fn push(&mut self, span: Span) {
+        self.violations.push(Violation {
+            rule: rule_id::OPEN_REDIRECT.to_owned(),
+            severity: Severity::High,
+            fix: FIX_MESSAGE.to_owned(),
+            file: self.file_path.to_owned(),
+            line: Some(self.span_to_line(span)),
+        });
+    }
+}
+
+impl<'a> Visit<'a> for OpenRedirectVisitor<'_> {
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if is_location_target(&expr.left) && !is_safe_url_value(&expr.right) {
+            self.push(expr.span);
+        }
+        walk::walk_assignment_expression(self, expr);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if is_location_call(&call.callee) {
+            let unsafe_arg = call
+                .arguments
+                .first()
+                .and_then(|a| a.as_expression())
+                .is_some_and(|e| !is_safe_url_value(e));
+            if unsafe_arg {
+                self.push(call.span);
+            }
+        }
+        walk::walk_call_expression(self, call);
+    }
+}
+
+fn is_location_target(target: &AssignmentTarget) -> bool {
+    match target {
+        AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "location",
+        AssignmentTarget::StaticMemberExpression(sme) => {
+            matches_location_member(&sme.object, sme.property.name.as_str())
+        }
+        AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
+            Expression::StringLiteral(s) => matches_location_member(&cme.object, &s.value),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
+    match expr {
+        Expression::StaticMemberExpression(sme) => Some((&sme.object, sme.property.name.as_str())),
+        Expression::ComputedMemberExpression(cme) => match &cme.expression {
+            Expression::StringLiteral(s) => Some((&cme.object, s.value.as_str())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn matches_location_member(obj: &Expression, name: &str) -> bool {
+    match name {
+        "href" => is_location_expr(obj),
+        "location" => is_window_or_document(obj),
+        _ => false,
+    }
+}
+
+fn is_location_expr(expr: &Expression) -> bool {
+    if matches!(expr, Expression::Identifier(id) if id.name == "location") {
+        return true;
+    }
+    member_name(expr).is_some_and(|(obj, name)| name == "location" && is_window_or_document(obj))
+}
+
+fn is_window_or_document(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Identifier(id) if id.name == "window" || id.name == "document"
+    )
+}
+
+fn is_location_call(callee: &Expression) -> bool {
+    member_name(callee)
+        .is_some_and(|(obj, name)| matches!(name, "assign" | "replace") && is_location_expr(obj))
+}
+
+fn is_safe_url_value(expr: &Expression) -> bool {
+    match expr {
+        Expression::StringLiteral(s) => is_safe_url_str(&s.value),
+        // Template is safe when its literal prefix already commits to a relative URL.
+        // With expressions, the leading quasi must be non-empty so interpolations cannot
+        // supply scheme/host (e.g., `${url}` must be flagged).
+        Expression::TemplateLiteral(tl) => tl.quasis.first().is_some_and(|q| {
+            let s = q.value.cooked.as_deref().unwrap_or(&q.value.raw);
+            if tl.expressions.is_empty() {
+                is_safe_url_str(s)
+            } else {
+                !s.is_empty() && is_safe_url_str(s)
+            }
+        }),
+        _ => false,
+    }
+}
+
+fn is_safe_url_str(s: &str) -> bool {
+    if s.starts_with("//") {
+        return false;
+    }
+    s.is_empty()
+        || s.starts_with('/')
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || s.starts_with('#')
+        || s.starts_with('?')
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn check(content: &str, path: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match(path) {
-            return Vec::new();
-        }
-        r.check(content, path, &super::super::non_comment_lines(content))
-    }
-
     #[test]
     fn detects_location_href_variable() {
         let v = check("location.href = redirectUrl;", "/src/auth.ts");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].severity, Severity::High);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
     }
 
     #[test]
@@ -62,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_window_location_assign() {
+    fn detects_window_location_property_assignment() {
         let v = check("window.location = target;", "/src/auth.ts");
         assert_eq!(v.len(), 1);
     }
@@ -103,5 +218,88 @@ mod tests {
     #[test]
     fn ignores_relocation_href() {
         assert!(check("relocation.href = url;", "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn detects_bracket_notation_href() {
+        let v = check(r#"location["href"] = userInput;"#, "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
+    }
+
+    #[test]
+    fn detects_bracket_notation_window_location() {
+        let v = check(r#"window["location"] = target;"#, "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn detects_conditional_rhs() {
+        let v = check(
+            "location.href = isProd ? safePath : userInput;",
+            "/src/auth.ts",
+        );
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn detects_binary_rhs() {
+        let v = check("location.href = baseUrl + path;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn allows_hash_string() {
+        assert!(check(r##"location.href = "#anchor";"##, "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn allows_query_string() {
+        assert!(check(r#"location.href = "?page=1";"#, "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn allows_empty_string() {
+        assert!(check(r#"location.href = "";"#, "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn detects_empty_quasi_template() {
+        let v = check("location.href = `${userInput}`;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
+    }
+
+    #[test]
+    fn detects_protocol_relative_string() {
+        let v = check(r#"location.href = "//evil.com";"#, "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
+    }
+
+    #[test]
+    fn detects_protocol_relative_template() {
+        let v = check("location.href = `//${host}`;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn allows_static_template_no_expressions() {
+        assert!(check("location.href = `/dashboard`;", "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn ignores_non_js_files() {
+        assert!(check("location.href = url;", "/src/styles.css").is_empty());
+    }
+
+    #[test]
+    fn fail_open_on_invalid_syntax() {
+        assert!(check("function { invalid !!!", "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn empty_file() {
+        assert!(check("", "/src/auth.ts").is_empty());
     }
 }

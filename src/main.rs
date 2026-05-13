@@ -171,6 +171,13 @@ fn lint_with_ast(
                 file_path,
             ));
         }
+        if config.rules.open_redirect {
+            found.extend(rules::open_redirect::check_program(
+                program,
+                line_offsets,
+                file_path,
+            ));
+        }
         found
     });
     match result {
@@ -208,7 +215,8 @@ fn collect_violations(
         violations.extend(rule.check(content, file_path, &lines));
     }
 
-    let has_ast_rules = config.rules.ast_security || config.rules.no_use_effect;
+    let has_ast_rules =
+        config.rules.ast_security || config.rules.no_use_effect || config.rules.open_redirect;
     if is_js && has_ast_rules {
         let (vs, note) = lint_with_ast(content, file_path, config);
         violations.extend(vs);
