@@ -91,30 +91,83 @@ struct EditItem {
     replace_all: bool,
 }
 
-fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
+/// Reason analysis fell back to the Edit/MultiEdit snippet instead of
+/// post-edit full file content. Distinct from `NotApplicable` (intentional
+/// snippet mode, e.g., non-JS file) — every variant here means the caller
+/// wanted full context but could not get it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DegradedReason {
+    OversizedFile,
+    NonUtf8Content,
+    FileNotFound,
+    PermissionDenied,
+    IoError,
+    OldStringNotFound,
+    MultiEditMidFailure(usize),
+}
+
+impl DegradedReason {
+    fn note(self) -> String {
+        match self {
+            Self::OversizedFile => format!(
+                "Target file exceeds {MAX_INPUT_SIZE}-byte limit; analyzed Edit snippet only."
+            ),
+            Self::NonUtf8Content => {
+                "Target file is not valid UTF-8; analyzed Edit snippet only.".to_owned()
+            }
+            Self::FileNotFound => "Target file not on disk; analyzed Edit snippet only.".to_owned(),
+            Self::PermissionDenied => {
+                "Permission denied reading target file; analyzed Edit snippet only.".to_owned()
+            }
+            Self::IoError => {
+                "I/O error reading target file; analyzed Edit snippet only.".to_owned()
+            }
+            Self::OldStringNotFound => {
+                "Edit pattern not found in target file; analyzed Edit snippet only.".to_owned()
+            }
+            Self::MultiEditMidFailure(idx) => format!(
+                "MultiEdit edit {idx} did not match post-edit content; analyzed Edit snippet only."
+            ),
+        }
+    }
+}
+
+/// Result of resolving full post-edit content for a hook invocation.
+/// - `Full`: full file content reconstructed (post-write semantic intact).
+/// - `Degraded`: caller wanted full context, failed for a documented reason.
+/// - `NotApplicable`: full-file analysis not attempted (non-JS file, missing
+///   old_string, etc.). Silent fallback to snippet is correct here.
+enum ContentResolution {
+    Full(String),
+    Degraded(DegradedReason),
+    NotApplicable,
+}
+
+fn get_file_and_content(input: &ToolInput) -> Option<(String, String, Option<DegradedReason>)> {
     let file_path = input.tool_input.file_path.clone()?;
 
-    let content = match input.tool_name.as_str() {
-        tool_name::WRITE => input.tool_input.content.clone()?,
+    let (content, degraded) = match input.tool_name.as_str() {
+        tool_name::WRITE => (input.tool_input.content.clone()?, None),
         tool_name::EDIT => {
             let new_string = input.tool_input.new_string.clone()?;
-            resolve_edit_content(
+            match resolve_edit_content(
                 &file_path,
                 input.tool_input.old_string.as_deref(),
                 &new_string,
                 input.tool_input.replace_all,
-            )
-            .unwrap_or(new_string)
+            ) {
+                ContentResolution::Full(c) => (c, None),
+                ContentResolution::Degraded(reason) => (new_string, Some(reason)),
+                ContentResolution::NotApplicable => (new_string, None),
+            }
         }
         tool_name::MULTI_EDIT => {
             let edits = input.tool_input.edits.as_ref()?;
-            resolve_multi_edit_content(&file_path, edits).unwrap_or_else(|| {
-                edits
-                    .iter()
-                    .filter_map(|e| e.new_string.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
+            match resolve_multi_edit_content(&file_path, edits) {
+                ContentResolution::Full(c) => (c, None),
+                ContentResolution::Degraded(reason) => (join_new_strings(edits), Some(reason)),
+                ContentResolution::NotApplicable => (join_new_strings(edits), None),
+            }
         }
         _ => {
             if input.tool_input.content.is_some() || input.tool_input.new_string.is_some() {
@@ -131,7 +184,15 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
         return None;
     }
 
-    Some((file_path, content))
+    Some((file_path, content, degraded))
+}
+
+fn join_new_strings(edits: &[EditItem]) -> String {
+    edits
+        .iter()
+        .filter_map(|e| e.new_string.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn apply_edit(
@@ -151,19 +212,33 @@ fn apply_edit(
 }
 
 /// Bound on-disk file read at MAX_INPUT_SIZE to mirror the stdin cap.
-fn read_file_capped(file_path: &str) -> Option<String> {
+/// `NotApplicable` signals "skip full-file analysis" (non-JS file).
+/// `Degraded(_)` signals "wanted full content, failed" — caller must surface.
+fn read_file_capped(file_path: &str) -> ContentResolution {
     if !RE_JS_FILE.is_match(file_path) {
-        return None;
+        return ContentResolution::NotApplicable;
     }
-    let file = fs::File::open(file_path).ok()?;
+    let file = match fs::File::open(file_path) {
+        Ok(f) => f,
+        Err(e) => return ContentResolution::Degraded(io_error_to_reason(&e)),
+    };
     let mut buf = String::new();
-    file.take(MAX_INPUT_SIZE + 1)
-        .read_to_string(&mut buf)
-        .ok()?;
-    if buf.len() as u64 > MAX_INPUT_SIZE {
-        return None;
+    if let Err(e) = file.take(MAX_INPUT_SIZE + 1).read_to_string(&mut buf) {
+        return ContentResolution::Degraded(io_error_to_reason(&e));
     }
-    Some(buf)
+    if buf.len() as u64 > MAX_INPUT_SIZE {
+        return ContentResolution::Degraded(DegradedReason::OversizedFile);
+    }
+    ContentResolution::Full(buf)
+}
+
+fn io_error_to_reason(e: &io::Error) -> DegradedReason {
+    match e.kind() {
+        io::ErrorKind::NotFound => DegradedReason::FileNotFound,
+        io::ErrorKind::PermissionDenied => DegradedReason::PermissionDenied,
+        io::ErrorKind::InvalidData => DegradedReason::NonUtf8Content,
+        _ => DegradedReason::IoError,
+    }
 }
 
 fn resolve_edit_content(
@@ -171,20 +246,38 @@ fn resolve_edit_content(
     old_string: Option<&str>,
     new_string: &str,
     replace_all: bool,
-) -> Option<String> {
-    let old = old_string?;
-    let file_content = read_file_capped(file_path)?;
-    apply_edit(&file_content, old, new_string, replace_all)
+) -> ContentResolution {
+    let Some(old) = old_string else {
+        return ContentResolution::NotApplicable;
+    };
+    let content = match read_file_capped(file_path) {
+        ContentResolution::Full(c) => c,
+        other => return other,
+    };
+    match apply_edit(&content, old, new_string, replace_all) {
+        Some(applied) => ContentResolution::Full(applied),
+        None => ContentResolution::Degraded(DegradedReason::OldStringNotFound),
+    }
 }
 
-fn resolve_multi_edit_content(file_path: &str, edits: &[EditItem]) -> Option<String> {
-    let mut current = read_file_capped(file_path)?;
-    for edit in edits {
-        let old = edit.old_string.as_deref()?;
-        let new = edit.new_string.as_deref()?;
-        current = apply_edit(&current, old, new, edit.replace_all)?;
+fn resolve_multi_edit_content(file_path: &str, edits: &[EditItem]) -> ContentResolution {
+    let mut current = match read_file_capped(file_path) {
+        ContentResolution::Full(c) => c,
+        other => return other,
+    };
+    for (idx, edit) in edits.iter().enumerate() {
+        let Some(old) = edit.old_string.as_deref() else {
+            return ContentResolution::NotApplicable;
+        };
+        let Some(new) = edit.new_string.as_deref() else {
+            return ContentResolution::NotApplicable;
+        };
+        match apply_edit(&current, old, new, edit.replace_all) {
+            Some(applied) => current = applied,
+            None => return ContentResolution::Degraded(DegradedReason::MultiEditMidFailure(idx)),
+        }
     }
-    Some(current)
+    ContentResolution::Full(current)
 }
 
 fn lint_with_external_tools(
@@ -497,7 +590,7 @@ fn run_hook(json_mode: bool) -> i32 {
         Err(code) => return code,
     };
 
-    let Some((file_path, content)) = get_file_and_content(&input) else {
+    let Some((file_path, content, degraded)) = get_file_and_content(&input) else {
         let is_write_tool = matches!(
             input.tool_name.as_str(),
             tool_name::WRITE | tool_name::EDIT | tool_name::MULTI_EDIT
@@ -535,7 +628,12 @@ fn run_hook(json_mode: bool) -> i32 {
         return 0;
     }
 
-    let (violations, notes) = collect_violations(&file_path, &content, &config);
+    let (violations, mut notes) = collect_violations(&file_path, &content, &config);
+    if let Some(reason) = degraded {
+        let note = reason.note();
+        eprintln!("guardrails: degraded: {note}");
+        notes.push(note);
+    }
     let (blocking, warnings) = partition_violations(&violations, &config);
 
     emit_json_if_enabled(json_mode, &blocking, &warnings, notes);
@@ -605,10 +703,16 @@ mod tests {
         }
     }
 
+    fn temp_ts_file(dir: &tempfile::TempDir, name: &str, content: &str) -> PathBuf {
+        let path = dir.path().join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
     #[test]
     fn write_extracts_content() {
         let input = make_write_input(Some("/src/app.ts"), Some("const x = 1;"));
-        let (path, content) = get_file_and_content(&input).unwrap();
+        let (path, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(path, "/src/app.ts");
         assert_eq!(content, "const x = 1;");
     }
@@ -616,7 +720,7 @@ mod tests {
     #[test]
     fn edit_extracts_new_string() {
         let input = make_edit_input(Some("/src/app.ts"), Some("const y = 2;"));
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(content, "const y = 2;");
     }
 
@@ -639,7 +743,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(content, "line1\nline2");
     }
 
@@ -736,7 +840,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(
             content,
             "import { exec } from 'child_process';\nconst y = 2;\n"
@@ -754,7 +858,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -772,7 +876,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -800,7 +904,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(content, "let a = 10;\nlet b = 20;\n");
     }
 
@@ -818,8 +922,145 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content) = get_file_and_content(&input).unwrap();
+        let (_, content, _) = get_file_and_content(&input).unwrap();
         assert_eq!(content, "eval(userInput);");
+    }
+
+    #[test]
+    fn read_file_capped_returns_full_for_valid_js() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = temp_ts_file(&tmp, "ok.ts", "const x = 1;\n");
+        match read_file_capped(path.to_str().unwrap()) {
+            ContentResolution::Full(c) => assert_eq!(c, "const x = 1;\n"),
+            _ => panic!("expected Full"),
+        }
+    }
+
+    #[test]
+    fn read_file_capped_returns_not_applicable_for_non_js() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = temp_ts_file(&tmp, "readme.md", "hello");
+        assert!(matches!(
+            read_file_capped(path.to_str().unwrap()),
+            ContentResolution::NotApplicable
+        ));
+    }
+
+    #[test]
+    fn read_file_capped_degrades_on_file_not_found() {
+        assert!(matches!(
+            read_file_capped("/nonexistent/path/that/does/not/exist.ts"),
+            ContentResolution::Degraded(DegradedReason::FileNotFound)
+        ));
+    }
+
+    #[test]
+    fn read_file_capped_degrades_on_non_utf8() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("binary.ts");
+        fs::write(&path, [0xff, 0xfe, 0xfd, 0xfc]).unwrap();
+        assert!(matches!(
+            read_file_capped(path.to_str().unwrap()),
+            ContentResolution::Degraded(DegradedReason::NonUtf8Content)
+        ));
+    }
+
+    #[test]
+    fn read_file_capped_degrades_on_oversized_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("huge.ts");
+        let size = usize::try_from(MAX_INPUT_SIZE + 1).unwrap();
+        fs::write(&path, "a".repeat(size)).unwrap();
+        assert!(matches!(
+            read_file_capped(path.to_str().unwrap()),
+            ContentResolution::Degraded(DegradedReason::OversizedFile)
+        ));
+    }
+
+    #[test]
+    fn read_file_capped_accepts_exactly_max_size() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("limit.ts");
+        let size = usize::try_from(MAX_INPUT_SIZE).unwrap();
+        fs::write(&path, "a".repeat(size)).unwrap();
+        match read_file_capped(path.to_str().unwrap()) {
+            ContentResolution::Full(c) => {
+                assert_eq!(u64::try_from(c.len()).unwrap(), MAX_INPUT_SIZE)
+            }
+            _ => panic!("expected Full at exact MAX_INPUT_SIZE boundary"),
+        }
+    }
+
+    #[test]
+    fn resolve_edit_content_degrades_on_old_string_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = temp_ts_file(&tmp, "file.ts", "const a = 1;");
+        let result =
+            resolve_edit_content(path.to_str().unwrap(), Some("missing pattern"), "x", false);
+        assert!(matches!(
+            result,
+            ContentResolution::Degraded(DegradedReason::OldStringNotFound)
+        ));
+    }
+
+    #[test]
+    fn resolve_edit_content_not_applicable_without_old_string() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = temp_ts_file(&tmp, "file.ts", "const a = 1;");
+        let result = resolve_edit_content(path.to_str().unwrap(), None, "x", false);
+        assert!(matches!(result, ContentResolution::NotApplicable));
+    }
+
+    #[test]
+    fn resolve_multi_edit_content_degrades_on_mid_failure() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = temp_ts_file(&tmp, "file.ts", "let a = 1;\n");
+        let edits = vec![
+            EditItem {
+                old_string: Some("let a = 1;".to_owned()),
+                new_string: Some("let a = 10;".to_owned()),
+                ..EditItem::default()
+            },
+            EditItem {
+                old_string: Some("not in file".to_owned()),
+                new_string: Some("eval(x);".to_owned()),
+                ..EditItem::default()
+            },
+        ];
+        let result = resolve_multi_edit_content(path.to_str().unwrap(), &edits);
+        match result {
+            ContentResolution::Degraded(DegradedReason::MultiEditMidFailure(idx)) => {
+                assert_eq!(idx, 1, "second edit (index 1) should be the failure point");
+            }
+            _ => panic!("expected MultiEditMidFailure(1)"),
+        }
+    }
+
+    #[test]
+    fn get_file_and_content_propagates_degraded_reason() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = temp_ts_file(&tmp, "file.ts", "const a = 1;");
+        let input = ToolInput {
+            tool_name: tool_name::EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some(path.to_string_lossy().into_owned()),
+                old_string: Some("missing pattern".to_owned()),
+                new_string: Some("eval(x);".to_owned()),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content, degraded) = get_file_and_content(&input).unwrap();
+        assert_eq!(content, "eval(x);");
+        assert_eq!(degraded, Some(DegradedReason::OldStringNotFound));
+    }
+
+    #[test]
+    fn degraded_reason_note_contains_actionable_text() {
+        let note = DegradedReason::OversizedFile.note();
+        assert!(note.contains("exceeds"));
+        assert!(note.contains("snippet"));
+        let note = DegradedReason::MultiEditMidFailure(2).note();
+        assert!(note.contains("edit 2"));
     }
 
     #[test]
