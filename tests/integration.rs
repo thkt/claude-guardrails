@@ -163,9 +163,10 @@ fn edit_with_jsx_attribute_snippet_detects_via_full_file() {
 
 #[test]
 fn edit_snippet_fallback_emits_degraded_true_in_json_envelope() {
-    // RC-001 regression: when full-file resolution fails (e.g., old_string not
-    // in file), the snippet fallback must mark the envelope as degraded so
-    // downstream consumers can distinguish full vs degraded analysis.
+    // RC-001 regression: when full-file resolution fails (here: target path
+    // outside the guardrails project root — tempdir lives under /var/folders),
+    // the snippet fallback must mark the envelope as degraded so downstream
+    // consumers can distinguish full vs degraded analysis.
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("file.ts");
     fs::write(&path, "const a = 1;\n").unwrap();
@@ -184,8 +185,8 @@ fn edit_snippet_fallback_emits_degraded_true_in_json_envelope() {
         "expected degraded:true in JSON envelope, got: {stdout}"
     );
     assert!(
-        stdout.contains("Edit pattern not found"),
-        "expected reason note in envelope notes, got: {stdout}"
+        stdout.contains("analyzed Edit snippet only"),
+        "expected snippet-fallback note in envelope notes, got: {stdout}"
     );
 }
 
