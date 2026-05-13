@@ -1,0 +1,19 @@
+rules:
+  artipacked:
+    ignore:
+      # update-homebrew job requires HOMEBREW_TAP_TOKEN to be persisted for git push
+      - release.yml:137
+      # update-sentinels job requires SENTINELS_TOKEN to be persisted for git push
+      - release.yml:205
+      # publish-binaries-to-sentinels job requires SENTINELS_TOKEN to be persisted for git push
+      - release.yml:245
+  cache-poisoning:
+    ignore:
+      # Swatinem/rust-cache in build job; release workflow runs on tag push only,
+      # no PR-driven cache injection path exists for poisoning to reach release artifacts
+      - release.yml:50
+  superfluous-actions:
+    ignore:
+      # softprops/action-gh-release retained for generate_release_notes feature
+      # which gh CLI does not provide equivalently in script step
+      - release.yml:124
