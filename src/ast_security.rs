@@ -320,9 +320,13 @@ fn is_response_call(callee: &Expression) -> bool {
 
 fn arg_contains_stack(arg: &Argument) -> bool {
     match arg {
-        Argument::SpreadElement(s) => expr_contains_stack(&s.argument),
+        Argument::SpreadElement(s) => spread_contains_stack(&s.argument),
         _ => arg.as_expression().is_some_and(|e| expr_contains_stack(e)),
     }
+}
+
+fn spread_contains_stack(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(_)) || expr_contains_stack(expr)
 }
 
 fn expr_contains_stack(expr: &Expression) -> bool {
@@ -332,7 +336,7 @@ fn expr_contains_stack(expr: &Expression) -> bool {
         }
         Expression::ObjectExpression(obj) => obj.properties.iter().any(|p| match p {
             ObjectPropertyKind::ObjectProperty(op) => expr_contains_stack(&op.value),
-            ObjectPropertyKind::SpreadProperty(sp) => expr_contains_stack(&sp.argument),
+            ObjectPropertyKind::SpreadProperty(sp) => spread_contains_stack(&sp.argument),
         }),
         Expression::CallExpression(call) => call.arguments.iter().any(|a| arg_contains_stack(a)),
         Expression::ConditionalExpression(ce) => {
@@ -342,7 +346,7 @@ fn expr_contains_stack(expr: &Expression) -> bool {
             expr_contains_stack(&le.left) || expr_contains_stack(&le.right)
         }
         Expression::ArrayExpression(arr) => arr.elements.iter().any(|el| match el {
-            ArrayExpressionElement::SpreadElement(s) => expr_contains_stack(&s.argument),
+            ArrayExpressionElement::SpreadElement(s) => spread_contains_stack(&s.argument),
             ArrayExpressionElement::Elision(_) => false,
             _ => el.as_expression().is_some_and(expr_contains_stack),
         }),
@@ -619,9 +623,37 @@ mod tests {
 
     #[test]
     fn known_limitations_not_detected() {
-        assert!(check_js("res.json({ ...err });").is_empty());
         assert!(check_js("fileSystem.readFile(userInput, cb);").is_empty());
         assert!(check_js("require('fs').readFile(userInput, cb);").is_empty());
+    }
+
+    #[test]
+    fn stack_in_spread_object() {
+        let v = check_js("res.json({ ...err });");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn stack_in_spread_array() {
+        let v = check_js("res.json([...err]);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
+    }
+
+    #[test]
+    fn stack_in_spread_argument() {
+        let v = check_js("res.json(...args);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
+    }
+
+    #[test]
+    fn non_spread_identifier_property_safe() {
+        // Bare identifier in property value is unknown content, not flagged.
+        // Only spread (`...err`) is conservatively treated as stack leak.
+        assert!(check_js("res.json({ data: someVar });").is_empty());
     }
 
     #[test]
