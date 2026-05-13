@@ -4,6 +4,7 @@ mod color;
 mod config;
 mod download;
 mod envelope;
+mod hook_exit;
 mod import_map;
 mod oxlint;
 mod parse_json;
@@ -16,12 +17,14 @@ mod tempfile_util;
 use clap::{Parser, Subcommand};
 use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
 use envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelope};
+use hook_exit::HookExitCode;
 use reporter::{build_json_report, format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
 use serde::Serialize;
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::panic;
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -705,7 +708,16 @@ fn run_hook(json_mode: bool) -> i32 {
     }
 }
 
+fn install_panic_hook() {
+    panic::set_hook(Box::new(|info| {
+        eprintln!("guardrails: internal error: {info}");
+        process::exit(i32::from(HookExitCode::Internal.code()));
+    }));
+}
+
 fn main() {
+    install_panic_hook();
+
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(e) => {
