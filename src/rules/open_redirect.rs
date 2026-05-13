@@ -1,9 +1,6 @@
 use super::{rule_id, Severity, Violation, RE_JS_FILE};
 use crate::ast;
-use oxc_ast::ast::{
-    AssignmentExpression, AssignmentTarget, CallExpression, ComputedMemberExpression, Expression,
-    Program, StaticMemberExpression,
-};
+use oxc_ast::ast::{AssignmentExpression, AssignmentTarget, CallExpression, Expression, Program};
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
 
@@ -82,43 +79,41 @@ impl<'a> Visit<'a> for OpenRedirectVisitor<'_> {
 fn is_location_target(target: &AssignmentTarget) -> bool {
     match target {
         AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "location",
-        AssignmentTarget::StaticMemberExpression(sme) => is_location_static_member(sme),
-        AssignmentTarget::ComputedMemberExpression(cme) => is_location_computed_member(cme),
+        AssignmentTarget::StaticMemberExpression(sme) => {
+            matches_location_member(&sme.object, sme.property.name.as_str())
+        }
+        AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
+            Expression::StringLiteral(s) => matches_location_member(&cme.object, &s.value),
+            _ => false,
+        },
         _ => false,
     }
 }
 
-fn is_location_static_member(sme: &StaticMemberExpression) -> bool {
-    if sme.property.name == "href" && is_location_expr(&sme.object) {
-        return true;
+fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
+    match expr {
+        Expression::StaticMemberExpression(sme) => Some((&sme.object, sme.property.name.as_str())),
+        Expression::ComputedMemberExpression(cme) => match &cme.expression {
+            Expression::StringLiteral(s) => Some((&cme.object, s.value.as_str())),
+            _ => None,
+        },
+        _ => None,
     }
-    sme.property.name == "location" && is_window_or_document(&sme.object)
 }
 
-fn is_location_computed_member(cme: &ComputedMemberExpression) -> bool {
-    let Expression::StringLiteral(s) = &cme.expression else {
-        return false;
-    };
-    if s.value == "href" && is_location_expr(&cme.object) {
-        return true;
+fn matches_location_member(obj: &Expression, name: &str) -> bool {
+    match name {
+        "href" => is_location_expr(obj),
+        "location" => is_window_or_document(obj),
+        _ => false,
     }
-    s.value == "location" && is_window_or_document(&cme.object)
 }
 
 fn is_location_expr(expr: &Expression) -> bool {
-    match expr {
-        Expression::Identifier(id) => id.name == "location",
-        Expression::StaticMemberExpression(sme) => {
-            sme.property.name == "location" && is_window_or_document(&sme.object)
-        }
-        Expression::ComputedMemberExpression(cme) => {
-            let Expression::StringLiteral(s) = &cme.expression else {
-                return false;
-            };
-            s.value == "location" && is_window_or_document(&cme.object)
-        }
-        _ => false,
+    if matches!(expr, Expression::Identifier(id) if id.name == "location") {
+        return true;
     }
+    member_name(expr).is_some_and(|(obj, name)| name == "location" && is_window_or_document(obj))
 }
 
 fn is_window_or_document(expr: &Expression) -> bool {
@@ -129,29 +124,32 @@ fn is_window_or_document(expr: &Expression) -> bool {
 }
 
 fn is_location_call(callee: &Expression) -> bool {
-    let (obj, name) = match callee {
-        Expression::StaticMemberExpression(sme) => (&sme.object, sme.property.name.as_str()),
-        Expression::ComputedMemberExpression(cme) => match &cme.expression {
-            Expression::StringLiteral(s) => (&cme.object, s.value.as_str()),
-            _ => return false,
-        },
-        _ => return false,
-    };
-    (name == "assign" || name == "replace") && is_location_expr(obj)
+    member_name(callee)
+        .is_some_and(|(obj, name)| matches!(name, "assign" | "replace") && is_location_expr(obj))
 }
 
 fn is_safe_url_value(expr: &Expression) -> bool {
     match expr {
         Expression::StringLiteral(s) => is_safe_url_str(&s.value),
-        Expression::TemplateLiteral(tl) => tl
-            .quasis
-            .first()
-            .is_some_and(|q| is_safe_url_str(q.value.cooked.as_deref().unwrap_or(&q.value.raw))),
+        // Template is safe when its literal prefix already commits to a relative URL.
+        // With expressions, the leading quasi must be non-empty so interpolations cannot
+        // supply scheme/host (e.g., `${url}` must be flagged).
+        Expression::TemplateLiteral(tl) => tl.quasis.first().is_some_and(|q| {
+            let s = q.value.cooked.as_deref().unwrap_or(&q.value.raw);
+            if tl.expressions.is_empty() {
+                is_safe_url_str(s)
+            } else {
+                !s.is_empty() && is_safe_url_str(s)
+            }
+        }),
         _ => false,
     }
 }
 
 fn is_safe_url_str(s: &str) -> bool {
+    if s.starts_with("//") {
+        return false;
+    }
     s.is_empty()
         || s.starts_with('/')
         || s.starts_with("./")
@@ -179,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_window_location_assign() {
+    fn detects_window_location_property_assignment() {
         let v = check("window.location = target;", "/src/auth.ts");
         assert_eq!(v.len(), 1);
     }
@@ -263,6 +261,31 @@ mod tests {
     #[test]
     fn allows_empty_string() {
         assert!(check(r#"location.href = "";"#, "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn detects_empty_quasi_template() {
+        let v = check("location.href = `${userInput}`;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
+    }
+
+    #[test]
+    fn detects_protocol_relative_string() {
+        let v = check(r#"location.href = "//evil.com";"#, "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
+    }
+
+    #[test]
+    fn detects_protocol_relative_template() {
+        let v = check("location.href = `//${host}`;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn allows_static_template_no_expressions() {
+        assert!(check("location.href = `/dashboard`;", "/src/auth.ts").is_empty());
     }
 
     #[test]
