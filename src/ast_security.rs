@@ -325,6 +325,8 @@ fn arg_contains_stack(arg: &Argument) -> bool {
     }
 }
 
+/// Spread of a bare identifier (e.g., `...err`) may copy a `.stack` property;
+/// treat as unsafe in spread context only.
 fn spread_contains_stack(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(_)) || expr_contains_stack(expr)
 }
@@ -628,31 +630,21 @@ mod tests {
     }
 
     #[test]
-    fn stack_in_spread_object() {
-        let v = check_js("res.json({ ...err });");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
-        assert_eq!(v[0].severity, Severity::High);
-    }
-
-    #[test]
-    fn stack_in_spread_array() {
-        let v = check_js("res.json([...err]);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
-    }
-
-    #[test]
-    fn stack_in_spread_argument() {
-        let v = check_js("res.json(...args);");
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
+    fn stack_in_spread_contexts_blocked() {
+        for code in [
+            "res.json({ ...err });",
+            "res.json([...err]);",
+            "res.json(...args);",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(v[0].severity, Severity::High, "failed for: {code}");
+            assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE, "failed for: {code}");
+        }
     }
 
     #[test]
     fn non_spread_identifier_property_safe() {
-        // Bare identifier in property value is unknown content, not flagged.
-        // Only spread (`...err`) is conservatively treated as stack leak.
         assert!(check_js("res.json({ data: someVar });").is_empty());
     }
 
