@@ -26,6 +26,14 @@ pub fn span_to_line(offsets: &[usize], span: Span) -> u32 {
     scanner::offset_to_line(offsets, span.start as usize) as u32
 }
 
+pub fn is_ident(expr: &Expression, name: &str) -> bool {
+    matches!(expr, Expression::Identifier(id) if id.name == name)
+}
+
+pub fn is_static_template_literal(expr: &Expression) -> bool {
+    matches!(expr, Expression::TemplateLiteral(tl) if tl.expressions.is_empty())
+}
+
 /// Unwraps `obj.prop` and `obj["prop"]` (string-literal key only) to `(object, name)`.
 pub fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
     match expr {
