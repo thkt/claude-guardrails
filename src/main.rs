@@ -72,17 +72,23 @@ struct ToolInput {
     tool_input: ToolInputData,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct ToolInputData {
     file_path: Option<String>,
     content: Option<String>,
     new_string: Option<String>,
+    old_string: Option<String>,
+    #[serde(default)]
+    replace_all: bool,
     edits: Option<Vec<EditItem>>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 struct EditItem {
     new_string: Option<String>,
+    old_string: Option<String>,
+    #[serde(default)]
+    replace_all: bool,
 }
 
 fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
@@ -90,14 +96,25 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
 
     let content = match input.tool_name.as_str() {
         tool_name::WRITE => input.tool_input.content.clone()?,
-        tool_name::EDIT => input.tool_input.new_string.clone()?,
+        tool_name::EDIT => {
+            let new_string = input.tool_input.new_string.clone()?;
+            resolve_edit_content(
+                &file_path,
+                input.tool_input.old_string.as_deref(),
+                &new_string,
+                input.tool_input.replace_all,
+            )
+            .unwrap_or(new_string)
+        }
         tool_name::MULTI_EDIT => {
             let edits = input.tool_input.edits.as_ref()?;
-            edits
-                .iter()
-                .filter_map(|e| e.new_string.clone())
-                .collect::<Vec<_>>()
-                .join("\n")
+            resolve_multi_edit_content(&file_path, edits).unwrap_or_else(|| {
+                edits
+                    .iter()
+                    .filter_map(|e| e.new_string.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
         }
         _ => {
             if input.tool_input.content.is_some() || input.tool_input.new_string.is_some() {
@@ -115,6 +132,59 @@ fn get_file_and_content(input: &ToolInput) -> Option<(String, String)> {
     }
 
     Some((file_path, content))
+}
+
+fn apply_edit(
+    file_content: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> Option<String> {
+    if old_string.is_empty() || !file_content.contains(old_string) {
+        return None;
+    }
+    Some(if replace_all {
+        file_content.replace(old_string, new_string)
+    } else {
+        file_content.replacen(old_string, new_string, 1)
+    })
+}
+
+/// Bound on-disk file read at MAX_INPUT_SIZE to mirror the stdin cap.
+fn read_file_capped(file_path: &str) -> Option<String> {
+    if !RE_JS_FILE.is_match(file_path) {
+        return None;
+    }
+    let file = fs::File::open(file_path).ok()?;
+    let mut buf = String::new();
+    file.take(MAX_INPUT_SIZE + 1)
+        .read_to_string(&mut buf)
+        .ok()?;
+    if buf.len() as u64 > MAX_INPUT_SIZE {
+        return None;
+    }
+    Some(buf)
+}
+
+fn resolve_edit_content(
+    file_path: &str,
+    old_string: Option<&str>,
+    new_string: &str,
+    replace_all: bool,
+) -> Option<String> {
+    let old = old_string?;
+    let file_content = read_file_capped(file_path)?;
+    apply_edit(&file_content, old, new_string, replace_all)
+}
+
+fn resolve_multi_edit_content(file_path: &str, edits: &[EditItem]) -> Option<String> {
+    let mut current = read_file_capped(file_path)?;
+    for edit in edits {
+        let old = edit.old_string.as_deref()?;
+        let new = edit.new_string.as_deref()?;
+        current = apply_edit(&current, old, new, edit.replace_all)?;
+    }
+    Some(current)
 }
 
 fn lint_with_external_tools(
@@ -509,8 +579,7 @@ mod tests {
             tool_input: ToolInputData {
                 file_path: file_path.map(String::from),
                 content: content.map(String::from),
-                new_string: None,
-                edits: None,
+                ..ToolInputData::default()
             },
         }
     }
@@ -520,9 +589,8 @@ mod tests {
             tool_name: tool_name::EDIT.to_owned(),
             tool_input: ToolInputData {
                 file_path: file_path.map(String::from),
-                content: None,
                 new_string: new_string.map(String::from),
-                edits: None,
+                ..ToolInputData::default()
             },
         }
     }
@@ -558,16 +626,17 @@ mod tests {
             tool_name: tool_name::MULTI_EDIT.to_owned(),
             tool_input: ToolInputData {
                 file_path: Some("/src/app.ts".to_owned()),
-                content: None,
-                new_string: None,
                 edits: Some(vec![
                     EditItem {
                         new_string: Some("line1".to_owned()),
+                        ..EditItem::default()
                     },
                     EditItem {
                         new_string: Some("line2".to_owned()),
+                        ..EditItem::default()
                     },
                 ]),
+                ..ToolInputData::default()
             },
         };
         let (_, content) = get_file_and_content(&input).unwrap();
@@ -580,9 +649,8 @@ mod tests {
             tool_name: tool_name::MULTI_EDIT.to_owned(),
             tool_input: ToolInputData {
                 file_path: Some("/src/app.ts".to_owned()),
-                content: None,
-                new_string: None,
                 edits: Some(vec![]),
+                ..ToolInputData::default()
             },
         };
         assert!(get_file_and_content(&input).is_none());
@@ -594,12 +662,8 @@ mod tests {
             tool_name: tool_name::MULTI_EDIT.to_owned(),
             tool_input: ToolInputData {
                 file_path: Some("/src/app.ts".to_owned()),
-                content: None,
-                new_string: None,
-                edits: Some(vec![
-                    EditItem { new_string: None },
-                    EditItem { new_string: None },
-                ]),
+                edits: Some(vec![EditItem::default(), EditItem::default()]),
+                ..ToolInputData::default()
             },
         };
         assert!(get_file_and_content(&input).is_none());
@@ -612,8 +676,7 @@ mod tests {
             tool_input: ToolInputData {
                 file_path: Some("/tmp/x".to_owned()),
                 content: Some("echo hi".to_owned()),
-                new_string: None,
-                edits: None,
+                ..ToolInputData::default()
             },
         };
         assert!(get_file_and_content(&input).is_none());
@@ -629,6 +692,134 @@ mod tests {
             let input = make_write_input(path, content);
             assert!(get_file_and_content(&input).is_none(), "case: {label}");
         }
+    }
+
+    #[test]
+    fn apply_edit_replaces_first_occurrence() {
+        let got = apply_edit("foo bar foo", "foo", "X", false).unwrap();
+        assert_eq!(got, "X bar foo");
+    }
+
+    #[test]
+    fn apply_edit_replace_all_replaces_every_occurrence() {
+        let got = apply_edit("foo bar foo", "foo", "X", true).unwrap();
+        assert_eq!(got, "X bar X");
+    }
+
+    #[test]
+    fn apply_edit_returns_none_when_old_string_not_found() {
+        assert!(apply_edit("foo", "bar", "X", false).is_none());
+        assert!(apply_edit("foo", "bar", "X", true).is_none());
+    }
+
+    #[test]
+    fn apply_edit_returns_none_when_old_string_empty() {
+        assert!(apply_edit("foo", "", "X", false).is_none());
+        assert!(apply_edit("foo", "", "X", true).is_none());
+    }
+
+    #[test]
+    fn edit_reads_full_file_and_applies_substitution() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("file.ts");
+        fs::write(
+            &path,
+            "import { exec } from 'child_process';\nconst x = 1;\n",
+        )
+        .unwrap();
+        let input = ToolInput {
+            tool_name: tool_name::EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some(path.to_string_lossy().into_owned()),
+                old_string: Some("const x = 1;".to_owned()),
+                new_string: Some("const y = 2;".to_owned()),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content) = get_file_and_content(&input).unwrap();
+        assert_eq!(
+            content,
+            "import { exec } from 'child_process';\nconst y = 2;\n"
+        );
+    }
+
+    #[test]
+    fn edit_falls_back_to_snippet_when_file_missing() {
+        let input = ToolInput {
+            tool_name: tool_name::EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some("/nonexistent/path/that/does/not/exist.ts".to_owned()),
+                old_string: Some("const x = 1;".to_owned()),
+                new_string: Some("eval(userInput);".to_owned()),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content) = get_file_and_content(&input).unwrap();
+        assert_eq!(content, "eval(userInput);");
+    }
+
+    #[test]
+    fn edit_falls_back_to_snippet_when_old_string_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("file.ts");
+        fs::write(&path, "const a = 1;\n").unwrap();
+        let input = ToolInput {
+            tool_name: tool_name::EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some(path.to_string_lossy().into_owned()),
+                old_string: Some("not in file".to_owned()),
+                new_string: Some("eval(userInput);".to_owned()),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content) = get_file_and_content(&input).unwrap();
+        assert_eq!(content, "eval(userInput);");
+    }
+
+    #[test]
+    fn multi_edit_applies_sequentially_to_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("file.ts");
+        fs::write(&path, "let a = 1;\nlet b = 2;\n").unwrap();
+        let input = ToolInput {
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some(path.to_string_lossy().into_owned()),
+                edits: Some(vec![
+                    EditItem {
+                        old_string: Some("let a = 1;".to_owned()),
+                        new_string: Some("let a = 10;".to_owned()),
+                        ..EditItem::default()
+                    },
+                    EditItem {
+                        old_string: Some("let b = 2;".to_owned()),
+                        new_string: Some("let b = 20;".to_owned()),
+                        ..EditItem::default()
+                    },
+                ]),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content) = get_file_and_content(&input).unwrap();
+        assert_eq!(content, "let a = 10;\nlet b = 20;\n");
+    }
+
+    #[test]
+    fn multi_edit_falls_back_when_file_missing() {
+        let input = ToolInput {
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some("/nonexistent/path.ts".to_owned()),
+                edits: Some(vec![EditItem {
+                    new_string: Some("eval(userInput);".to_owned()),
+                    old_string: Some("none".to_owned()),
+                    ..EditItem::default()
+                }]),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content) = get_file_and_content(&input).unwrap();
+        assert_eq!(content, "eval(userInput);");
     }
 
     #[test]

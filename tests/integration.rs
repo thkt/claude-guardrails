@@ -128,6 +128,40 @@ fn edit_with_violation_exits_two() {
 }
 
 #[test]
+fn edit_with_jsx_attribute_snippet_detects_via_full_file() {
+    // Regression test for issue #59. JSX attribute snippet alone fails AST parse,
+    // so before the fix all AST rules were silently skipped. The fix reads the
+    // file from disk, applies the edit, and parses the post-edit content.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("auth.tsx");
+    fs::write(
+        &path,
+        "export function Auth({ redirectUrl }: { redirectUrl: string }) {\n  return <button>Login</button>;\n}\n",
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": path.to_str().unwrap(),
+            "old_string": "<button>Login</button>",
+            "new_string": "<button onClick={() => { location.href = redirectUrl; }}>Login</button>"
+        }
+    });
+    let output = run_guardrails_json(&json.to_string());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("open-redirect"),
+        "expected open-redirect in stderr, got: {stderr}"
+    );
+}
+
+#[test]
 fn non_js_file_skips_js_rules() {
     let json = serde_json::json!({
         "tool_name": "Write",
