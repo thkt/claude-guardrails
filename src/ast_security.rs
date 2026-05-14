@@ -2,11 +2,12 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
-    BindingPattern, CallExpression, Expression, LogicalExpression, LogicalOperator,
+    BindingPattern, CallExpression, Expression, Function, LogicalExpression, LogicalOperator,
     ObjectPropertyKind, Program, RegExpLiteral, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
+use oxc_syntax::scope::ScopeFlags;
 
 // SECRET_KEY / SESSION_SECRET 等は SECRET の substring match で網羅される。
 // KEY 単体は PUBLIC_KEY / SORT_KEY 等を誤検知するため除外し API_KEY のみ採用。
@@ -162,6 +163,7 @@ pub fn check_program(
         file_path,
         line_offsets,
         is_test_file: RE_TEST_FILE.is_match(file_path),
+        in_security_named_fn: false,
     };
     visitor.visit_program(program);
     visitor.violations
@@ -190,6 +192,7 @@ struct SecurityVisitor<'s> {
     file_path: &'s str,
     line_offsets: &'s [usize],
     is_test_file: bool,
+    in_security_named_fn: bool,
 }
 
 impl SecurityVisitor<'_> {
@@ -518,6 +521,24 @@ impl SecurityVisitor<'_> {
             decl.span,
         );
     }
+
+    fn check_math_random_keyword_fn(&mut self, call: &CallExpression) {
+        if self.is_test_file || !self.in_security_named_fn {
+            return;
+        }
+        let Expression::StaticMemberExpression(sme) = &call.callee else {
+            return;
+        };
+        if !ast::is_ident(&sme.object, "Math") || sme.property.name != "random" {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::Medium,
+            "Math.random() inside a security-named function. Use crypto.randomBytes() or crypto.getRandomValues() for tokens/IDs.",
+            call.span,
+        );
+    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -534,9 +555,21 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_non_literal_require(it);
         self.check_math_random_insecure(it);
         self.check_math_random_crypto_sink(it);
+        self.check_math_random_keyword_fn(it);
         self.check_document_write(it);
         self.check_merge_pollution_sinks(it);
         walk::walk_call_expression(self, it);
+    }
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        let prev = self.in_security_named_fn;
+        if let Some(id) = &func.id {
+            if name_matches_security_keyword(&id.name) {
+                self.in_security_named_fn = true;
+            }
+        }
+        walk::walk_function(self, func, flags);
+        self.in_security_named_fn = prev;
     }
 
     fn visit_reg_exp_literal(&mut self, re: &RegExpLiteral<'a>) {
@@ -551,7 +584,21 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
 
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         self.check_math_random_keyword_var(decl);
+        let prev = self.in_security_named_fn;
+        if let BindingPattern::BindingIdentifier(ident) = &decl.id {
+            if name_matches_security_keyword(&ident.name) {
+                if let Some(init) = &decl.init {
+                    if matches!(
+                        init,
+                        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+                    ) {
+                        self.in_security_named_fn = true;
+                    }
+                }
+            }
+        }
         walk::walk_variable_declarator(self, decl);
+        self.in_security_named_fn = prev;
     }
 }
 
@@ -1403,6 +1450,32 @@ mod tests {
     #[test]
     fn math_random_keyword_var_multiplication_pass_pattern_allowed() {
         let v = check_js("const token = Math.random() * 100;");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-030: math_random_keyword_fn_declaration_blocked
+    #[test]
+    fn math_random_keyword_fn_declaration_blocked() {
+        let v = check_js("function generateToken() { return Math.random(); }");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-031: math_random_keyword_fn_arrow_with_parent_blocked
+    #[test]
+    fn math_random_keyword_fn_arrow_with_parent_blocked() {
+        let v = check_js("const generateSessionId = () => Math.floor(Math.random() * 1000000);");
+        assert!(
+            v.iter().any(|v| v.severity == Severity::Medium),
+            "expected at least one Medium violation, got: {v:?}"
+        );
+    }
+
+    // T-032: math_random_keyword_fn_no_keyword_match_allowed
+    #[test]
+    fn math_random_keyword_fn_no_keyword_match_allowed() {
+        let v = check_js("function generateAnimOffset() { return Math.random() * 360; }");
         assert_eq!(v.len(), 0);
     }
 
