@@ -145,7 +145,6 @@ See `src/rules/` for custom rules that complement external linters.
 | Rule               | Severity | Description                                                              | When to disable                                  |
 | ------------------ | -------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
 | `sensitiveFile`         | Critical | Blocks writes to .env, credentials.\*, \*.pem                            | Never (security critical)                              |
-| `expressionInjection`   | Critical | Untrusted GitHub context (`github.event.issue.title`, `github.head_ref`, etc.) used in `run:`/`script:` inside `.github/workflows/*.yml` or `action.yml` | Repositories without GitHub Actions                    |
 | `cryptoWeak`            | High     | Detects MD5, SHA1, DES, RC4 usage                                        | Legacy system maintenance with known constraints       |
 | `sensitiveLogging`      | High     | Detects password/token/secret in console.log                             | Never (security critical)                              |
 | `security`              | High     | XSS vectors, unsafe APIs, postMessage                                    | Never (security critical)                              |
@@ -162,7 +161,6 @@ See `src/rules/` for custom rules that complement external linters.
 | `domAccess`             | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS                   |
 | `syncIo`                | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts        |
 | `bundleSize`            | Medium   | Full lodash/moment imports                                               | Backend/Node.js (no bundle size concerns)              |
-| `disableMustacheEscape` | Medium   | Handlebars/Mustache auto-escape bypass (`{{{ }}}`, `{{& }}`, `noEscape: true`) | Projects not using Handlebars/Mustache templating      |
 | `testAssertion`         | Medium   | Tests without expect() or assert calls                                   | Playwright, custom test frameworks                     |
 | `flakyTest`             | Low      | setTimeout, Math.random in tests                                         | Intentional timing/randomness tests                    |
 | `generatedFile`         | High     | Warns on \*.generated.\*, \*.g.ts edits                                  | No code generation in project                          |
@@ -319,7 +317,6 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
     "rules": {
       "oxlint": true,
       "sensitiveFile": true,
-      "expressionInjection": true,
       "cryptoWeak": true,
       "sensitiveLogging": true,
       "security": true,
@@ -336,7 +333,6 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
       "domAccess": true,
       "syncIo": true,
       "bundleSize": true,
-      "disableMustacheEscape": true,
       "testAssertion": true,
       "generatedFile": true,
       "testLocation": true,

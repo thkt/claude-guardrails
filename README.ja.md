@@ -147,7 +147,6 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | ルール             | 重大度   | 説明                                                                            | 無効化する場面                                       |
 | ------------------ | -------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | `sensitiveFile`         | Critical | .env、credentials.\*、\*.pem への書き込みをブロック                             | 無効化不可（セキュリティ上重要）                          |
-| `expressionInjection`   | Critical | `.github/workflows/*.yml` や `action.yml` の `run:`/`script:` 内で `github.event.issue.title` / `github.head_ref` など untrusted GitHub context を使用 | GitHub Actions を使用しないリポジトリ                     |
 | `cryptoWeak`            | High     | MD5、SHA1、DES、RC4 の使用を検出                                                | 既知の制約があるレガシーシステムの保守                    |
 | `sensitiveLogging`      | High     | console.log 内の password/token/secret を検出                                   | 無効化不可（セキュリティ上重要）                          |
 | `security`              | High     | XSS ベクター、安全でない API、postMessage                                       | 無効化不可（セキュリティ上重要）                          |
@@ -164,7 +163,6 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `domAccess`             | Medium   | React（.tsx/.jsx）での直接 DOM 操作                                             | React 以外のプロジェクト、またはバニラ JS/TS              |
 | `syncIo`                | Medium   | readFileSync、writeFileSync（イベントループをブロック）                         | CLI ツール、ビルドスクリプト、同期のみのコンテキスト      |
 | `bundleSize`            | Medium   | lodash/moment のフルインポート                                                  | バックエンド/Node.js（バンドルサイズの懸念なし）          |
-| `disableMustacheEscape` | Medium   | Handlebars/Mustache の auto-escape 回避 (`{{{ }}}`、`{{& }}`、`noEscape: true`) | Handlebars/Mustache を使用しないプロジェクト              |
 | `testAssertion`         | Medium   | expect() や assert のないテスト                                                 | Playwright、カスタムテストフレームワーク                  |
 | `flakyTest`             | Low      | テスト内の setTimeout、Math.random                                              | 意図的なタイミング/ランダムネスのテスト                   |
 | `generatedFile`         | High     | \*.generated.\*、\*.g.ts の編集を警告                                           | コード生成のないプロジェクト                              |
@@ -321,7 +319,6 @@ guardrails --json < tool-call.json
     "rules": {
       "oxlint": true,
       "sensitiveFile": true,
-      "expressionInjection": true,
       "cryptoWeak": true,
       "sensitiveLogging": true,
       "security": true,
@@ -338,7 +335,6 @@ guardrails --json < tool-call.json
       "domAccess": true,
       "syncIo": true,
       "bundleSize": true,
-      "disableMustacheEscape": true,
       "testAssertion": true,
       "generatedFile": true,
       "testLocation": true,
