@@ -63,6 +63,7 @@ define_rule_config! {
     ast_security      => "astSecurity",
     cot_leakage_marker => "cotLeakageMarker",
     expression_injection => "expressionInjection",
+    disable_mustache_escape => "disableMustacheEscape",
 }
 
 #[derive(Debug, Clone, PartialEq)]
