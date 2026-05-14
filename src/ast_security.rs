@@ -469,7 +469,7 @@ impl SecurityVisitor<'_> {
         if is_safe_html_value(&expr.right) {
             return;
         }
-        self.push_violation(rule_id::SECURITY, severity, fix, expr.span);
+        self.push_violation(rule_id::UNSAFE_HTML_INJECTION, severity, fix, expr.span);
     }
 
     fn check_document_write(&mut self, call: &CallExpression) {
@@ -491,7 +491,7 @@ impl SecurityVisitor<'_> {
             return;
         }
         self.push_violation(
-            rule_id::SECURITY,
+            rule_id::UNSAFE_HTML_INJECTION,
             Severity::High,
             "Use createElement/appendChild instead",
             call.span,
@@ -1690,7 +1690,7 @@ mod tests {
     fn detects_inner_html_variable_assignment() {
         let v = check_js("el.innerHTML = userInput;");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::High);
         assert!(v[0].fix.contains("textContent"));
     }
@@ -1712,7 +1712,7 @@ mod tests {
     fn detects_inner_html_template_with_expression() {
         let v = check_js("el.innerHTML = `<div>${userInput}</div>`;");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
     }
 
     // T-019: detects_inner_html_empty_string_concat (regex 版の known limitation を解消)
@@ -1720,7 +1720,7 @@ mod tests {
     fn detects_inner_html_empty_string_concat() {
         let v = check_js(r#"el.innerHTML = "" + userInput;"#);
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
     }
 
     // T-019: allows_inner_html_concat_of_literals
@@ -1734,7 +1734,7 @@ mod tests {
     fn detects_outer_html_variable_assignment() {
         let v = check_js("el.outerHTML = userInput;");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::Medium);
         assert!(v[0].fix.contains("DOM methods"));
     }
@@ -1750,7 +1750,7 @@ mod tests {
     fn detects_document_write_variable() {
         let v = check_js("document.write(userInput);");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::High);
         assert!(v[0].fix.contains("createElement"));
     }
@@ -1760,7 +1760,7 @@ mod tests {
     fn detects_document_writeln_variable() {
         let v = check_js("document.writeln(userInput);");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::High);
     }
 
@@ -1775,7 +1775,7 @@ mod tests {
     fn detects_document_write_concat_with_variable() {
         let v = check_js(r#"document.write("<h1>" + title + "</h1>");"#);
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
     }
 
     // T-021: ignores_unrelated_document_method
@@ -1803,7 +1803,7 @@ mod tests {
             1,
             "zero-arg document.write() intentionally flagged"
         );
-        assert_eq!(v[0].rule, rule_id::SECURITY);
+        assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::High);
     }
 

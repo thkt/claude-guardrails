@@ -56,7 +56,7 @@ Exit codes (prefetch subcommand):
   74  I/O error (download / extract / cache failure)"
 )]
 struct Cli {
-    /// Emit violations as a structured JSON report on stdout (hook mode only).
+    /// Emit a structured JSON envelope on stdout (hook violations or prefetch result).
     #[arg(long, global = true)]
     json: bool,
 
