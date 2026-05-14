@@ -355,7 +355,7 @@ impl SecurityVisitor<'_> {
         }
         self.push_violation(
             rule_id::MATH_RANDOM_INSECURE,
-            Severity::Medium,
+            Severity::High,
             "Math.random() is not cryptographically secure. Use crypto.randomBytes() for tokens/IDs.",
             call.span,
         );
@@ -1101,7 +1101,7 @@ mod tests {
         let v = check_js("const t = Math.random().toString(36).substring(2);");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
-        assert_eq!(v[0].severity, Severity::Medium);
+        assert_eq!(v[0].severity, Severity::High);
     }
 
     // T-011: math_random_insecure_to_string_36_no_chain_blocked
