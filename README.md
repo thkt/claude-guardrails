@@ -147,7 +147,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `sensitiveFile`         | Critical | Blocks writes to .env, credentials.\*, \*.pem                            | Never (security critical)                              |
 | `cryptoWeak`            | High     | Detects MD5, SHA1, DES, RC4 usage                                        | Legacy system maintenance with known constraints       |
 | `sensitiveLogging`      | High     | Detects password/token/secret in console.log                             | Never (security critical)                              |
-| `security`              | High     | XSS vectors, unsafe APIs, postMessage                                    | Never (security critical)                              |
+| `security`              | Mixed    | XSS vectors, unsafe APIs, sensitive storage. See `Security Rules` below for the rule_id breakdown | Never (security critical)                              |
 | `architecture`          | High     | Layer violations (e.g., UI importing domain)                             | Small projects, monoliths, or scripts                  |
 | `eval`                  | High     | eval(), new Function(), indirect eval                                    | Never (security critical)                              |
 | `hardcodedSecrets`      | High     | API keys, tokens, passwords in source                                    | Never (security critical)                              |
@@ -168,6 +168,15 @@ See `src/rules/` for custom rules that complement external linters.
 | `naming`                | Mixed    | Naming conventions (hooks, components, types)                            | Different naming conventions in team/project           |
 | `noUseEffect`           | Medium   | Flags useEffect in .tsx/.jsx with alternative suggestions                | Projects using useEffect intentionally                 |
 | `astSecurity`           | Mixed    | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection (see below) | Non-Node.js projects                                   |
+
+### Security Rules (`security`)
+
+The `security` toggle covers two rule_ids. Consumers filtering on the JSON `rule` field need the breakdown below.
+
+| Sub-rule (rule_id)     | Severity | Description                                                                                                          |
+| ---------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `security`             | Mixed    | `setTimeout('str')` / `setInterval('str')` / `postMessage(_, '*')` (High); sensitive `localStorage` / `sessionStorage` (Medium) |
+| `dangerous-inner-html` | High     | React `dangerouslySetInnerHTML={...}` (XSS sink, scoped to `.tsx` / `.jsx`)                                          |
 
 ### AST Security Rules (`astSecurity`)
 
