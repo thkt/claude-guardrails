@@ -3,10 +3,8 @@ mod bundle_size;
 pub(crate) mod cors_wildcard;
 mod cot_leakage_marker;
 mod crypto_weak;
-mod disable_mustache_escape;
 mod dom_access;
 pub(crate) mod eval;
-mod expression_injection;
 mod flaky_test;
 mod generated_file;
 mod hardcoded_secrets;
@@ -61,8 +59,6 @@ pub(crate) mod rule_id {
     pub const DANGEROUS_INNER_HTML: &str = "dangerous-inner-html";
     pub const MATH_RANDOM_INSECURE: &str = "math-random-insecure";
     pub const COT_LEAKAGE_MARKER: &str = "cot-leakage-marker";
-    pub const EXPRESSION_INJECTION: &str = "expression-injection";
-    pub const DISABLE_MUSTACHE_ESCAPE: &str = "disable-mustache-escape";
     pub const PROTOTYPE_POLLUTION: &str = "prototype-pollution";
     pub const SQLI_CONCAT: &str = "sqli-concat";
     pub const CORS_WILDCARD: &str = "cors-wildcard";
@@ -219,8 +215,6 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         http_resource     => http_resource,
         raw_html          => raw_html,
         cot_leakage_marker => cot_leakage_marker,
-        expression_injection => expression_injection,
-        disable_mustache_escape => disable_mustache_escape,
     );
     rules
 }
@@ -358,7 +352,7 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 20);
+        assert_eq!(rules.len(), 18);
     }
 
     #[test]

@@ -62,8 +62,6 @@ define_rule_config! {
     open_redirect     => "openRedirect",
     ast_security      => "astSecurity",
     cot_leakage_marker => "cotLeakageMarker",
-    expression_injection => "expressionInjection",
-    disable_mustache_escape => "disableMustacheEscape",
     sqli_concat       => "sqliConcat",
     cors_wildcard     => "corsWildcard",
 }
