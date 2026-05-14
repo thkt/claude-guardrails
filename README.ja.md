@@ -149,7 +149,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `sensitiveFile`         | Critical | .env、credentials.\*、\*.pem への書き込みをブロック                             | 無効化不可（セキュリティ上重要）                          |
 | `cryptoWeak`            | High     | MD5、SHA1、DES、RC4 の使用を検出                                                | 既知の制約があるレガシーシステムの保守                    |
 | `sensitiveLogging`      | High     | console.log 内の password/token/secret を検出                                   | 無効化不可（セキュリティ上重要）                          |
-| `security`              | High     | XSS ベクター、安全でない API、postMessage                                       | 無効化不可（セキュリティ上重要）                          |
+| `security`              | Mixed    | XSS ベクター、安全でない API、機密ストレージ。rule_id 別の内訳は下記の `Security Rules` を参照 | 無効化不可（セキュリティ上重要）                          |
 | `architecture`          | High     | レイヤー違反（例: UI がドメインをインポート）                                   | 小規模プロジェクト、モノリス、スクリプト                  |
 | `eval`                  | High     | eval()、new Function()、間接的 eval                                             | 無効化不可（セキュリティ上重要）                          |
 | `hardcodedSecrets`      | High     | ソースコード内の API キー、トークン、パスワード                                 | 無効化不可（セキュリティ上重要）                          |
@@ -170,6 +170,15 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `naming`                | Mixed    | 命名規則（hooks、コンポーネント、型）                                           | チーム/プロジェクトで異なる命名規則がある場合             |
 | `noUseEffect`           | Medium   | .tsx/.jsx内のuseEffectを検出し代替案を提示                                      | useEffectを意図的に使用するプロジェクト                   |
 | `astSecurity`           | Mixed    | ASTベース: コマンド/正規表現/require インジェクション、スタック露出、パストラバーサル、プロトタイプ汚染、bidi 文字、env-var フォールバック、不安全な乱数、HTML インジェクション（下記参照） | Node.js以外のプロジェクト                                 |
+
+### セキュリティルール（`security`）
+
+`security` toggle 配下には 2 つの rule_id が含まれます。JSON `rule` フィールドで振り分ける consumer 向けに内訳を以下に示します。
+
+| サブルール (rule_id)   | 重大度 | 説明                                                                                                                  |
+| ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| `security`             | Mixed  | `setTimeout('str')` / `setInterval('str')` / `postMessage(_, '*')` (High)、機密 `localStorage` / `sessionStorage` (Medium) |
+| `dangerous-inner-html` | High   | React の `dangerouslySetInnerHTML={...}`（XSS sink、`.tsx` / `.jsx` のみ対象）                                        |
 
 ### ASTセキュリティルール（`astSecurity`）
 
