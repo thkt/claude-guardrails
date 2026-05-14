@@ -156,8 +156,8 @@ See `src/rules/` for custom rules that complement external linters.
 | `rawHtml`               | High     | HTML concatenation with variables                                        | Non-web projects                                       |
 | `sqliConcat`            | High     | SQL assembled via template interpolation or string concatenation         | Projects without database access                       |
 | `httpResource`          | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                               |
-| `corsWildcard`          | Medium   | CORS wildcard origin (`cors({ origin: '*' })`, `Access-Control-Allow-Origin: *`) | Non-web projects, internal APIs only            |
-| `transaction`           | Medium   | Multiple writes without transaction wrapper                              | Non-database projects                                  |
+| `corsWildcard`          | Medium   | CORS wildcard origin (`cors({ origin: '*' })`, `Access-Control-Allow-Origin: *`). Scoped to `app/api/`, `pages/api/`, and `middleware.{ts,js}` | Rarely needed (scope already excludes UI/util files) |
+| `transaction`           | Medium   | Multiple writes without transaction wrapper. Scoped to `usecases/`, `services/`, `domain/`, `handlers/`, `app/`, `server/` directories and `app/**/route.{ts,js}` segments | Non-database projects, or layout that does not use these directory names |
 | `domAccess`             | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS                   |
 | `syncIo`                | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts        |
 | `bundleSize`            | Medium   | Full lodash/moment imports                                               | Backend/Node.js (no bundle size concerns)              |
@@ -175,10 +175,10 @@ Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the A
 
 | Sub-rule                  | Severity | Description                                                                                                                                |
 | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `child-process-injection` | High     | Non-literal args to exec/execSync/spawn/spawnSync                                                                                          |
-| `err-stack-exposure`      | High     | Error stack traces leaked in HTTP responses (res.json/res.send)                                                                            |
-| `non-literal-fs-path`     | Medium   | Non-literal file paths in fs.\* calls (path traversal risk)                                                                                |
-| `non-literal-require`     | Medium   | Non-literal arg to require() (dynamic module loading)                                                                                      |
+| `child-process-injection` | High     | Non-literal args to exec/execSync/spawn/spawnSync. Scoped to `app/api/`, `pages/api/`, and files with `'use server'` directive             |
+| `err-stack-exposure`      | High     | Error stack traces leaked in HTTP responses (res.json/res.send). Scoped to `app/api/`, `pages/api/`, and `app/**/route.{ts,js}` segments   |
+| `non-literal-fs-path`     | Medium   | Non-literal file paths in fs.\* calls (path traversal risk). Scoped to `app/api/`, `pages/api/`, and files with `'use server'` directive   |
+| `non-literal-require`     | Medium   | Non-literal arg to require() (dynamic module loading). Scoped to `app/api/`, `pages/api/`, and files with `'use server'` directive         |
 | `unsafe-regex`            | Medium   | Regex literals vulnerable to ReDoS (nested quantifiers, catastrophic backtracking)                                                         |
 | `bidi-characters`         | High     | Unicode bidirectional control chars hidden in source (CVE-2021-42574 / Trojan Source)                                                      |
 | `env-var-fallback`        | High     | `process.env.X \|\| 'default'` style — leaks secrets via hardcoded fallback                                                                |

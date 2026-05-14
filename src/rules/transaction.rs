@@ -1,9 +1,12 @@
-use super::{count_matches_in_lines, find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use super::{
+    count_matches_in_lines, find_match_in_lines, Rule, Severity, Violation, RE_API_OR_ROUTE_FILE,
+    RE_JS_FILE,
+};
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_TARGET_DIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"/(usecases?|use-cases?|application|services?|domain|handlers?|app)/")
+    Regex::new(r"/(usecases?|use-cases?|application|services?|domain|handlers?|app|server)/")
         .expect("RE_TARGET_DIR: invalid regex")
 });
 
@@ -23,7 +26,7 @@ pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
         checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            if !RE_TARGET_DIR.is_match(file_path) {
+            if !RE_TARGET_DIR.is_match(file_path) && !RE_API_OR_ROUTE_FILE.is_match(file_path) {
                 return Vec::new();
             }
 
@@ -134,6 +137,50 @@ mod tests {
         "#;
         let violations = check(content, "/src/domain/order/handler.ts");
         assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn detects_in_app_api_route() {
+        let content = r#"
+            export async function POST() {
+                await user.save();
+                await order.create();
+            }
+        "#;
+        assert_eq!(check(content, "/app/api/orders/route.ts").len(), 1);
+    }
+
+    #[test]
+    fn detects_in_pages_api() {
+        let content = r#"
+            export default async function handler() {
+                await user.save();
+                await order.create();
+            }
+        "#;
+        assert_eq!(check(content, "/pages/api/orders.ts").len(), 1);
+    }
+
+    #[test]
+    fn detects_in_server_directory() {
+        let content = r#"
+            async function handle() {
+                await user.save();
+                await order.create();
+            }
+        "#;
+        assert_eq!(check(content, "/server/orders/handler.ts").len(), 1);
+    }
+
+    #[test]
+    fn detects_in_app_route_segment() {
+        let content = r#"
+            export async function POST() {
+                await user.save();
+                await order.create();
+            }
+        "#;
+        assert_eq!(check(content, "/app/orders/[id]/route.tsx").len(), 1);
     }
 
     #[test]
