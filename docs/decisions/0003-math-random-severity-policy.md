@@ -8,9 +8,9 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-guardrails は AI エージェント向け hook として、AST 解析で検出した violation を `Severity` で分類し、`config.severity.block_on` メンバーシップで exit code (blocking=2 / advisory=1) を決定する (`src/hook_exit.rs`, `src/main.rs:469`)。default `block_on = [Critical, High]` (`src/config.rs:93`)。
+guardrails は AI エージェント向け hook として、AST 解析で検出した violation を `Severity` で分類し、`config.severity.block_on` メンバーシップで exit code (blocking=2 / advisory=1) を決定する (`src/hook_exit.rs`, `src/main.rs` の `partition_violations`)。default `block_on = [Critical, High]` (`src/config.rs` の `SeverityConfig::default()`)。
 
-既存 `Math.random().toString(36)` (`src/ast_security.rs:357`) は `Severity::Medium` で実装されており、default block_on 外、つまり default では Advisory (exit 1) しか出さない。これは OUTCOME.md Behavior B1「禁止パターン → blocking signal → 同サイクル修正」と齟齬する。Issue #80 で検出範囲を拡張する際、各検出パターンを blocking と advisory のどちらに振るかの判断基準が必要になった。
+既存 `Math.random().toString(36)` (`src/ast_security.rs` の `check_math_random_insecure` / `check_math_random_crypto_sink`) は `Severity::Medium` で実装されており、default block_on 外、つまり default では Advisory (exit 1) しか出さない。これは OUTCOME.md Behavior B1「禁止パターン → blocking signal → 同サイクル修正」と齟齬する。Issue #80 で検出範囲を拡張する際、各検出パターンを blocking と advisory のどちらに振るかの判断基準が必要になった。
 
 ## Decision Drivers
 
