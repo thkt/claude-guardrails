@@ -4,9 +4,9 @@ use oxc_ast::ast::{BinaryOperator, CallExpression, Expression, Program, Template
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
 
-const SQL_KEYWORDS: [&str; 11] = [
+const SQL_KEYWORDS: [&str; 13] = [
     "SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE", "DROP", "CREATE", "ALTER", "TRUNCATE",
-    "GRANT", "REVOKE",
+    "GRANT", "REVOKE", "UNION", "EXEC",
 ];
 
 const FIX_MESSAGE: &str =
@@ -82,10 +82,13 @@ fn collect_concat_parts(expr: &Expression, parts: &mut ConcatParts) {
             parts.literals.push(' ');
             parts.literals.push_str(s.value.as_str());
         }
-        Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
+        Expression::TemplateLiteral(tl) => {
             for q in &tl.quasis {
                 parts.literals.push(' ');
                 parts.literals.push_str(q.value.raw.as_str());
+            }
+            if !tl.expressions.is_empty() {
+                parts.has_dynamic = true;
             }
         }
         Expression::BinaryExpression(be) if be.operator == BinaryOperator::Addition => {
@@ -105,12 +108,11 @@ fn template_has_sql_keyword(tl: &TemplateLiteral) -> bool {
         .any(|q| contains_sql_keyword(q.value.raw.as_str()))
 }
 
-/// `console.*` 全般 (log/info/warn/error/debug) を除外する。DB sink ではないため。
 fn is_console_member_call(call: &CallExpression) -> bool {
-    let Some((object, _method)) = ast::member_name(&call.callee) else {
+    let Some((object, _)) = ast::member_name(&call.callee) else {
         return false;
     };
-    matches!(object, Expression::Identifier(id) if id.name == "console")
+    ast::is_ident(object, "console")
 }
 
 fn contains_sql_keyword(s: &str) -> bool {
@@ -120,14 +122,14 @@ fn contains_sql_keyword(s: &str) -> bool {
 
 impl<'a> Visit<'a> for SqliVisitor<'_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        if !is_console_member_call(call) {
-            for arg in &call.arguments {
-                if let Some(expr) = arg.as_expression() {
-                    if expression_is_dynamic_sql(expr) {
-                        self.push(call.span);
-                    }
-                }
-            }
+        if !is_console_member_call(call)
+            && call
+                .arguments
+                .iter()
+                .filter_map(|a| a.as_expression())
+                .any(expression_is_dynamic_sql)
+        {
+            self.push(call.span);
         }
         walk::walk_call_expression(self, call);
     }
@@ -240,7 +242,20 @@ mod tests {
         );
     }
 
-    // T-013: NFR-001: AST parse + check < 10ms per file
+    // T-014: dynamic TemplateLiteral participating in `+` concat → blocked
+    #[test]
+    fn detects_dynamic_template_in_concat_chain() {
+        let v = check_js("db.query(`SELECT * FROM users WHERE id = ${id}` + suffix);");
+        assert_eq!(
+            v.len(),
+            1,
+            "dynamic template in `+` chain must flag: {:?}",
+            v
+        );
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-015: NFR-001: AST parse + check < 10ms per file
     #[test]
     fn nfr001_sqli_under_10ms() {
         let content = concat!(

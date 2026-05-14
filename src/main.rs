@@ -455,7 +455,8 @@ fn collect_violations(
     let has_ast_rules = config.rules.ast_security
         || config.rules.no_use_effect
         || config.rules.open_redirect
-        || config.rules.eval;
+        || config.rules.eval
+        || config.rules.sqli_concat;
     if is_js && has_ast_rules {
         let (vs, note) = lint_with_ast(content, file_path, config);
         violations.extend(vs);
