@@ -232,7 +232,7 @@ guardrails --json < tool-call.json
 
 > **BREAKING (v0.15+)**: v0.14 で利用できた `GUARDRAILS_JSON=1` env は削除されました。代わりに `--json` を使ってください。すべての hook 呼び出しで JSON を出力したい場合は、hook の `command` にフラグを追加してください ([Claude Code Hookとして](#claude-code-hookとして)参照)。
 
-> **BREAKING (v0.15+)**: 成功時の出力は [ADR-0065](https://github.com/thkt/scout/blob/main/docs/decisions/0065-scout-json-output-schema-and-sysexits-exit-code-policy.md) に従って `SuccessEnvelope` (`{ data, degraded, notes }`) で wrap されます。旧 schema (`{ violations, decision, exit_code }`) は廃止 — hook 判定はプロセス終了コードを参照してください。
+> **BREAKING (v0.15+)**: 成功時の出力は [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) に従って `SuccessEnvelope` (`{ data, degraded, notes }`) で wrap されます。旧 schema (`{ violations, decision, exit_code }`) は廃止 — hook 判定はプロセス終了コードを参照してください。
 
 ### Success envelope
 
@@ -281,13 +281,13 @@ guardrails --json < tool-call.json
 
 | フィールド          | 型                                                                                | 補足                                       |
 | ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------ |
-| `error.code`        | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | ADR-0065 準拠の SCREAMING_SNAKE_CASE       |
+| `error.code`        | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) 準拠の SCREAMING_SNAKE_CASE |
 | `error.message`     | string                                                                            | 人間向けの詳細 (stderr にも出力される)     |
 | `error.next_step`   | string (optional)                                                                 | 復旧のための具体的なアクション             |
 | `error.candidates`  | 文字列の配列 (optional)                                                           | 復旧候補 (空なら省略)                      |
 | `error.retryable`   | bool                                                                              | 一時的な失敗の場合のみ `true`              |
 
-> **ケース混在**: `severity` は小文字 (v0.14 からの継承) で `error.code` は SCREAMING_SNAKE_CASE (ADR-0065)。意図的な混在で、両 shape は安定しています。
+> **ケース混在**: `severity` は小文字 (v0.14 からの継承) で `error.code` は SCREAMING_SNAKE_CASE ([ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md))。意図的な混在で、両 shape は安定しています。
 
 `--json` を付けない場合、出力は人間向けデフォルトモードとバイト単位で完全互換です。
 
