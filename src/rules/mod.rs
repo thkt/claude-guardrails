@@ -61,6 +61,7 @@ pub(crate) mod rule_id {
     pub const COT_LEAKAGE_MARKER: &str = "cot-leakage-marker";
     pub const EXPRESSION_INJECTION: &str = "expression-injection";
     pub const DISABLE_MUSTACHE_ESCAPE: &str = "disable-mustache-escape";
+    pub const PROTOTYPE_POLLUTION: &str = "prototype-pollution";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
