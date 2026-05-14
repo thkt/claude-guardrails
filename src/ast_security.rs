@@ -21,6 +21,16 @@ const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
 
+/// (object identifier alternatives, method name, argument indices that expect crypto-strong randomness).
+/// 当該 index に `Math.random()` が渡されると Severity::High で blocking する。
+const CRYPTO_SINK_METHODS: &[(&[&str], &str, &[usize])] = &[
+    (&["bcrypt"], "hash", &[1]),
+    (&["jsonwebtoken", "jwt"], "sign", &[1]),
+    (&["crypto.subtle"], "importKey", &[1]),
+    (&["crypto"], "createCipheriv", &[1, 2]),
+    (&["crypto"], "createHmac", &[1]),
+];
+
 /// (object identifier alternatives, method name alternatives, fix message).
 /// Each row registers an assignment-style merge sink that pollutes its target
 /// when the source is untrusted (`JSON.parse(...)`).
@@ -38,6 +48,27 @@ const POLLUTION_MERGE_SINKS: &[(&[&str], &[&str], &str)] = &[
 ];
 fn is_bidi_char(ch: char) -> bool {
     matches!(ch, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+fn is_math_random_call(expr: &Expression) -> bool {
+    let Expression::CallExpression(call) = expr else {
+        return false;
+    };
+    let Expression::StaticMemberExpression(sme) = &call.callee else {
+        return false;
+    };
+    ast::is_ident(&sme.object, "Math") && sme.property.name == "random"
+}
+
+fn member_object_chain(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::Identifier(id) => Some(id.name.to_string()),
+        Expression::StaticMemberExpression(sme) => {
+            let inner = member_object_chain(&sme.object)?;
+            Some(format!("{}.{}", inner, sme.property.name))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -360,6 +391,39 @@ impl SecurityVisitor<'_> {
             call.span,
         );
     }
+
+    fn check_math_random_crypto_sink(&mut self, call: &CallExpression) {
+        if self.is_test_file {
+            return;
+        }
+        let Some((obj, method)) = ast::member_name(&call.callee) else {
+            return;
+        };
+        let Some(chain) = member_object_chain(obj) else {
+            return;
+        };
+        for &(objs, m, indices) in CRYPTO_SINK_METHODS {
+            if m != method {
+                continue;
+            }
+            if !objs.contains(&chain.as_str()) {
+                continue;
+            }
+            for &i in indices {
+                if let Some(expr) = call.arguments.get(i).and_then(|a| a.as_expression()) {
+                    if is_math_random_call(expr) {
+                        self.push_violation(
+                            rule_id::MATH_RANDOM_INSECURE,
+                            Severity::High,
+                            "Math.random() is not cryptographically secure as crypto API input. Use crypto.randomBytes() or crypto.getRandomValues().",
+                            call.span,
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -375,6 +439,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_fs_path(it);
         self.check_non_literal_require(it);
         self.check_math_random_insecure(it);
+        self.check_math_random_crypto_sink(it);
         self.check_document_write(it);
         self.check_merge_pollution_sinks(it);
         walk::walk_call_expression(self, it);
@@ -1152,6 +1217,59 @@ mod tests {
     #[test]
     fn math_random_insecure_fail_open_on_invalid_syntax() {
         let v = check_js("function { Math.random().toString(36) !!!");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-022: math_random_crypto_sink_bcrypt_hash_blocked
+    #[test]
+    fn math_random_crypto_sink_bcrypt_hash_blocked() {
+        let v = check_js(r#"bcrypt.hash("pwd", Math.random());"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-023: math_random_crypto_sink_jwt_sign_blocked
+    #[test]
+    fn math_random_crypto_sink_jwt_sign_blocked() {
+        let v = check_js("jsonwebtoken.sign(payload, Math.random());");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-024: math_random_crypto_sink_subtle_import_key_blocked
+    #[test]
+    fn math_random_crypto_sink_subtle_import_key_blocked() {
+        let v =
+            check_js(r#"crypto.subtle.importKey("raw", Math.random(), algo, false, ["sign"]);"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-025: math_random_crypto_sink_create_cipheriv_blocked
+    #[test]
+    fn math_random_crypto_sink_create_cipheriv_blocked() {
+        let v = check_js(r#"crypto.createCipheriv("aes-256-cbc", Math.random(), iv);"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-025b: math_random_crypto_sink_create_hmac_blocked
+    #[test]
+    fn math_random_crypto_sink_create_hmac_blocked() {
+        let v = check_js(r#"crypto.createHmac("sha256", Math.random());"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-026: math_random_crypto_sink_bcrypt_with_precomputed_salt_allowed
+    #[test]
+    fn math_random_crypto_sink_bcrypt_with_precomputed_salt_allowed() {
+        let v = check_js(r#"bcrypt.hash("pwd", precomputedSalt);"#);
         assert_eq!(v.len(), 0);
     }
 
