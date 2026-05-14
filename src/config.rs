@@ -64,6 +64,7 @@ define_rule_config! {
     cot_leakage_marker => "cotLeakageMarker",
     expression_injection => "expressionInjection",
     disable_mustache_escape => "disableMustacheEscape",
+    sqli_concat       => "sqliConcat",
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -408,6 +408,13 @@ fn lint_with_ast(
                 &import_map,
             ));
         }
+        if config.rules.sqli_concat {
+            found.extend(rules::sqli_concat::check_program(
+                program,
+                line_offsets,
+                file_path,
+            ));
+        }
         found
     });
     match result {
