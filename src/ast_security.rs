@@ -23,6 +23,8 @@ const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
 
+const USE_SERVER_DIRECTIVE: &str = "use server";
+
 /// crypto API sink。当該 index に `Math.random()` が渡されると Severity::High で blocking する。
 struct CryptoSink {
     object_aliases: &'static [&'static str],
@@ -228,21 +230,25 @@ pub fn check_program(
     file_path: &str,
 ) -> Vec<Violation> {
     let is_api_file = RE_API_FILE.is_match(file_path);
-    let has_use_server = program
-        .directives
-        .iter()
-        .any(|d| d.directive.as_str() == "use server");
+    let has_top_level_use_server = !is_api_file && has_use_server_directive(&program.directives);
     let mut visitor = SecurityVisitor {
         violations: Vec::new(),
         file_path,
         line_offsets,
         is_test_file: RE_TEST_FILE.is_match(file_path),
         is_api_or_route: RE_API_OR_ROUTE_FILE.is_match(file_path),
-        is_server_context: is_api_file || has_use_server,
+        is_server_context: is_api_file || has_top_level_use_server,
+        use_server_depth: 0,
         in_security_named_fn: false,
     };
     visitor.visit_program(program);
     visitor.violations
+}
+
+fn has_use_server_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
+    directives
+        .iter()
+        .any(|d| d.directive.as_str() == USE_SERVER_DIRECTIVE)
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -270,12 +276,17 @@ struct SecurityVisitor<'s> {
     is_test_file: bool,
     is_api_or_route: bool,
     is_server_context: bool,
+    use_server_depth: u32,
     in_security_named_fn: bool,
 }
 
 impl SecurityVisitor<'_> {
     fn span_to_line(&self, span: Span) -> u32 {
         ast::span_to_line(self.line_offsets, span)
+    }
+
+    fn in_server_context(&self) -> bool {
+        self.is_server_context || self.use_server_depth > 0
     }
 
     fn push_violation(&mut self, rule: &str, severity: Severity, fix: &str, span: Span) {
@@ -309,7 +320,7 @@ impl SecurityVisitor<'_> {
     }
 
     fn check_child_process(&mut self, call: &CallExpression) {
-        if !self.is_server_context {
+        if !self.in_server_context() {
             return;
         }
         // KNOWN LIMITATION: aliased imports (import { exec as run }) are not detected.
@@ -339,7 +350,7 @@ impl SecurityVisitor<'_> {
     }
 
     fn check_fs_path(&mut self, call: &CallExpression) {
-        if !self.is_server_context {
+        if !self.in_server_context() {
             return;
         }
         let obj = match &call.callee {
@@ -368,7 +379,7 @@ impl SecurityVisitor<'_> {
     }
 
     fn check_non_literal_require(&mut self, call: &CallExpression) {
-        if !self.is_server_context {
+        if !self.in_server_context() {
             return;
         }
         let Expression::Identifier(id) = &call.callee else {
@@ -692,7 +703,17 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
                 self.in_security_named_fn = true;
             }
         }
+        let entered_use_server = func
+            .body
+            .as_deref()
+            .is_some_and(|body| has_use_server_directive(&body.directives));
+        if entered_use_server {
+            self.use_server_depth += 1;
+        }
         walk::walk_function(self, func, flags);
+        if entered_use_server {
+            self.use_server_depth -= 1;
+        }
         self.in_security_named_fn = prev;
     }
 
@@ -2125,6 +2146,7 @@ mod tests {
             "/src/app/orders/[id]/route.ts",
         );
         assert_eq!(v.len(), 1, "app/**/route.ts must flag: {:?}", v);
+        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
     #[test]
@@ -2182,5 +2204,42 @@ mod tests {
         let v = check("'use server';\nexec(userInput);", "/src/lib/actions.ts");
         assert_eq!(v.len(), 1, "use server must flag: {:?}", v);
         assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
+    }
+
+    #[test]
+    fn detects_inline_use_server_inside_function_body() {
+        let code = r#"
+            export async function submitForm(formData) {
+                'use server';
+                fs.readFile(formData.get('path'), cb);
+            }
+        "#;
+        let v = check(code, "/src/app/page.tsx");
+        assert_eq!(v.len(), 1, "inline use server must flag: {:?}", v);
+        assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
+    }
+
+    #[test]
+    fn inline_use_server_scope_exits_with_function() {
+        let code = r#"
+            async function action() {
+                'use server';
+                require(modulePath);
+            }
+            fs.readFile(unsafePath, cb);
+        "#;
+        let v = check(code, "/src/components/Form.tsx");
+        assert_eq!(v.len(), 1, "only inner call flags: {:?}", v);
+        assert_eq!(v[0].rule, rule_id::NON_LITERAL_REQUIRE);
+    }
+
+    #[test]
+    fn err_stack_detected_in_root_app_route() {
+        let v = check(
+            "export async function GET() { res.json({ stack: err.stack }); }",
+            "/src/app/route.ts",
+        );
+        assert_eq!(v.len(), 1, "root app/route.ts must flag: {:?}", v);
+        assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 }

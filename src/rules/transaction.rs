@@ -1,12 +1,13 @@
-use super::{count_matches_in_lines, find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use super::{
+    count_matches_in_lines, find_match_in_lines, Rule, Severity, Violation, RE_API_OR_ROUTE_FILE,
+    RE_JS_FILE,
+};
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_TARGET_DIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"/(usecases?|use-cases?|application|services?|domain|handlers?|app|server)/|(^|/)(app|pages)/api/|(^|/)app/.*/route\.[jt]sx?$",
-    )
-    .expect("RE_TARGET_DIR: invalid regex")
+    Regex::new(r"/(usecases?|use-cases?|application|services?|domain|handlers?|app|server)/")
+        .expect("RE_TARGET_DIR: invalid regex")
 });
 
 static RE_WRITE_OPS: LazyLock<Regex> = LazyLock::new(|| {
@@ -25,7 +26,7 @@ pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
         checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            if !RE_TARGET_DIR.is_match(file_path) {
+            if !RE_TARGET_DIR.is_match(file_path) && !RE_API_OR_ROUTE_FILE.is_match(file_path) {
                 return Vec::new();
             }
 
