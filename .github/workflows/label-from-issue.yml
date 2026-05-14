@@ -28,7 +28,7 @@ jobs:
 
       - name: Apply labels for bug
         if: steps.parse-bug.outcome == 'success'
-        uses: redhat-plumbers-in-action/advanced-issue-labeler@9e55064634b67244f7deb4211452b4a7217b93de # v2
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # v3.2.4
         with:
           issue-form: ${{ steps.parse-bug.outputs.jsonString }}
           template: bug.yml
@@ -44,7 +44,7 @@ jobs:
 
       - name: Apply labels for feature
         if: steps.parse-feature.outcome == 'success'
-        uses: redhat-plumbers-in-action/advanced-issue-labeler@9e55064634b67244f7deb4211452b4a7217b93de # v2
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # v3.2.4
         with:
           issue-form: ${{ steps.parse-feature.outputs.jsonString }}
           template: feature.yml
