@@ -155,6 +155,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `rawHtml`          | High     | HTML concatenation with variables                                        | Non-web projects                                 |
 | `sqliConcat`       | High     | SQL assembled via template interpolation or string concatenation         | Projects without database access                 |
 | `httpResource`     | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                         |
+| `corsWildcard`     | Medium   | CORS wildcard origin (`cors({ origin: '*' })`, `Access-Control-Allow-Origin: *`) | Non-web projects, internal APIs only      |
 | `transaction`      | Medium   | Multiple writes without transaction wrapper                              | Non-database projects                            |
 | `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS             |
 | `syncIo`           | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts  |

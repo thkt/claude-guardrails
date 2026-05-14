@@ -415,6 +415,13 @@ fn lint_with_ast(
                 file_path,
             ));
         }
+        if config.rules.cors_wildcard {
+            found.extend(rules::cors_wildcard::check_program(
+                program,
+                line_offsets,
+                file_path,
+            ));
+        }
         found
     });
     match result {
@@ -456,7 +463,8 @@ fn collect_violations(
         || config.rules.no_use_effect
         || config.rules.open_redirect
         || config.rules.eval
-        || config.rules.sqli_concat;
+        || config.rules.sqli_concat
+        || config.rules.cors_wildcard;
     if is_js && has_ast_rules {
         let (vs, note) = lint_with_ast(content, file_path, config);
         violations.extend(vs);

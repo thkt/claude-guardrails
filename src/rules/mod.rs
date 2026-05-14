@@ -1,5 +1,6 @@
 mod architecture;
 mod bundle_size;
+pub(crate) mod cors_wildcard;
 mod cot_leakage_marker;
 mod crypto_weak;
 mod disable_mustache_escape;
@@ -64,6 +65,7 @@ pub(crate) mod rule_id {
     pub const DISABLE_MUSTACHE_ESCAPE: &str = "disable-mustache-escape";
     pub const PROTOTYPE_POLLUTION: &str = "prototype-pollution";
     pub const SQLI_CONCAT: &str = "sqli-concat";
+    pub const CORS_WILDCARD: &str = "cors-wildcard";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
