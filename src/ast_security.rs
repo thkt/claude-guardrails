@@ -1915,6 +1915,9 @@ mod tests {
             "Object.assign(target, JSON.parse(input));\n",
             "_.merge(target, JSON.parse(input));\n",
             "const lookup = styleMap[variant];\n",
+            "const token = Math.random();\n",
+            "function generateSessionToken() { return Math.random(); }\n",
+            "const fixed = Math.random().toFixed(8);\n",
         );
         let start = Instant::now();
         let iterations = 100;
