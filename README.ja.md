@@ -281,7 +281,7 @@ guardrails --json < tool-call.json
 
 | フィールド          | 型                                                                                | 補足                                       |
 | ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------ |
-| `error.code`        | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) 準拠の SCREAMING_SNAKE_CASE |
+| `error.code`        | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"IO_ERROR"` | [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) 準拠の SCREAMING_SNAKE_CASE |
 | `error.message`     | string                                                                            | 人間向けの詳細 (stderr にも出力される)     |
 | `error.next_step`   | string (optional)                                                                 | 復旧のための具体的なアクション             |
 | `error.candidates`  | 文字列の配列 (optional)                                                           | 復旧候補 (空なら省略)                      |

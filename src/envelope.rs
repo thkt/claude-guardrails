@@ -36,12 +36,11 @@ impl<T: Serialize> SuccessEnvelope<T> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(clippy::enum_variant_names)]
 pub enum ErrorCode {
     UsageError,
     DataError,
-    NotFound,
     IoError,
-    TempFailure,
 }
 
 impl ErrorCode {
@@ -49,9 +48,7 @@ impl ErrorCode {
         match self {
             Self::UsageError => 64,
             Self::DataError => 65,
-            Self::NotFound => 66,
             Self::IoError => 74,
-            Self::TempFailure => 75,
         }
     }
 }
@@ -186,9 +183,7 @@ mod tests {
         let pairs = [
             (ErrorCode::UsageError, r#""USAGE_ERROR""#),
             (ErrorCode::DataError, r#""DATA_ERROR""#),
-            (ErrorCode::NotFound, r#""NOT_FOUND""#),
             (ErrorCode::IoError, r#""IO_ERROR""#),
-            (ErrorCode::TempFailure, r#""TEMP_FAILURE""#),
         ];
         for (code, expected) in pairs {
             let actual = serde_json::to_string(&code).unwrap();
@@ -203,8 +198,6 @@ mod tests {
     fn error_code_exit_code_matches_sysexits_h() {
         assert_eq!(ErrorCode::UsageError.exit_code(), 64);
         assert_eq!(ErrorCode::DataError.exit_code(), 65);
-        assert_eq!(ErrorCode::NotFound.exit_code(), 66);
         assert_eq!(ErrorCode::IoError.exit_code(), 74);
-        assert_eq!(ErrorCode::TempFailure.exit_code(), 75);
     }
 }
