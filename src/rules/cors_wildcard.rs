@@ -10,7 +10,7 @@ use oxc_span::Span;
 const CORS_HEADER: &str = "Access-Control-Allow-Origin";
 const WILDCARD: &str = "*";
 
-const HEADER_METHODS: [&str; 3] = ["setHeader", "header", "appendHeader"];
+const HEADER_METHODS: [&str; 4] = ["setHeader", "header", "appendHeader", "set"];
 
 const FIX_MESSAGE: &str =
     "CORS wildcard '*' grants any origin. Restrict to a specific URL or an allowlist array.";
@@ -69,12 +69,17 @@ fn is_header_setter_call(call: &CallExpression) -> bool {
     HEADER_METHODS.contains(&method)
 }
 
-fn cors_options_has_wildcard_origin(call: &CallExpression) -> bool {
+/// npm `cors` middleware defaults `origin` to `*` when omitted, so `cors()`
+/// and `cors({ credentials: true })` both emit `Access-Control-Allow-Origin: *`.
+fn cors_call_has_wildcard_origin(call: &CallExpression) -> bool {
+    if call.arguments.is_empty() {
+        return true;
+    }
     call.arguments.iter().any(|arg| {
         let Some(Expression::ObjectExpression(obj)) = arg.as_expression() else {
             return false;
         };
-        origin_is_wildcard(obj)
+        origin_is_wildcard(obj) || !origin_property_present(obj)
     })
 }
 
@@ -84,6 +89,15 @@ fn origin_is_wildcard(obj: &ObjectExpression) -> bool {
             return false;
         };
         property_key_is(&p.key, "origin") && string_value_is(&p.value, WILDCARD)
+    })
+}
+
+fn origin_property_present(obj: &ObjectExpression) -> bool {
+    obj.properties.iter().any(|prop| {
+        let ObjectPropertyKind::ObjectProperty(p) = prop else {
+            return false;
+        };
+        property_key_is(&p.key, "origin")
     })
 }
 
@@ -121,7 +135,7 @@ fn string_arg<'a>(arg: &'a Argument<'a>) -> Option<&'a str> {
 
 impl<'a> Visit<'a> for CorsVisitor<'_> {
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        if (is_cors_call(call) && cors_options_has_wildcard_origin(call))
+        if (is_cors_call(call) && cors_call_has_wildcard_origin(call))
             || (is_header_setter_call(call) && header_setter_is_acao_wildcard(call))
         {
             self.push(call.span);
@@ -232,7 +246,29 @@ mod tests {
         assert_eq!(v.len(), 1);
     }
 
-    // T-013: NFR-001 perf < 10ms/file
+    // T-014: cors() with no arguments → blocked (npm cors default origin is '*')
+    #[test]
+    fn detects_cors_with_no_arguments() {
+        let v = check_js("app.use(cors());");
+        assert_eq!(v.len(), 1, "cors() no-arg must flag: {:?}", v);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-015: cors options without origin property → blocked (default '*')
+    #[test]
+    fn detects_cors_options_without_origin_property() {
+        let v = check_js("app.use(cors({ credentials: true }));");
+        assert_eq!(v.len(), 1, "cors options w/o origin must flag: {:?}", v);
+    }
+
+    // T-016: res.set('Access-Control-Allow-Origin', '*') → blocked (Express alias)
+    #[test]
+    fn detects_express_set_acao_wildcard() {
+        let v = check_js("res.set('Access-Control-Allow-Origin', '*');");
+        assert_eq!(v.len(), 1, "res.set must flag: {:?}", v);
+    }
+
+    // T-017: NFR-001 perf < 10ms/file
     #[test]
     fn nfr001_cors_under_10ms() {
         let content = concat!(
