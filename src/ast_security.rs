@@ -3,7 +3,8 @@ use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
     BindingPattern, CallExpression, Expression, Function, LogicalExpression, LogicalOperator,
-    ObjectPropertyKind, Program, RegExpLiteral, VariableDeclarator,
+    MethodDefinition, ObjectProperty, ObjectPropertyKind, Program, RegExpLiteral,
+    VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -68,14 +69,26 @@ fn is_bidi_char(ch: char) -> bool {
     matches!(ch, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
-fn is_math_random_call(expr: &Expression) -> bool {
-    let Expression::CallExpression(call) = expr else {
-        return false;
-    };
+fn unwrap_parenthesized<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    let mut current = expr;
+    while let Expression::ParenthesizedExpression(p) = current {
+        current = &p.expression;
+    }
+    current
+}
+
+fn is_math_random_callee(call: &CallExpression) -> bool {
     let Expression::StaticMemberExpression(sme) = &call.callee else {
         return false;
     };
     ast::is_ident(&sme.object, "Math") && sme.property.name == "random"
+}
+
+fn is_math_random_call(expr: &Expression) -> bool {
+    let Expression::CallExpression(call) = unwrap_parenthesized(expr) else {
+        return false;
+    };
+    is_math_random_callee(call)
 }
 
 fn member_object_chain(expr: &Expression) -> Option<String> {
@@ -97,6 +110,7 @@ fn name_matches_security_keyword(name: &str) -> bool {
 }
 
 fn expression_contains_math_random(expr: &Expression) -> bool {
+    let expr = unwrap_parenthesized(expr);
     if is_math_random_call(expr) {
         return true;
     }
@@ -104,10 +118,20 @@ fn expression_contains_math_random(expr: &Expression) -> bool {
         Expression::BinaryExpression(be) => {
             expression_contains_math_random(&be.left) || expression_contains_math_random(&be.right)
         }
-        Expression::CallExpression(call) => call.arguments.iter().any(|a| {
-            a.as_expression()
-                .is_some_and(expression_contains_math_random)
-        }),
+        Expression::CallExpression(call) => {
+            let callee_has = match &call.callee {
+                Expression::StaticMemberExpression(sme) => {
+                    expression_contains_math_random(&sme.object)
+                }
+                _ => false,
+            };
+            callee_has
+                || call.arguments.iter().any(|a| {
+                    a.as_expression()
+                        .is_some_and(expression_contains_math_random)
+                })
+        }
+        Expression::StaticMemberExpression(sme) => expression_contains_math_random(&sme.object),
         _ => false,
     }
 }
@@ -451,10 +475,7 @@ impl SecurityVisitor<'_> {
         let Expression::CallExpression(inner) = &method.object else {
             return;
         };
-        let Expression::StaticMemberExpression(rand) = &inner.callee else {
-            return;
-        };
-        if !ast::is_ident(&rand.object, "Math") || rand.property.name != "random" {
+        if !is_math_random_callee(inner) {
             return;
         }
         self.push_violation(
@@ -484,7 +505,7 @@ impl SecurityVisitor<'_> {
             }
             for &i in indices {
                 if let Some(expr) = call.arguments.get(i).and_then(|a| a.as_expression()) {
-                    if is_math_random_call(expr) {
+                    if expression_contains_math_random(expr) {
                         self.push_violation(
                             rule_id::MATH_RANDOM_INSECURE,
                             Severity::High,
@@ -526,10 +547,7 @@ impl SecurityVisitor<'_> {
         if self.is_test_file || !self.in_security_named_fn {
             return;
         }
-        let Expression::StaticMemberExpression(sme) = &call.callee else {
-            return;
-        };
-        if !ast::is_ident(&sme.object, "Math") || sme.property.name != "random" {
+        if !is_math_random_callee(call) {
             return;
         }
         self.push_violation(
@@ -562,10 +580,7 @@ impl SecurityVisitor<'_> {
         let Expression::CallExpression(inner) = &method.object else {
             return;
         };
-        let Expression::StaticMemberExpression(rand) = &inner.callee else {
-            return;
-        };
-        if !ast::is_ident(&rand.object, "Math") || rand.property.name != "random" {
+        if !is_math_random_callee(inner) {
             return;
         }
         self.push_violation(
@@ -606,6 +621,33 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
             }
         }
         walk::walk_function(self, func, flags);
+        self.in_security_named_fn = prev;
+    }
+
+    fn visit_method_definition(&mut self, it: &MethodDefinition<'a>) {
+        let prev = self.in_security_named_fn;
+        if let Some(name) = it.key.static_name() {
+            if name_matches_security_keyword(&name) {
+                self.in_security_named_fn = true;
+            }
+        }
+        walk::walk_method_definition(self, it);
+        self.in_security_named_fn = prev;
+    }
+
+    fn visit_object_property(&mut self, it: &ObjectProperty<'a>) {
+        let prev = self.in_security_named_fn;
+        if let Some(name) = it.key.static_name() {
+            if name_matches_security_keyword(&name)
+                && matches!(
+                    &it.value,
+                    Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+                )
+            {
+                self.in_security_named_fn = true;
+            }
+        }
+        walk::walk_object_property(self, it);
         self.in_security_named_fn = prev;
     }
 
@@ -1541,6 +1583,44 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
         assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-038: math_random_crypto_sink_parenthesized_blocked
+    #[test]
+    fn math_random_crypto_sink_parenthesized_blocked() {
+        let v = check_js(r#"bcrypt.hash("pwd", (Math.random()));"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-039: math_random_crypto_sink_wrapped_arg_blocked
+    #[test]
+    fn math_random_crypto_sink_wrapped_arg_blocked() {
+        let v = check_js(r#"bcrypt.hash("pwd", Math.random().toString());"#);
+        assert!(
+            v.iter().any(|v| v.severity == Severity::High),
+            "expected at least one High violation, got: {v:?}"
+        );
+    }
+
+    // T-040: math_random_keyword_fn_method_definition_blocked
+    #[test]
+    fn math_random_keyword_fn_method_definition_blocked() {
+        let v = check_js("class Auth { generateToken() { return Math.random(); } }");
+        assert!(
+            v.iter().any(|v| v.severity == Severity::Medium),
+            "expected at least one Medium violation, got: {v:?}"
+        );
+    }
+
+    // T-041: math_random_keyword_fn_object_property_blocked
+    #[test]
+    fn math_random_keyword_fn_object_property_blocked() {
+        let v = check_js("const auth = { generateToken: () => Math.random() };");
+        assert!(
+            v.iter().any(|v| v.severity == Severity::Medium),
+            "expected at least one Medium violation, got: {v:?}"
+        );
     }
 
     // T-019: detects_inner_html_variable_assignment
