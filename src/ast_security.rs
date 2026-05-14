@@ -539,6 +539,42 @@ impl SecurityVisitor<'_> {
             call.span,
         );
     }
+
+    fn check_math_random_to_string_other(&mut self, call: &CallExpression) {
+        if self.is_test_file {
+            return;
+        }
+        let Expression::StaticMemberExpression(method) = &call.callee else {
+            return;
+        };
+        let method_matches = match method.property.name.as_str() {
+            "toString" => match call.arguments.as_slice() {
+                [] => true,
+                [Argument::NumericLiteral(n)] => (n.value - 36.0).abs() > f64::EPSILON,
+                _ => true,
+            },
+            "toFixed" => true,
+            _ => return,
+        };
+        if !method_matches {
+            return;
+        }
+        let Expression::CallExpression(inner) = &method.object else {
+            return;
+        };
+        let Expression::StaticMemberExpression(rand) = &inner.callee else {
+            return;
+        };
+        if !ast::is_ident(&rand.object, "Math") || rand.property.name != "random" {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::Medium,
+            "Math.random().toString()/toFixed() in a likely identifier context. Use crypto.randomBytes() or crypto.getRandomValues() for tokens/IDs.",
+            call.span,
+        );
+    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -556,6 +592,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_math_random_insecure(it);
         self.check_math_random_crypto_sink(it);
         self.check_math_random_keyword_fn(it);
+        self.check_math_random_to_string_other(it);
         self.check_document_write(it);
         self.check_merge_pollution_sinks(it);
         walk::walk_call_expression(self, it);
@@ -1477,6 +1514,33 @@ mod tests {
     fn math_random_keyword_fn_no_keyword_match_allowed() {
         let v = check_js("function generateAnimOffset() { return Math.random() * 360; }");
         assert_eq!(v.len(), 0);
+    }
+
+    // T-033: math_random_to_string_no_arg_blocked
+    #[test]
+    fn math_random_to_string_no_arg_blocked() {
+        let v = check_js("const x = Math.random().toString();");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-034: math_random_to_fixed_blocked
+    #[test]
+    fn math_random_to_fixed_blocked() {
+        let v = check_js("const x = Math.random().toFixed(8);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-035: math_random_to_string_36_remains_high
+    #[test]
+    fn math_random_to_string_36_remains_high() {
+        let v = check_js("const x = Math.random().toString(36);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
     }
 
     // T-019: detects_inner_html_variable_assignment
