@@ -279,7 +279,7 @@ When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO
 
 | Field             | Type                                            | Notes                                                            |
 | ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| `error.code`      | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | SCREAMING_SNAKE_CASE per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) |
+| `error.code`      | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"IO_ERROR"` | SCREAMING_SNAKE_CASE per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) |
 | `error.message`   | string                                          | Human-readable detail (also printed on stderr)                   |
 | `error.next_step` | string (optional)                               | Concrete action to recover                                       |
 | `error.candidates`| array of strings (optional)                     | Recovery candidates (omitted when empty)                         |
