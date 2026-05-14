@@ -219,6 +219,69 @@ impl SecurityVisitor<'_> {
         );
     }
 
+    fn check_prototype_pollution(&mut self, expr: &AssignmentExpression) {
+        let key = match &expr.left {
+            AssignmentTarget::StaticMemberExpression(sme) => Some(sme.property.name.as_str()),
+            AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
+                Expression::StringLiteral(s) => Some(s.value.as_str()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if matches!(key, Some("__proto__" | "constructor" | "prototype")) {
+            self.push_violation(
+                rule_id::PROTOTYPE_POLLUTION,
+                Severity::High,
+                "Direct assignment to __proto__/constructor/prototype enables prototype pollution. Use Object.defineProperty or Map.",
+                expr.span,
+            );
+        }
+    }
+
+    fn check_merge_pollution(&mut self, call: &CallExpression, fix: &str) {
+        let Some(target) = call.arguments.first().and_then(|a| a.as_expression()) else {
+            return;
+        };
+        if is_safe_assign_target(target) {
+            return;
+        }
+        let has_untrusted = call
+            .arguments
+            .iter()
+            .skip(1)
+            .any(|arg| arg.as_expression().is_some_and(is_json_parse_call));
+        if has_untrusted {
+            self.push_violation(rule_id::PROTOTYPE_POLLUTION, Severity::High, fix, call.span);
+        }
+    }
+
+    fn check_object_assign_pollution(&mut self, call: &CallExpression) {
+        let Expression::StaticMemberExpression(sme) = &call.callee else {
+            return;
+        };
+        if !ast::is_ident(&sme.object, "Object") || sme.property.name != "assign" {
+            return;
+        }
+        self.check_merge_pollution(
+            call,
+            "Object.assign with JSON.parse() source can pollute prototype. Use {} or Object.create(null) target.",
+        );
+    }
+
+    fn check_lodash_merge_pollution(&mut self, call: &CallExpression) {
+        let Expression::StaticMemberExpression(sme) = &call.callee else {
+            return;
+        };
+        let is_lodash = ast::is_ident(&sme.object, "_") || ast::is_ident(&sme.object, "lodash");
+        if !is_lodash || !matches!(sme.property.name.as_str(), "merge" | "defaultsDeep") {
+            return;
+        }
+        self.check_merge_pollution(
+            call,
+            "lodash merge/defaultsDeep with JSON.parse() source can pollute prototype. Use {} or Object.create(null) target.",
+        );
+    }
+
     fn check_html_assignment(&mut self, expr: &AssignmentExpression) {
         let AssignmentTarget::StaticMemberExpression(sme) = &expr.left else {
             return;
@@ -303,6 +366,7 @@ impl SecurityVisitor<'_> {
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
         self.check_html_assignment(expr);
+        self.check_prototype_pollution(expr);
         walk::walk_assignment_expression(self, expr);
     }
 
@@ -313,6 +377,8 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_non_literal_require(it);
         self.check_math_random_insecure(it);
         self.check_document_write(it);
+        self.check_object_assign_pollution(it);
+        self.check_lodash_merge_pollution(it);
         walk::walk_call_expression(self, it);
     }
 
@@ -431,6 +497,35 @@ fn is_safe_html_value(expr: &Expression) -> bool {
         }
         _ => false,
     }
+}
+
+fn is_safe_assign_target(expr: &Expression) -> bool {
+    if matches!(expr, Expression::ObjectExpression(_)) {
+        return true;
+    }
+    let Expression::CallExpression(call) = expr else {
+        return false;
+    };
+    let Expression::StaticMemberExpression(sme) = &call.callee else {
+        return false;
+    };
+    if !ast::is_ident(&sme.object, "Object") || sme.property.name != "create" {
+        return false;
+    }
+    matches!(
+        call.arguments.first().and_then(|a| a.as_expression()),
+        Some(Expression::NullLiteral(_))
+    )
+}
+
+fn is_json_parse_call(expr: &Expression) -> bool {
+    let Expression::CallExpression(call) = expr else {
+        return false;
+    };
+    let Expression::StaticMemberExpression(sme) = &call.callee else {
+        return false;
+    };
+    ast::is_ident(&sme.object, "JSON") && sme.property.name == "parse"
 }
 
 fn is_static_path(expr: &Expression) -> bool {
@@ -1151,6 +1246,171 @@ mod tests {
         assert_eq!(v[0].severity, Severity::High);
     }
 
+    // T-022: prototype_pollution_literal_proto_assignment_blocked
+    #[test]
+    fn prototype_pollution_literal_proto_assignment_blocked() {
+        let v = check_js(r#"obj["__proto__"] = x;"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-023: prototype_pollution_static_proto_assignment_blocked
+    #[test]
+    fn prototype_pollution_static_proto_assignment_blocked() {
+        let v = check_js("obj.__proto__ = x;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-024: prototype_pollution_constructor_prototype_assignment_blocked
+    #[test]
+    fn prototype_pollution_constructor_prototype_assignment_blocked() {
+        for code in [
+            r#"obj["constructor"] = x;"#,
+            "obj.constructor = x;",
+            r#"obj["prototype"] = x;"#,
+            "obj.prototype = x;",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::PROTOTYPE_POLLUTION,
+                "failed for: {code}"
+            );
+        }
+    }
+
+    // T-025: prototype_pollution_variable_key_allowed (Record lookup FP suppression)
+    #[test]
+    fn prototype_pollution_variable_key_allowed() {
+        assert!(check_js("obj[key] = x;").is_empty());
+        assert!(check_js("obj[someVar] = x;").is_empty());
+        assert!(check_js("styleMap[variant] = value;").is_empty());
+    }
+
+    // T-026: prototype_pollution_normal_property_allowed
+    #[test]
+    fn prototype_pollution_normal_property_allowed() {
+        assert!(check_js("obj.knownProp = x;").is_empty());
+        assert!(check_js(r#"obj["safeName"] = x;"#).is_empty());
+    }
+
+    // T-027: prototype_pollution_constructor_read_allowed
+    #[test]
+    fn prototype_pollution_constructor_read_allowed() {
+        assert!(check_js("if (instance.constructor === Foo) {}").is_empty());
+        assert!(check_js("const c = obj.constructor;").is_empty());
+        assert!(check_js("const p = obj.__proto__;").is_empty());
+    }
+
+    // T-028: prototype_pollution_object_assign_json_parse_blocked
+    #[test]
+    fn prototype_pollution_object_assign_json_parse_blocked() {
+        let v = check_js("Object.assign(target, JSON.parse(input));");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-029: prototype_pollution_object_assign_empty_literal_target_allowed
+    #[test]
+    fn prototype_pollution_object_assign_empty_literal_target_allowed() {
+        assert!(check_js("Object.assign({}, JSON.parse(input));").is_empty());
+    }
+
+    // T-030: prototype_pollution_object_assign_null_proto_target_allowed
+    #[test]
+    fn prototype_pollution_object_assign_null_proto_target_allowed() {
+        assert!(check_js("Object.assign(Object.create(null), JSON.parse(input));").is_empty());
+    }
+
+    // T-031: prototype_pollution_object_assign_static_source_allowed
+    #[test]
+    fn prototype_pollution_object_assign_static_source_allowed() {
+        assert!(check_js("Object.assign(target, { a: 1, b: 2 });").is_empty());
+        assert!(check_js("Object.assign(target, source);").is_empty());
+    }
+
+    // T-032: prototype_pollution_object_assign_multi_source_blocked
+    #[test]
+    fn prototype_pollution_object_assign_multi_source_blocked() {
+        let v = check_js("Object.assign(target, { static: 1 }, JSON.parse(x));");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-033: prototype_pollution_lodash_merge_json_parse_blocked
+    #[test]
+    fn prototype_pollution_lodash_merge_json_parse_blocked() {
+        let v = check_js("_.merge(target, JSON.parse(input));");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-034: prototype_pollution_lodash_defaults_deep_blocked
+    #[test]
+    fn prototype_pollution_lodash_defaults_deep_blocked() {
+        let v = check_js("_.defaultsDeep(target, JSON.parse(input));");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-035: prototype_pollution_lodash_full_name_blocked
+    #[test]
+    fn prototype_pollution_lodash_full_name_blocked() {
+        for code in [
+            "lodash.merge(target, JSON.parse(input));",
+            "lodash.defaultsDeep(target, JSON.parse(input));",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::PROTOTYPE_POLLUTION,
+                "failed for: {code}"
+            );
+        }
+    }
+
+    // T-036: prototype_pollution_lodash_static_source_allowed
+    #[test]
+    fn prototype_pollution_lodash_static_source_allowed() {
+        assert!(check_js("_.merge(target, { a: 1 });").is_empty());
+        assert!(check_js("_.merge(target, source);").is_empty());
+    }
+
+    // T-037: prototype_pollution_lodash_safe_target_allowed
+    #[test]
+    fn prototype_pollution_lodash_safe_target_allowed() {
+        assert!(check_js("_.merge({}, JSON.parse(input));").is_empty());
+        assert!(check_js("_.merge(Object.create(null), JSON.parse(input));").is_empty());
+    }
+
+    // T-038: prototype_pollution_record_lookup_patterns_allowed
+    #[test]
+    fn prototype_pollution_record_lookup_patterns_allowed() {
+        for code in [
+            "const label = translations[locale];",
+            "const color = STATUS_LABELS[order.status];",
+            "const style = styleMap[variant];",
+            "const item = items[0];",
+            "const v = arr[idx + 1];",
+            "obj[key] += 1;",
+        ] {
+            assert!(check_js(code).is_empty(), "false positive for: {code}");
+        }
+    }
+
+    // T-039: prototype_pollution_no_call_no_assignment_allowed
+    #[test]
+    fn prototype_pollution_no_call_no_assignment_allowed() {
+        assert!(check_js("const p = Object.assign(target, source);").is_empty());
+        assert!(check_js("const merged = _.merge({}, defaults);").is_empty());
+    }
+
     // T-018: nfr001_performance_under_10ms
     #[test]
     fn nfr001_performance_under_10ms() {
@@ -1173,6 +1433,10 @@ mod tests {
             // TC-006: deeply-nested BinaryExpression to stress is_safe_html_value
             // recursive descent on the safe-static path (all string literals).
             "el.innerHTML = 'a' + 'b' + 'c' + 'd' + 'e' + 'f' + 'g' + 'h' + 'i' + 'j' + 'k' + 'l' + 'm' + 'n' + 'o' + 'p';\n",
+            "obj[\"__proto__\"] = userInput;\n",
+            "Object.assign(target, JSON.parse(input));\n",
+            "_.merge(target, JSON.parse(input));\n",
+            "const lookup = styleMap[variant];\n",
         );
         let start = Instant::now();
         let iterations = 100;
