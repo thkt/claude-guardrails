@@ -2,8 +2,8 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
-    CallExpression, Expression, LogicalExpression, LogicalOperator, ObjectPropertyKind, Program,
-    RegExpLiteral,
+    BindingPattern, CallExpression, Expression, LogicalExpression, LogicalOperator,
+    ObjectPropertyKind, Program, RegExpLiteral, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -29,6 +29,23 @@ const CRYPTO_SINK_METHODS: &[(&[&str], &str, &[usize])] = &[
     (&["crypto.subtle"], "importKey", &[1]),
     (&["crypto"], "createCipheriv", &[1, 2]),
     (&["crypto"], "createHmac", &[1]),
+];
+
+/// Variable / function name substring (case-insensitive) が一致したら、
+/// その文脈で使われる `Math.random()` を Severity::Medium で advisory する。
+const MATH_RANDOM_SECURITY_KEYWORDS: [&str; 12] = [
+    "token",
+    "secret",
+    "nonce",
+    "sessionid",
+    "userid",
+    "apikey",
+    "csrf",
+    "salt",
+    "uuid",
+    "authtoken",
+    "authkey",
+    "privatekey",
 ];
 
 /// (object identifier alternatives, method name alternatives, fix message).
@@ -68,6 +85,59 @@ fn member_object_chain(expr: &Expression) -> Option<String> {
             Some(format!("{}.{}", inner, sme.property.name))
         }
         _ => None,
+    }
+}
+
+fn name_matches_security_keyword(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    MATH_RANDOM_SECURITY_KEYWORDS
+        .iter()
+        .any(|kw| lower.contains(kw))
+}
+
+fn expression_contains_math_random(expr: &Expression) -> bool {
+    if is_math_random_call(expr) {
+        return true;
+    }
+    match expr {
+        Expression::BinaryExpression(be) => {
+            expression_contains_math_random(&be.left) || expression_contains_math_random(&be.right)
+        }
+        Expression::CallExpression(call) => call.arguments.iter().any(|a| {
+            a.as_expression()
+                .is_some_and(expression_contains_math_random)
+        }),
+        _ => false,
+    }
+}
+
+/// `Math.random()` を「security 文脈で危険」と判定すべき右辺式かどうか。
+/// 直接の呼び出し、`Math.floor/ceil/round` ラッパー内、または除算 (`/`) の被除数として
+/// 含まれる場合は true。乗算 / 加算 jitter / 三項分岐 / JSX attribute は carve-out。
+fn rhs_has_insecure_math_random(expr: &Expression) -> bool {
+    if is_math_random_call(expr) {
+        return true;
+    }
+    match expr {
+        Expression::CallExpression(call) => {
+            let Expression::StaticMemberExpression(sme) = &call.callee else {
+                return false;
+            };
+            if !ast::is_ident(&sme.object, "Math") {
+                return false;
+            }
+            if !matches!(sme.property.name.as_str(), "floor" | "ceil" | "round") {
+                return false;
+            }
+            call.arguments.iter().any(|a| {
+                a.as_expression()
+                    .is_some_and(expression_contains_math_random)
+            })
+        }
+        Expression::BinaryExpression(be) if be.operator == BinaryOperator::Division => {
+            expression_contains_math_random(&be.left)
+        }
+        _ => false,
     }
 }
 
@@ -424,6 +494,30 @@ impl SecurityVisitor<'_> {
             }
         }
     }
+
+    fn check_math_random_keyword_var(&mut self, decl: &VariableDeclarator) {
+        if self.is_test_file {
+            return;
+        }
+        let BindingPattern::BindingIdentifier(ident) = &decl.id else {
+            return;
+        };
+        if !name_matches_security_keyword(&ident.name) {
+            return;
+        }
+        let Some(init) = &decl.init else {
+            return;
+        };
+        if !rhs_has_insecure_math_random(init) {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::Medium,
+            "Math.random() assigned to a security-named variable. Use crypto.randomBytes() or crypto.getRandomValues() for tokens/IDs.",
+            decl.span,
+        );
+    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -453,6 +547,11 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     fn visit_logical_expression(&mut self, it: &LogicalExpression<'a>) {
         self.check_env_var_fallback(it);
         walk::walk_logical_expression(self, it);
+    }
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.check_math_random_keyword_var(decl);
+        walk::walk_variable_declarator(self, decl);
     }
 }
 
@@ -1270,6 +1369,40 @@ mod tests {
     #[test]
     fn math_random_crypto_sink_bcrypt_with_precomputed_salt_allowed() {
         let v = check_js(r#"bcrypt.hash("pwd", precomputedSalt);"#);
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-027: math_random_keyword_var_token_blocked
+    #[test]
+    fn math_random_keyword_var_token_blocked() {
+        let v = check_js("const token = Math.random();");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-028: math_random_keyword_var_math_floor_wrapper_blocked
+    #[test]
+    fn math_random_keyword_var_math_floor_wrapper_blocked() {
+        let v = check_js("const apiKey = Math.floor(Math.random() * 1000000);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-028b: math_random_keyword_var_division_wrapper_blocked
+    #[test]
+    fn math_random_keyword_var_division_wrapper_blocked() {
+        let v = check_js("const userId = Math.random() / 1000;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-029: math_random_keyword_var_multiplication_pass_pattern_allowed
+    #[test]
+    fn math_random_keyword_var_multiplication_pass_pattern_allowed() {
+        let v = check_js("const token = Math.random() * 100;");
         assert_eq!(v.len(), 0);
     }
 
