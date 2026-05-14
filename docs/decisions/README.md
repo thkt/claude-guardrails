@@ -9,6 +9,10 @@ This directory contains important decisions about the project's architecture.
 | [0001](0001-adopt-installsh-prefetch-for-oxlint-provisioning.md) | Adopt install.sh prefetch for oxlint provisioning | accepted | 2026-05-08 |
 | [0002](0002-publish-release-binaries-via-orphan-branch-mirror.md) | Publish release binaries to sentinels via orphan-branch mirror | accepted | 2026-05-13 |
 | [0003](0003-math-random-severity-policy.md) | Math.random ルールの severity policy | accepted | 2026-05-14 |
+| [0004](0004-fail-mode-policy.md) | Fail-mode policy | accepted | 2026-05-14 |
+| [0005](0005-json-envelope-and-sysexits-adoption.md) | JSON envelope と sysexits exit code の採用 | accepted | 2026-05-14 |
+| [0006](0006-legacy-config-migration-policy.md) | Legacy config migration policy | accepted | 2026-05-14 |
+| [0007](0007-post-edit-content-resolution-and-degradation-contract.md) | Post-edit content resolution と degradation contract | accepted | 2026-05-14 |
 
 ## By Status
 
@@ -17,6 +21,10 @@ This directory contains important decisions about the project's architecture.
 - **0001**: Adopt install.sh prefetch for oxlint provisioning
 - **0002**: Publish release binaries to sentinels via orphan-branch mirror
 - **0003**: Math.random ルールの severity policy
+- **0004**: Fail-mode policy
+- **0005**: JSON envelope と sysexits exit code の採用
+- **0006**: Legacy config migration policy
+- **0007**: Post-edit content resolution と degradation contract
 
 ## About MADR Format
 

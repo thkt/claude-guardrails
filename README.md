@@ -230,7 +230,7 @@ guardrails --json < tool-call.json
 
 > **BREAKING (v0.15+)**: the `GUARDRAILS_JSON=1` env from v0.14 is removed. Use `--json` instead. To keep JSON output on every hook call, add the flag to your hook command (see [As Claude Code Hook](#as-claude-code-hook)).
 
-> **BREAKING (v0.15+)**: success output is wrapped in a `SuccessEnvelope` (`{ data, degraded, notes }`) per [ADR-0065](https://github.com/thkt/scout/blob/main/docs/decisions/0065-scout-json-output-schema-and-sysexits-exit-code-policy.md). The pre-envelope shape (`{ violations, decision, exit_code }`) is gone — the process exit code remains the source of truth for hook decisions.
+> **BREAKING (v0.15+)**: success output is wrapped in a `SuccessEnvelope` (`{ data, degraded, notes }`) per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md). The pre-envelope shape (`{ violations, decision, exit_code }`) is gone — the process exit code remains the source of truth for hook decisions.
 
 ### Success envelope
 
@@ -279,13 +279,13 @@ When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO
 
 | Field             | Type                                            | Notes                                                            |
 | ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| `error.code`      | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | SCREAMING_SNAKE_CASE per ADR-0065 |
+| `error.code`      | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"NOT_FOUND"` / `"IO_ERROR"` / `"TEMP_FAILURE"` | SCREAMING_SNAKE_CASE per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) |
 | `error.message`   | string                                          | Human-readable detail (also printed on stderr)                   |
 | `error.next_step` | string (optional)                               | Concrete action to recover                                       |
 | `error.candidates`| array of strings (optional)                     | Recovery candidates (omitted when empty)                         |
 | `error.retryable` | boolean                                         | `true` only when the cause is a transient failure                |
 
-> **Case mixing**: `severity` is lowercase (legacy from v0.14) and `error.code` is SCREAMING_SNAKE_CASE (ADR-0065). The mix is intentional — both shapes are stable.
+> **Case mixing**: `severity` is lowercase (legacy from v0.14) and `error.code` is SCREAMING_SNAKE_CASE ([ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md)). The mix is intentional — both shapes are stable.
 
 Without `--json`, output is byte-for-byte identical to the human-readable default mode.
 

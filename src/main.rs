@@ -28,6 +28,8 @@ use std::panic;
 use std::path::{Path, PathBuf};
 use std::process;
 
+/// 10 MB upper bound for stdin and on-disk reads (Claude Code hook stdin cap +
+/// DoS / OOM guard). See ADR-0004 resource boundary axis (fail-closed exit 64).
 const MAX_INPUT_SIZE: u64 = 10_000_000;
 const SYSEXIT_USAGE: i32 = 64;
 

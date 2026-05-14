@@ -1,7 +1,8 @@
-//! JSON output envelopes per ADR-0065 (scout JSON output schema), reused for
-//! agent-friendly output across guardrails. `SuccessEnvelope<T>` wraps
-//! command-specific data with a degradation signal; `ErrorEnvelope` wraps a
-//! structured error with a next-step hint and recovery candidates.
+//! JSON output envelopes for agent-friendly output across guardrails.
+//! `SuccessEnvelope<T>` wraps command-specific data with a degradation
+//! signal; `ErrorEnvelope` wraps a structured error with a next-step hint
+//! and recovery candidates. Shape and exit code mapping are fixed in
+//! ADR-0005 (`docs/decisions/0005-json-envelope-and-sysexits-adoption.md`).
 
 #![allow(dead_code)]
 
