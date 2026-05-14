@@ -17,6 +17,7 @@ mod raw_html;
 mod security;
 mod sensitive_file;
 mod sensitive_logging;
+pub(crate) mod sqli_concat;
 mod sync_io;
 mod test_assertion;
 mod test_location;
@@ -62,6 +63,7 @@ pub(crate) mod rule_id {
     pub const EXPRESSION_INJECTION: &str = "expression-injection";
     pub const DISABLE_MUSTACHE_ESCAPE: &str = "disable-mustache-escape";
     pub const PROTOTYPE_POLLUTION: &str = "prototype-pollution";
+    pub const SQLI_CONCAT: &str = "sqli-concat";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =

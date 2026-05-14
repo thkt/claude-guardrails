@@ -153,6 +153,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `hardcodedSecrets` | High     | API keys, tokens, passwords in source                                    | Never (security critical)                        |
 | `openRedirect`     | High     | location.href/assign with user-controlled input                          | Non-web projects                                 |
 | `rawHtml`          | High     | HTML concatenation with variables                                        | Non-web projects                                 |
+| `sqliConcat`       | High     | SQL assembled via template interpolation or string concatenation         | Projects without database access                 |
 | `httpResource`     | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                         |
 | `transaction`      | Medium   | Multiple writes without transaction wrapper                              | Non-database projects                            |
 | `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS             |

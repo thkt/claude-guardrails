@@ -155,6 +155,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `hardcodedSecrets` | High     | ソースコード内の API キー、トークン、パスワード                                 | 無効化不可（セキュリティ上重要）                     |
 | `openRedirect`     | High     | ユーザー制御入力による location.href/assign                                     | Web 以外のプロジェクト                               |
 | `rawHtml`          | High     | 変数を含む HTML の文字列結合                                                    | Web 以外のプロジェクト                               |
+| `sqliConcat`       | High     | テンプレートリテラル/文字列結合で組み立てた SQL を検出                          | データベースを使用しないプロジェクト                 |
 | `httpResource`     | Medium   | HTTP（非 HTTPS）リソース URL                                                    | 開発専用の設定                                       |
 | `transaction`      | Medium   | トランザクションラッパーなしの複数書き込み                                      | データベースを使用しないプロジェクト                 |
 | `domAccess`        | Medium   | React（.tsx/.jsx）での直接 DOM 操作                                             | React 以外のプロジェクト、またはバニラ JS/TS         |
