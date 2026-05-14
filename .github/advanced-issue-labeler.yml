@@ -1,5 +1,5 @@
 # Maps Issue Forms dropdown selections to labels.
-# See https://github.com/stefanbuck/advanced-issue-labeler for syntax.
+# See https://github.com/redhat-plumbers-in-action/advanced-issue-labeler for syntax.
 #
 # Per-repo extension: target repos can append additional `policy` entries
 # (e.g. for area:* labels) by editing this file directly. The shared base
@@ -9,12 +9,12 @@ policy:
       - bug.yml
       - feature.yml
     section:
-      - id: priority
-        block-list:
-          - high
-          - medium
-          - low
+      - id: [priority]
+        block-list: []
         label:
-          - priority:high
-          - priority:medium
-          - priority:low
+          - name: 'priority:high'
+            keys: ['high']
+          - name: 'priority:medium'
+            keys: ['medium']
+          - name: 'priority:low'
+            keys: ['low']

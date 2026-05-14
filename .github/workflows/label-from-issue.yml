@@ -7,22 +7,46 @@ on:
       - edited
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
   label:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Apply priority labels
-        uses: stefanbuck/[email protected]
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
+
+      - name: Parse bug.yml
+        id: parse-bug
+        uses: stefanbuck/github-issue-parser@cb6e97157cbf851e3a393ff8d57c93a484cc323f # v3
+        with:
+          template-path: .github/ISSUE_TEMPLATE/bug.yml
+        continue-on-error: true
+
+      - name: Apply labels for bug
+        if: steps.parse-bug.outcome == 'success'
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@9e55064634b67244f7deb4211452b4a7217b93de # v2
+        with:
+          issue-form: ${{ steps.parse-bug.outputs.jsonString }}
           template: bug.yml
           section: priority
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Apply priority labels (feature)
-        uses: stefanbuck/[email protected]
+      - name: Parse feature.yml
+        id: parse-feature
+        uses: stefanbuck/github-issue-parser@cb6e97157cbf851e3a393ff8d57c93a484cc323f # v3
         with:
+          template-path: .github/ISSUE_TEMPLATE/feature.yml
+        continue-on-error: true
+
+      - name: Apply labels for feature
+        if: steps.parse-feature.outcome == 'success'
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@9e55064634b67244f7deb4211452b4a7217b93de # v2
+        with:
+          issue-form: ${{ steps.parse-feature.outputs.jsonString }}
           template: feature.yml
           section: priority
           token: ${{ secrets.GITHUB_TOKEN }}
