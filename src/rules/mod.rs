@@ -77,6 +77,19 @@ pub static RE_ALL_FILES: LazyLock<Regex> =
 pub static RE_REACT_FILE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\.(tsx|jsx)$").expect("RE_REACT_FILE: invalid regex"));
 
+pub static RE_API_FILE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(^|/)(app|pages)/api/").expect("RE_API_FILE: invalid regex"));
+
+pub static RE_API_OR_MIDDLEWARE_FILE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(^|/)(app|pages)/api/|(^|/)middleware\.[jt]sx?$")
+        .expect("RE_API_OR_MIDDLEWARE_FILE: invalid regex")
+});
+
+pub static RE_API_OR_ROUTE_FILE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(^|/)(app|pages)/api/|(^|/)app/.*/route\.[jt]sx?$")
+        .expect("RE_API_OR_ROUTE_FILE: invalid regex")
+});
+
 /// Matches `* ` (with space) or bare `*` to avoid `x * y` false positives.
 fn is_line_comment(line: &str) -> bool {
     let trimmed = line.trim_start();
@@ -308,6 +321,49 @@ mod tests {
         assert_eq!(Severity::from_linter_str("warning"), Severity::Medium);
         assert_eq!(Severity::from_linter_str("info"), Severity::Low);
         assert_eq!(Severity::from_linter_str("unknown"), Severity::Low);
+    }
+
+    #[test]
+    fn re_api_file_matches_app_api_and_pages_api() {
+        assert!(RE_API_FILE.is_match("/src/app/api/users/route.ts"));
+        assert!(RE_API_FILE.is_match("/src/pages/api/users.ts"));
+        assert!(RE_API_FILE.is_match("app/api/route.ts"));
+    }
+
+    #[test]
+    fn re_api_file_rejects_near_miss_paths() {
+        assert!(!RE_API_FILE.is_match("/src/myapp/api/users.ts"));
+        assert!(!RE_API_FILE.is_match("/src/components/api.ts"));
+        assert!(!RE_API_FILE.is_match("/src/pages/users.ts"));
+        assert!(!RE_API_FILE.is_match("/src/api/users.ts"));
+    }
+
+    #[test]
+    fn re_api_or_middleware_matches_middleware_files() {
+        assert!(RE_API_OR_MIDDLEWARE_FILE.is_match("/middleware.ts"));
+        assert!(RE_API_OR_MIDDLEWARE_FILE.is_match("/src/middleware.js"));
+        assert!(RE_API_OR_MIDDLEWARE_FILE.is_match("/src/app/api/route.ts"));
+    }
+
+    #[test]
+    fn re_api_or_middleware_rejects_near_miss_paths() {
+        assert!(!RE_API_OR_MIDDLEWARE_FILE.is_match("/src/mymiddleware.ts"));
+        assert!(!RE_API_OR_MIDDLEWARE_FILE.is_match("/src/middlewares/auth.ts"));
+        assert!(!RE_API_OR_MIDDLEWARE_FILE.is_match("/src/middleware/index.ts"));
+    }
+
+    #[test]
+    fn re_api_or_route_matches_app_route_segments() {
+        assert!(RE_API_OR_ROUTE_FILE.is_match("/src/app/orders/route.ts"));
+        assert!(RE_API_OR_ROUTE_FILE.is_match("/src/app/[id]/route.tsx"));
+        assert!(RE_API_OR_ROUTE_FILE.is_match("/src/app/api/users/route.ts"));
+    }
+
+    #[test]
+    fn re_api_or_route_rejects_near_miss_paths() {
+        assert!(!RE_API_OR_ROUTE_FILE.is_match("/src/lib/route.ts"));
+        assert!(!RE_API_OR_ROUTE_FILE.is_match("/src/myapp/api/users.ts"));
+        assert!(!RE_API_OR_ROUTE_FILE.is_match("/src/app/route-helper.ts"));
     }
 
     // --- Known limitations ---

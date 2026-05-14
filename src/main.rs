@@ -1298,7 +1298,8 @@ mod tests {
     #[test]
     fn collect_violations_ast_security_detects_injection() {
         let config = Config::default();
-        let (violations, _notes) = collect_violations("/src/app.ts", "exec(userInput);", &config);
+        let (violations, _notes) =
+            collect_violations("/src/app/api/users/route.ts", "exec(userInput);", &config);
         assert!(violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));
@@ -1308,7 +1309,8 @@ mod tests {
     fn collect_violations_ast_security_disabled() {
         let mut config = Config::default();
         config.rules.ast_security = false;
-        let (violations, _notes) = collect_violations("/src/app.ts", "exec(userInput);", &config);
+        let (violations, _notes) =
+            collect_violations("/src/app/api/users/route.ts", "exec(userInput);", &config);
         assert!(!violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));

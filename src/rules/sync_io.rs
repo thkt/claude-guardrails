@@ -135,6 +135,13 @@ mod tests {
     }
 
     #[test]
+    fn allows_in_next_config() {
+        let content = r#"const data = fs.readFileSync('config.json', 'utf8');"#;
+        assert!(check(content, "/next.config.ts").is_empty());
+        assert!(check(content, "/next.config.js").is_empty());
+    }
+
+    #[test]
     fn allows_in_scripts() {
         let content = r#"const data = fs.readFileSync('data.json', 'utf8');"#;
         assert!(check(content, "/scripts/build.ts").is_empty());

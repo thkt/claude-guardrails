@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::rules::{rule_id, Severity, Violation, RE_JS_FILE};
+use crate::rules::{rule_id, Severity, Violation, RE_API_OR_MIDDLEWARE_FILE};
 use oxc_ast::ast::{
     Argument, CallExpression, Expression, ObjectExpression, ObjectPropertyKind, Program,
     PropertyKey,
@@ -28,7 +28,7 @@ pub fn check_program(
     line_offsets: &[usize],
     file_path: &str,
 ) -> Vec<Violation> {
-    if !RE_JS_FILE.is_match(file_path) {
+    if !RE_API_OR_MIDDLEWARE_FILE.is_match(file_path) {
         return Vec::new();
     }
     let mut visitor = CorsVisitor {
@@ -150,7 +150,7 @@ mod tests {
     use std::time::Instant;
 
     fn check_js(code: &str) -> Vec<Violation> {
-        check(code, "/src/app.ts")
+        check(code, "/src/app/api/users/route.ts")
     }
 
     // T-001: cors({ origin: '*' }) → blocked, Medium
@@ -268,6 +268,39 @@ mod tests {
         assert_eq!(v.len(), 1, "res.set must flag: {:?}", v);
     }
 
+    #[test]
+    fn skips_ui_component_file() {
+        let v = check(
+            "app.use(cors({ origin: '*' }));",
+            "/src/components/Header.tsx",
+        );
+        assert!(v.is_empty(), "UI component file must skip: {:?}", v);
+    }
+
+    #[test]
+    fn skips_util_file() {
+        let v = check("app.use(cors({ origin: '*' }));", "/src/utils/helper.ts");
+        assert!(v.is_empty(), "util file must skip: {:?}", v);
+    }
+
+    #[test]
+    fn detects_in_pages_api() {
+        let v = check(
+            "res.setHeader('Access-Control-Allow-Origin', '*');",
+            "/src/pages/api/users.ts",
+        );
+        assert_eq!(v.len(), 1, "pages/api must flag: {:?}", v);
+    }
+
+    #[test]
+    fn detects_in_middleware_file() {
+        let v = check(
+            "res.setHeader('Access-Control-Allow-Origin', '*');",
+            "/middleware.ts",
+        );
+        assert_eq!(v.len(), 1, "middleware.ts must flag: {:?}", v);
+    }
+
     // T-017: NFR-001 perf < 10ms/file
     #[test]
     fn nfr001_cors_under_10ms() {
@@ -283,7 +316,7 @@ mod tests {
         let start = Instant::now();
         let iterations = 100;
         for _ in 0..iterations {
-            let _ = check(content, "/src/app.ts");
+            let _ = check(content, "/src/app/api/cors/route.ts");
         }
         let elapsed = start.elapsed();
         let per_file_us = elapsed.as_micros() / iterations;
