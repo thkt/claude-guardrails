@@ -23,14 +23,39 @@ const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
 
-/// (object identifier alternatives, method name, argument indices that expect crypto-strong randomness).
-/// 当該 index に `Math.random()` が渡されると Severity::High で blocking する。
-const CRYPTO_SINK_METHODS: &[(&[&str], &str, &[usize])] = &[
-    (&["bcrypt"], "hash", &[1]),
-    (&["jsonwebtoken", "jwt"], "sign", &[1]),
-    (&["crypto.subtle"], "importKey", &[1]),
-    (&["crypto"], "createCipheriv", &[1, 2]),
-    (&["crypto"], "createHmac", &[1]),
+/// crypto API sink。当該 index に `Math.random()` が渡されると Severity::High で blocking する。
+struct CryptoSink {
+    object_aliases: &'static [&'static str],
+    method: &'static str,
+    crypto_arg_indices: &'static [usize],
+}
+
+const CRYPTO_SINK_METHODS: &[CryptoSink] = &[
+    CryptoSink {
+        object_aliases: &["bcrypt"],
+        method: "hash",
+        crypto_arg_indices: &[1],
+    },
+    CryptoSink {
+        object_aliases: &["jsonwebtoken", "jwt"],
+        method: "sign",
+        crypto_arg_indices: &[1],
+    },
+    CryptoSink {
+        object_aliases: &["crypto.subtle"],
+        method: "importKey",
+        crypto_arg_indices: &[1],
+    },
+    CryptoSink {
+        object_aliases: &["crypto"],
+        method: "createCipheriv",
+        crypto_arg_indices: &[1, 2],
+    },
+    CryptoSink {
+        object_aliases: &["crypto"],
+        method: "createHmac",
+        crypto_arg_indices: &[1],
+    },
 ];
 
 /// Variable / function name substring (case-insensitive) が一致したら、
@@ -102,11 +127,31 @@ fn member_object_chain(expr: &Expression) -> Option<String> {
     }
 }
 
+/// `name` を ASCII-lowercase で fold して `MATH_RANDOM_SECURITY_KEYWORDS` のいずれかが
+/// substring として含まれるかを判定する。JS identifier は概ね ASCII なので
+/// `to_lowercase()` の per-call allocation を避けるためバイト走査で済ませる。
+/// keyword 側は全て lowercase ASCII (上記定数を参照) なので比較は ASCII fold で十分。
 fn name_matches_security_keyword(name: &str) -> bool {
-    let lower = name.to_lowercase();
+    let bytes = name.as_bytes();
     MATH_RANDOM_SECURITY_KEYWORDS
         .iter()
-        .any(|kw| lower.contains(kw))
+        .any(|kw| ascii_fold_contains(bytes, kw.as_bytes()))
+}
+
+/// `haystack` を per-byte ASCII-lowercase で fold した結果に `needle` (lowercase ASCII) が
+/// 含まれるか調べる。`needle.len() <= haystack.len()` のときのみ true を返す。
+fn ascii_fold_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| {
+        w.iter()
+            .zip(needle)
+            .all(|(h, n)| h.to_ascii_lowercase() == *n)
+    })
 }
 
 fn expression_contains_math_random(expr: &Expression) -> bool {
@@ -493,17 +538,22 @@ impl SecurityVisitor<'_> {
         let Some((obj, method)) = ast::member_name(&call.callee) else {
             return;
         };
+        // method 名が CRYPTO_SINK_METHODS のどれにも一致しない CallExpression が大多数なので、
+        // String を生成する member_object_chain より先に method 名で zero-cost filter する。
+        if !CRYPTO_SINK_METHODS.iter().any(|s| s.method == method) {
+            return;
+        }
         let Some(chain) = member_object_chain(obj) else {
             return;
         };
-        for &(objs, m, indices) in CRYPTO_SINK_METHODS {
-            if m != method {
+        for sink in CRYPTO_SINK_METHODS {
+            if sink.method != method {
                 continue;
             }
-            if !objs.contains(&chain.as_str()) {
+            if !sink.object_aliases.contains(&chain.as_str()) {
                 continue;
             }
-            for &i in indices {
+            for &i in sink.crypto_arg_indices {
                 if let Some(expr) = call.arguments.get(i).and_then(|a| a.as_expression()) {
                     if expression_contains_math_random(expr) {
                         self.push_violation(
@@ -565,17 +615,18 @@ impl SecurityVisitor<'_> {
         let Expression::StaticMemberExpression(method) = &call.callee else {
             return;
         };
-        let method_matches = match method.property.name.as_str() {
-            "toString" => match call.arguments.as_slice() {
-                [] => true,
-                [Argument::NumericLiteral(n)] => (n.value - 36.0).abs() > f64::EPSILON,
-                _ => true,
-            },
-            "toFixed" => true,
+        match method.property.name.as_str() {
+            // `toString(36)` は check_math_random_insecure が High で扱う。
+            // ここでは radix 36 のみ除外し、それ以外の toString() / toFixed() を Medium に。
+            "toString" => {
+                if let [Argument::NumericLiteral(n)] = call.arguments.as_slice() {
+                    if (n.value - 36.0).abs() <= f64::EPSILON {
+                        return;
+                    }
+                }
+            }
+            "toFixed" => {}
             _ => return,
-        };
-        if !method_matches {
-            return;
         }
         let Expression::CallExpression(inner) = &method.object else {
             return;
@@ -664,21 +715,32 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         self.check_math_random_keyword_var(decl);
         let prev = self.in_security_named_fn;
-        if let BindingPattern::BindingIdentifier(ident) = &decl.id {
-            if name_matches_security_keyword(&ident.name) {
-                if let Some(init) = &decl.init {
-                    if matches!(
-                        init,
-                        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
-                    ) {
-                        self.in_security_named_fn = true;
-                    }
-                }
-            }
+        if binds_security_named_function(decl) {
+            self.in_security_named_fn = true;
         }
         walk::walk_variable_declarator(self, decl);
         self.in_security_named_fn = prev;
     }
+}
+
+/// `const generateToken = () => ...` のような「security-named binding に function/arrow 値を
+/// 直接束縛する」VariableDeclarator のときのみ true。RHS が関数式でないケース
+/// (例: `const token = Math.random()`) は false を返す。後者は
+/// `check_math_random_keyword_var` 側で扱う。
+fn binds_security_named_function(decl: &VariableDeclarator) -> bool {
+    let BindingPattern::BindingIdentifier(ident) = &decl.id else {
+        return false;
+    };
+    if !name_matches_security_keyword(&ident.name) {
+        return false;
+    }
+    let Some(init) = &decl.init else {
+        return false;
+    };
+    matches!(
+        init,
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+    )
 }
 
 fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
