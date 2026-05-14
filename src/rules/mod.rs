@@ -66,6 +66,7 @@ pub(crate) mod rule_id {
     pub const PROTOTYPE_POLLUTION: &str = "prototype-pollution";
     pub const SQLI_CONCAT: &str = "sqli-concat";
     pub const CORS_WILDCARD: &str = "cors-wildcard";
+    pub const UNSAFE_HTML_INJECTION: &str = "unsafe-html-injection";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =

@@ -144,51 +144,61 @@ See `src/rules/` for custom rules that complement external linters.
 
 | Rule               | Severity | Description                                                              | When to disable                                  |
 | ------------------ | -------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
-| `sensitiveFile`    | Critical | Blocks writes to .env, credentials.\*, \*.pem                            | Never (security critical)                        |
-| `cryptoWeak`       | High     | Detects MD5, SHA1, DES, RC4 usage                                        | Legacy system maintenance with known constraints |
-| `sensitiveLogging` | High     | Detects password/token/secret in console.log                             | Never (security critical)                        |
-| `security`         | High     | XSS vectors, unsafe APIs, postMessage                                    | Never (security critical)                        |
-| `architecture`     | High     | Layer violations (e.g., UI importing domain)                             | Small projects, monoliths, or scripts            |
-| `eval`             | High     | eval(), new Function(), indirect eval                                    | Never (security critical)                        |
-| `hardcodedSecrets` | High     | API keys, tokens, passwords in source                                    | Never (security critical)                        |
-| `openRedirect`     | High     | location.href/assign with user-controlled input                          | Non-web projects                                 |
-| `rawHtml`          | High     | HTML concatenation with variables                                        | Non-web projects                                 |
-| `sqliConcat`       | High     | SQL assembled via template interpolation or string concatenation         | Projects without database access                 |
-| `httpResource`     | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                         |
-| `corsWildcard`     | Medium   | CORS wildcard origin (`cors({ origin: '*' })`, `Access-Control-Allow-Origin: *`) | Non-web projects, internal APIs only      |
-| `transaction`      | Medium   | Multiple writes without transaction wrapper                              | Non-database projects                            |
-| `domAccess`        | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS             |
-| `syncIo`           | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts  |
-| `bundleSize`       | Medium   | Full lodash/moment imports                                               | Backend/Node.js (no bundle size concerns)        |
-| `testAssertion`    | Medium   | Tests without expect() or assert calls                                   | Playwright, custom test frameworks               |
-| `flakyTest`        | Low      | setTimeout, Math.random in tests                                         | Intentional timing/randomness tests              |
-| `generatedFile`    | High     | Warns on \*.generated.\*, \*.g.ts edits                                  | No code generation in project                    |
-| `testLocation`     | Medium   | Test files in src/ directory                                             | Co-located test strategy (tests next to source)  |
-| `naming`           | Mixed    | Naming conventions (hooks, components, types)                            | Different naming conventions in team/project     |
-| `noUseEffect`      | Medium   | Flags useEffect in .tsx/.jsx with alternative suggestions                | Projects using useEffect intentionally           |
-| `astSecurity`      | Mixed    | AST-based: command injection, stack exposure, path traversal (see below) | Non-Node.js projects                             |
+| `sensitiveFile`         | Critical | Blocks writes to .env, credentials.\*, \*.pem                            | Never (security critical)                              |
+| `expressionInjection`   | Critical | Untrusted GitHub context (`github.event.issue.title`, `github.head_ref`, etc.) used in `run:`/`script:` inside `.github/workflows/*.yml` or `action.yml` | Repositories without GitHub Actions                    |
+| `cryptoWeak`            | High     | Detects MD5, SHA1, DES, RC4 usage                                        | Legacy system maintenance with known constraints       |
+| `sensitiveLogging`      | High     | Detects password/token/secret in console.log                             | Never (security critical)                              |
+| `security`              | High     | XSS vectors, unsafe APIs, postMessage                                    | Never (security critical)                              |
+| `architecture`          | High     | Layer violations (e.g., UI importing domain)                             | Small projects, monoliths, or scripts                  |
+| `eval`                  | High     | eval(), new Function(), indirect eval                                    | Never (security critical)                              |
+| `hardcodedSecrets`      | High     | API keys, tokens, passwords in source                                    | Never (security critical)                              |
+| `cotLeakageMarker`      | High     | AI chain-of-thought leak markers (`<thinking>`, `<\|channel\|>`, `<\|start\|>assistant`, `to=functions.`) | Projects that intentionally persist AI traces / transcripts |
+| `openRedirect`          | High     | location.href/assign with user-controlled input                          | Non-web projects                                       |
+| `rawHtml`               | High     | HTML concatenation with variables                                        | Non-web projects                                       |
+| `sqliConcat`            | High     | SQL assembled via template interpolation or string concatenation         | Projects without database access                       |
+| `httpResource`          | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                               |
+| `corsWildcard`          | Medium   | CORS wildcard origin (`cors({ origin: '*' })`, `Access-Control-Allow-Origin: *`) | Non-web projects, internal APIs only            |
+| `transaction`           | Medium   | Multiple writes without transaction wrapper                              | Non-database projects                                  |
+| `domAccess`             | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS                   |
+| `syncIo`                | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts        |
+| `bundleSize`            | Medium   | Full lodash/moment imports                                               | Backend/Node.js (no bundle size concerns)              |
+| `disableMustacheEscape` | Medium   | Handlebars/Mustache auto-escape bypass (`{{{ }}}`, `{{& }}`, `noEscape: true`) | Projects not using Handlebars/Mustache templating      |
+| `testAssertion`         | Medium   | Tests without expect() or assert calls                                   | Playwright, custom test frameworks                     |
+| `flakyTest`             | Low      | setTimeout, Math.random in tests                                         | Intentional timing/randomness tests                    |
+| `generatedFile`         | High     | Warns on \*.generated.\*, \*.g.ts edits                                  | No code generation in project                          |
+| `testLocation`          | Medium   | Test files in src/ directory                                             | Co-located test strategy (tests next to source)        |
+| `naming`                | Mixed    | Naming conventions (hooks, components, types)                            | Different naming conventions in team/project           |
+| `noUseEffect`           | Medium   | Flags useEffect in .tsx/.jsx with alternative suggestions                | Projects using useEffect intentionally                 |
+| `astSecurity`           | Mixed    | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection (see below) | Non-Node.js projects                                   |
 
 ### AST Security Rules (`astSecurity`)
 
 Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the AST directly, avoiding the false negatives of regex-based pattern matching.
 
-| Sub-rule                  | Severity | Description                                                     |
-| ------------------------- | -------- | --------------------------------------------------------------- |
-| `child-process-injection` | High     | Non-literal args to exec/execSync/spawn/spawnSync               |
-| `err-stack-exposure`      | High     | Error stack traces leaked in HTTP responses (res.json/res.send) |
-| `non-literal-fs-path`     | Medium   | Non-literal file paths in fs.\* calls (path traversal risk)     |
+| Sub-rule                  | Severity | Description                                                                                                                                |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `child-process-injection` | High     | Non-literal args to exec/execSync/spawn/spawnSync                                                                                          |
+| `err-stack-exposure`      | High     | Error stack traces leaked in HTTP responses (res.json/res.send)                                                                            |
+| `non-literal-fs-path`     | Medium   | Non-literal file paths in fs.\* calls (path traversal risk)                                                                                |
+| `non-literal-require`     | Medium   | Non-literal arg to require() (dynamic module loading)                                                                                      |
+| `unsafe-regex`            | Medium   | Regex literals vulnerable to ReDoS (nested quantifiers, catastrophic backtracking)                                                         |
+| `bidi-characters`         | High     | Unicode bidirectional control chars hidden in source (CVE-2021-42574 / Trojan Source)                                                      |
+| `env-var-fallback`        | High     | `process.env.X \|\| 'default'` style — leaks secrets via hardcoded fallback                                                                |
+| `prototype-pollution`     | High     | `Object.assign({}, untrusted)`, `_.merge`, `Object.create` with `__proto__`/`constructor`                                                  |
+| `math-random-insecure`    | Mixed    | `Math.random()` in token/ID/secret contexts. High when usage is concrete (`toString(36)` idiom or crypto-API argument); Medium when only inferable from naming heuristics (security-named var/fn, other `toString` radix). See [ADR-0003](docs/decisions/0003-math-random-severity-policy.md). |
+| `unsafe-html-injection`   | Mixed    | Non-literal assignment to `innerHTML` (High) / `outerHTML` (Medium) / `document.write[ln]` (High). See [ADR-0008](docs/decisions/0008-unsafe-html-injection-rule-id-separation.md). |
 
 ## Subcommands
 
 ```text
-guardrails [--json] [COMMAND]
+Usage: guardrails [OPTIONS] [COMMAND]
 
 Commands:
   prefetch  Download oxlint binary into the cache (no-op if already present)
-  help      Print help for a subcommand
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --json     Emit violations as a structured JSON report on stdout (hook mode only)
+      --json     Emit a structured JSON envelope on stdout (hook violations or prefetch result)
   -h, --help     Print help
   -V, --version  Print version
 ```
@@ -309,19 +319,24 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
     "rules": {
       "oxlint": true,
       "sensitiveFile": true,
+      "expressionInjection": true,
       "cryptoWeak": true,
       "sensitiveLogging": true,
       "security": true,
       "architecture": true,
       "eval": true,
       "hardcodedSecrets": true,
+      "cotLeakageMarker": true,
       "openRedirect": true,
       "rawHtml": true,
+      "sqliConcat": true,
       "httpResource": true,
+      "corsWildcard": true,
       "transaction": true,
       "domAccess": true,
       "syncIo": true,
       "bundleSize": true,
+      "disableMustacheEscape": true,
       "testAssertion": true,
       "generatedFile": true,
       "testLocation": true,
