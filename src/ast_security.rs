@@ -2,11 +2,13 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
-    CallExpression, Expression, LogicalExpression, LogicalOperator, ObjectPropertyKind, Program,
-    RegExpLiteral,
+    BindingPattern, CallExpression, Expression, Function, LogicalExpression, LogicalOperator,
+    MethodDefinition, ObjectProperty, ObjectPropertyKind, Program, RegExpLiteral,
+    VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
+use oxc_syntax::scope::ScopeFlags;
 
 // SECRET_KEY / SESSION_SECRET 等は SECRET の substring match で網羅される。
 // KEY 単体は PUBLIC_KEY / SORT_KEY 等を誤検知するため除外し API_KEY のみ採用。
@@ -20,6 +22,58 @@ const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
 ];
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
+
+/// crypto API sink。当該 index に `Math.random()` が渡されると Severity::High で blocking する。
+struct CryptoSink {
+    object_aliases: &'static [&'static str],
+    method: &'static str,
+    crypto_arg_indices: &'static [usize],
+}
+
+const CRYPTO_SINK_METHODS: &[CryptoSink] = &[
+    CryptoSink {
+        object_aliases: &["bcrypt"],
+        method: "hash",
+        crypto_arg_indices: &[1],
+    },
+    CryptoSink {
+        object_aliases: &["jsonwebtoken", "jwt"],
+        method: "sign",
+        crypto_arg_indices: &[1],
+    },
+    CryptoSink {
+        object_aliases: &["crypto.subtle"],
+        method: "importKey",
+        crypto_arg_indices: &[1],
+    },
+    CryptoSink {
+        object_aliases: &["crypto"],
+        method: "createCipheriv",
+        crypto_arg_indices: &[1, 2],
+    },
+    CryptoSink {
+        object_aliases: &["crypto"],
+        method: "createHmac",
+        crypto_arg_indices: &[1],
+    },
+];
+
+/// Variable / function name substring (case-insensitive) が一致したら、
+/// その文脈で使われる `Math.random()` を Severity::Medium で advisory する。
+const MATH_RANDOM_SECURITY_KEYWORDS: [&str; 12] = [
+    "token",
+    "secret",
+    "nonce",
+    "sessionid",
+    "userid",
+    "apikey",
+    "csrf",
+    "salt",
+    "uuid",
+    "authtoken",
+    "authkey",
+    "privatekey",
+];
 
 /// (object identifier alternatives, method name alternatives, fix message).
 /// Each row registers an assignment-style merge sink that pollutes its target
@@ -38,6 +92,123 @@ const POLLUTION_MERGE_SINKS: &[(&[&str], &[&str], &str)] = &[
 ];
 fn is_bidi_char(ch: char) -> bool {
     matches!(ch, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+fn unwrap_parenthesized<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    let mut current = expr;
+    while let Expression::ParenthesizedExpression(p) = current {
+        current = &p.expression;
+    }
+    current
+}
+
+fn is_math_random_callee(call: &CallExpression) -> bool {
+    let Expression::StaticMemberExpression(sme) = &call.callee else {
+        return false;
+    };
+    ast::is_ident(&sme.object, "Math") && sme.property.name == "random"
+}
+
+fn is_math_random_call(expr: &Expression) -> bool {
+    let Expression::CallExpression(call) = unwrap_parenthesized(expr) else {
+        return false;
+    };
+    is_math_random_callee(call)
+}
+
+fn member_object_chain(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::Identifier(id) => Some(id.name.to_string()),
+        Expression::StaticMemberExpression(sme) => {
+            let inner = member_object_chain(&sme.object)?;
+            Some(format!("{}.{}", inner, sme.property.name))
+        }
+        _ => None,
+    }
+}
+
+/// `name` を ASCII-lowercase で fold して `MATH_RANDOM_SECURITY_KEYWORDS` のいずれかが
+/// substring として含まれるかを判定する。JS identifier は概ね ASCII なので
+/// `to_lowercase()` の per-call allocation を避けるためバイト走査で済ませる。
+/// keyword 側は全て lowercase ASCII (上記定数を参照) なので比較は ASCII fold で十分。
+fn name_matches_security_keyword(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    MATH_RANDOM_SECURITY_KEYWORDS
+        .iter()
+        .any(|kw| ascii_fold_contains(bytes, kw.as_bytes()))
+}
+
+/// `haystack` を per-byte ASCII-lowercase で fold した結果に `needle` (lowercase ASCII) が
+/// 含まれるか調べる。`needle.len() <= haystack.len()` のときのみ true を返す。
+fn ascii_fold_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| {
+        w.iter()
+            .zip(needle)
+            .all(|(h, n)| h.to_ascii_lowercase() == *n)
+    })
+}
+
+fn expression_contains_math_random(expr: &Expression) -> bool {
+    let expr = unwrap_parenthesized(expr);
+    if is_math_random_call(expr) {
+        return true;
+    }
+    match expr {
+        Expression::BinaryExpression(be) => {
+            expression_contains_math_random(&be.left) || expression_contains_math_random(&be.right)
+        }
+        Expression::CallExpression(call) => {
+            let callee_has = match &call.callee {
+                Expression::StaticMemberExpression(sme) => {
+                    expression_contains_math_random(&sme.object)
+                }
+                _ => false,
+            };
+            callee_has
+                || call.arguments.iter().any(|a| {
+                    a.as_expression()
+                        .is_some_and(expression_contains_math_random)
+                })
+        }
+        Expression::StaticMemberExpression(sme) => expression_contains_math_random(&sme.object),
+        _ => false,
+    }
+}
+
+/// `Math.random()` を「security 文脈で危険」と判定すべき右辺式かどうか。
+/// 直接の呼び出し、`Math.floor/ceil/round` ラッパー内、または除算 (`/`) の被除数として
+/// 含まれる場合は true。乗算 / 加算 jitter / 三項分岐 / JSX attribute は carve-out。
+fn rhs_has_insecure_math_random(expr: &Expression) -> bool {
+    if is_math_random_call(expr) {
+        return true;
+    }
+    match expr {
+        Expression::CallExpression(call) => {
+            let Expression::StaticMemberExpression(sme) = &call.callee else {
+                return false;
+            };
+            if !ast::is_ident(&sme.object, "Math") {
+                return false;
+            }
+            if !matches!(sme.property.name.as_str(), "floor" | "ceil" | "round") {
+                return false;
+            }
+            call.arguments.iter().any(|a| {
+                a.as_expression()
+                    .is_some_and(expression_contains_math_random)
+            })
+        }
+        Expression::BinaryExpression(be) if be.operator == BinaryOperator::Division => {
+            expression_contains_math_random(&be.left)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -61,6 +232,7 @@ pub fn check_program(
         file_path,
         line_offsets,
         is_test_file: RE_TEST_FILE.is_match(file_path),
+        in_security_named_fn: false,
     };
     visitor.visit_program(program);
     visitor.violations
@@ -89,6 +261,7 @@ struct SecurityVisitor<'s> {
     file_path: &'s str,
     line_offsets: &'s [usize],
     is_test_file: bool,
+    in_security_named_fn: bool,
 }
 
 impl SecurityVisitor<'_> {
@@ -347,16 +520,124 @@ impl SecurityVisitor<'_> {
         let Expression::CallExpression(inner) = &method.object else {
             return;
         };
-        let Expression::StaticMemberExpression(rand) = &inner.callee else {
+        if !is_math_random_callee(inner) {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::High,
+            "Math.random() is not cryptographically secure. Use crypto.randomBytes() for tokens/IDs.",
+            call.span,
+        );
+    }
+
+    fn check_math_random_crypto_sink(&mut self, call: &CallExpression) {
+        if self.is_test_file {
+            return;
+        }
+        let Some((obj, method)) = ast::member_name(&call.callee) else {
             return;
         };
-        if !ast::is_ident(&rand.object, "Math") || rand.property.name != "random" {
+        // method 名が CRYPTO_SINK_METHODS のどれにも一致しない CallExpression が大多数なので、
+        // String を生成する member_object_chain より先に method 名で zero-cost filter する。
+        if !CRYPTO_SINK_METHODS.iter().any(|s| s.method == method) {
+            return;
+        }
+        let Some(chain) = member_object_chain(obj) else {
+            return;
+        };
+        for sink in CRYPTO_SINK_METHODS {
+            if sink.method != method {
+                continue;
+            }
+            if !sink.object_aliases.contains(&chain.as_str()) {
+                continue;
+            }
+            for &i in sink.crypto_arg_indices {
+                if let Some(expr) = call.arguments.get(i).and_then(|a| a.as_expression()) {
+                    if expression_contains_math_random(expr) {
+                        self.push_violation(
+                            rule_id::MATH_RANDOM_INSECURE,
+                            Severity::High,
+                            "Math.random() is not cryptographically secure as crypto API input. Use crypto.randomBytes() or crypto.getRandomValues().",
+                            call.span,
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_math_random_keyword_var(&mut self, decl: &VariableDeclarator) {
+        if self.is_test_file {
+            return;
+        }
+        let BindingPattern::BindingIdentifier(ident) = &decl.id else {
+            return;
+        };
+        if !name_matches_security_keyword(&ident.name) {
+            return;
+        }
+        let Some(init) = &decl.init else {
+            return;
+        };
+        if !rhs_has_insecure_math_random(init) {
             return;
         }
         self.push_violation(
             rule_id::MATH_RANDOM_INSECURE,
             Severity::Medium,
-            "Math.random() is not cryptographically secure. Use crypto.randomBytes() for tokens/IDs.",
+            "Math.random() assigned to a security-named variable. Use crypto.randomBytes() or crypto.getRandomValues() for tokens/IDs.",
+            decl.span,
+        );
+    }
+
+    fn check_math_random_keyword_fn(&mut self, call: &CallExpression) {
+        if self.is_test_file || !self.in_security_named_fn {
+            return;
+        }
+        if !is_math_random_callee(call) {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::Medium,
+            "Math.random() inside a security-named function. Use crypto.randomBytes() or crypto.getRandomValues() for tokens/IDs.",
+            call.span,
+        );
+    }
+
+    fn check_math_random_to_string_other(&mut self, call: &CallExpression) {
+        if self.is_test_file {
+            return;
+        }
+        let Expression::StaticMemberExpression(method) = &call.callee else {
+            return;
+        };
+        match method.property.name.as_str() {
+            // `toString(36)` は check_math_random_insecure が High で扱う。
+            // ここでは radix 36 のみ除外し、それ以外の toString() / toFixed() を Medium に。
+            "toString" => {
+                if let [Argument::NumericLiteral(n)] = call.arguments.as_slice() {
+                    if (n.value - 36.0).abs() <= f64::EPSILON {
+                        return;
+                    }
+                }
+            }
+            "toFixed" => {}
+            _ => return,
+        }
+        let Expression::CallExpression(inner) = &method.object else {
+            return;
+        };
+        if !is_math_random_callee(inner) {
+            return;
+        }
+        self.push_violation(
+            rule_id::MATH_RANDOM_INSECURE,
+            Severity::Medium,
+            "Math.random().toString()/toFixed() in a likely identifier context. Use crypto.randomBytes() or crypto.getRandomValues() for tokens/IDs.",
             call.span,
         );
     }
@@ -375,9 +656,50 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_fs_path(it);
         self.check_non_literal_require(it);
         self.check_math_random_insecure(it);
+        self.check_math_random_crypto_sink(it);
+        self.check_math_random_keyword_fn(it);
+        self.check_math_random_to_string_other(it);
         self.check_document_write(it);
         self.check_merge_pollution_sinks(it);
         walk::walk_call_expression(self, it);
+    }
+
+    fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
+        let prev = self.in_security_named_fn;
+        if let Some(id) = &func.id {
+            if name_matches_security_keyword(&id.name) {
+                self.in_security_named_fn = true;
+            }
+        }
+        walk::walk_function(self, func, flags);
+        self.in_security_named_fn = prev;
+    }
+
+    fn visit_method_definition(&mut self, it: &MethodDefinition<'a>) {
+        let prev = self.in_security_named_fn;
+        if let Some(name) = it.key.static_name() {
+            if name_matches_security_keyword(&name) {
+                self.in_security_named_fn = true;
+            }
+        }
+        walk::walk_method_definition(self, it);
+        self.in_security_named_fn = prev;
+    }
+
+    fn visit_object_property(&mut self, it: &ObjectProperty<'a>) {
+        let prev = self.in_security_named_fn;
+        if let Some(name) = it.key.static_name() {
+            if name_matches_security_keyword(&name)
+                && matches!(
+                    &it.value,
+                    Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+                )
+            {
+                self.in_security_named_fn = true;
+            }
+        }
+        walk::walk_object_property(self, it);
+        self.in_security_named_fn = prev;
     }
 
     fn visit_reg_exp_literal(&mut self, re: &RegExpLiteral<'a>) {
@@ -389,6 +711,36 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_env_var_fallback(it);
         walk::walk_logical_expression(self, it);
     }
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.check_math_random_keyword_var(decl);
+        let prev = self.in_security_named_fn;
+        if binds_security_named_function(decl) {
+            self.in_security_named_fn = true;
+        }
+        walk::walk_variable_declarator(self, decl);
+        self.in_security_named_fn = prev;
+    }
+}
+
+/// `const generateToken = () => ...` のような「security-named binding に function/arrow 値を
+/// 直接束縛する」VariableDeclarator のときのみ true。RHS が関数式でないケース
+/// (例: `const token = Math.random()`) は false を返す。後者は
+/// `check_math_random_keyword_var` 側で扱う。
+fn binds_security_named_function(decl: &VariableDeclarator) -> bool {
+    let BindingPattern::BindingIdentifier(ident) = &decl.id else {
+        return false;
+    };
+    if !name_matches_security_keyword(&ident.name) {
+        return false;
+    }
+    let Some(init) = &decl.init else {
+        return false;
+    };
+    matches!(
+        init,
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+    )
 }
 
 fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
@@ -1101,7 +1453,7 @@ mod tests {
         let v = check_js("const t = Math.random().toString(36).substring(2);");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
-        assert_eq!(v[0].severity, Severity::Medium);
+        assert_eq!(v[0].severity, Severity::High);
     }
 
     // T-011: math_random_insecure_to_string_36_no_chain_blocked
@@ -1153,6 +1505,184 @@ mod tests {
     fn math_random_insecure_fail_open_on_invalid_syntax() {
         let v = check_js("function { Math.random().toString(36) !!!");
         assert_eq!(v.len(), 0);
+    }
+
+    // T-022: math_random_crypto_sink_bcrypt_hash_blocked
+    #[test]
+    fn math_random_crypto_sink_bcrypt_hash_blocked() {
+        let v = check_js(r#"bcrypt.hash("pwd", Math.random());"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-023: math_random_crypto_sink_jwt_sign_blocked
+    #[test]
+    fn math_random_crypto_sink_jwt_sign_blocked() {
+        let v = check_js("jsonwebtoken.sign(payload, Math.random());");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-024: math_random_crypto_sink_subtle_import_key_blocked
+    #[test]
+    fn math_random_crypto_sink_subtle_import_key_blocked() {
+        let v =
+            check_js(r#"crypto.subtle.importKey("raw", Math.random(), algo, false, ["sign"]);"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-025: math_random_crypto_sink_create_cipheriv_blocked
+    #[test]
+    fn math_random_crypto_sink_create_cipheriv_blocked() {
+        let v = check_js(r#"crypto.createCipheriv("aes-256-cbc", Math.random(), iv);"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-025b: math_random_crypto_sink_create_hmac_blocked
+    #[test]
+    fn math_random_crypto_sink_create_hmac_blocked() {
+        let v = check_js(r#"crypto.createHmac("sha256", Math.random());"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-026: math_random_crypto_sink_bcrypt_with_precomputed_salt_allowed
+    #[test]
+    fn math_random_crypto_sink_bcrypt_with_precomputed_salt_allowed() {
+        let v = check_js(r#"bcrypt.hash("pwd", precomputedSalt);"#);
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-027: math_random_keyword_var_token_blocked
+    #[test]
+    fn math_random_keyword_var_token_blocked() {
+        let v = check_js("const token = Math.random();");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-028: math_random_keyword_var_math_floor_wrapper_blocked
+    #[test]
+    fn math_random_keyword_var_math_floor_wrapper_blocked() {
+        let v = check_js("const apiKey = Math.floor(Math.random() * 1000000);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-028b: math_random_keyword_var_division_wrapper_blocked
+    #[test]
+    fn math_random_keyword_var_division_wrapper_blocked() {
+        let v = check_js("const userId = Math.random() / 1000;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-029: math_random_keyword_var_multiplication_pass_pattern_allowed
+    #[test]
+    fn math_random_keyword_var_multiplication_pass_pattern_allowed() {
+        let v = check_js("const token = Math.random() * 100;");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-030: math_random_keyword_fn_declaration_blocked
+    #[test]
+    fn math_random_keyword_fn_declaration_blocked() {
+        let v = check_js("function generateToken() { return Math.random(); }");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-031: math_random_keyword_fn_arrow_with_parent_blocked
+    #[test]
+    fn math_random_keyword_fn_arrow_with_parent_blocked() {
+        let v = check_js("const generateSessionId = () => Math.floor(Math.random() * 1000000);");
+        assert!(
+            v.iter().any(|v| v.severity == Severity::Medium),
+            "expected at least one Medium violation, got: {v:?}"
+        );
+    }
+
+    // T-032: math_random_keyword_fn_no_keyword_match_allowed
+    #[test]
+    fn math_random_keyword_fn_no_keyword_match_allowed() {
+        let v = check_js("function generateAnimOffset() { return Math.random() * 360; }");
+        assert_eq!(v.len(), 0);
+    }
+
+    // T-033: math_random_to_string_no_arg_blocked
+    #[test]
+    fn math_random_to_string_no_arg_blocked() {
+        let v = check_js("const x = Math.random().toString();");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-034: math_random_to_fixed_blocked
+    #[test]
+    fn math_random_to_fixed_blocked() {
+        let v = check_js("const x = Math.random().toFixed(8);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::Medium);
+    }
+
+    // T-035: math_random_to_string_36_remains_high
+    #[test]
+    fn math_random_to_string_36_remains_high() {
+        let v = check_js("const x = Math.random().toString(36);");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-038: math_random_crypto_sink_parenthesized_blocked
+    #[test]
+    fn math_random_crypto_sink_parenthesized_blocked() {
+        let v = check_js(r#"bcrypt.hash("pwd", (Math.random()));"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-039: math_random_crypto_sink_wrapped_arg_blocked
+    #[test]
+    fn math_random_crypto_sink_wrapped_arg_blocked() {
+        let v = check_js(r#"bcrypt.hash("pwd", Math.random().toString());"#);
+        assert!(
+            v.iter().any(|v| v.severity == Severity::High),
+            "expected at least one High violation, got: {v:?}"
+        );
+    }
+
+    // T-040: math_random_keyword_fn_method_definition_blocked
+    #[test]
+    fn math_random_keyword_fn_method_definition_blocked() {
+        let v = check_js("class Auth { generateToken() { return Math.random(); } }");
+        assert!(
+            v.iter().any(|v| v.severity == Severity::Medium),
+            "expected at least one Medium violation, got: {v:?}"
+        );
+    }
+
+    // T-041: math_random_keyword_fn_object_property_blocked
+    #[test]
+    fn math_random_keyword_fn_object_property_blocked() {
+        let v = check_js("const auth = { generateToken: () => Math.random() };");
+        assert!(
+            v.iter().any(|v| v.severity == Severity::Medium),
+            "expected at least one Medium violation, got: {v:?}"
+        );
     }
 
     // T-019: detects_inner_html_variable_assignment
@@ -1527,6 +2057,9 @@ mod tests {
             "Object.assign(target, JSON.parse(input));\n",
             "_.merge(target, JSON.parse(input));\n",
             "const lookup = styleMap[variant];\n",
+            "const token = Math.random();\n",
+            "function generateSessionToken() { return Math.random(); }\n",
+            "const fixed = Math.random().toFixed(8);\n",
         );
         let start = Instant::now();
         let iterations = 100;
