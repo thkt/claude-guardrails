@@ -20,6 +20,22 @@ const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
 ];
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
+
+/// (object identifier alternatives, method name alternatives, fix message).
+/// Each row registers an assignment-style merge sink that pollutes its target
+/// when the source is untrusted (`JSON.parse(...)`).
+const POLLUTION_MERGE_SINKS: &[(&[&str], &[&str], &str)] = &[
+    (
+        &["Object"],
+        &["assign"],
+        "Object.assign with JSON.parse() source can pollute prototype. Use Object.create(null) target (a plain {} still inherits __proto__).",
+    ),
+    (
+        &["_", "lodash"],
+        &["merge", "defaultsDeep"],
+        "lodash merge/defaultsDeep with JSON.parse() source can pollute prototype. Use Object.create(null) target.",
+    ),
+];
 fn is_bidi_char(ch: char) -> bool {
     matches!(ch, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
@@ -220,29 +236,24 @@ impl SecurityVisitor<'_> {
     }
 
     fn check_prototype_pollution(&mut self, expr: &AssignmentExpression) {
-        let key = match &expr.left {
-            AssignmentTarget::StaticMemberExpression(sme) => Some(sme.property.name.as_str()),
-            AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
-                Expression::StringLiteral(s) => Some(s.value.as_str()),
-                _ => None,
-            },
-            _ => None,
-        };
-        if matches!(key, Some("__proto__" | "constructor" | "prototype")) {
+        if self.is_test_file {
+            return;
+        }
+        if assignment_target_has_pollution_segment(&expr.left) {
             self.push_violation(
                 rule_id::PROTOTYPE_POLLUTION,
                 Severity::High,
-                "Direct assignment to __proto__/constructor/prototype enables prototype pollution. Use Object.defineProperty or Map.",
+                "Assignment via __proto__/constructor/prototype enables prototype pollution. Use Object.defineProperty or a Map.",
                 expr.span,
             );
         }
     }
 
-    fn check_merge_pollution(&mut self, call: &CallExpression, fix: &str) {
+    fn check_assign_with_untrusted_source(&mut self, call: &CallExpression, fix: &str) {
         let Some(target) = call.arguments.first().and_then(|a| a.as_expression()) else {
             return;
         };
-        if is_safe_assign_target(target) {
+        if is_null_prototype_target(target) {
             return;
         }
         let has_untrusted = call
@@ -255,31 +266,19 @@ impl SecurityVisitor<'_> {
         }
     }
 
-    fn check_object_assign_pollution(&mut self, call: &CallExpression) {
-        let Expression::StaticMemberExpression(sme) = &call.callee else {
-            return;
-        };
-        if !ast::is_ident(&sme.object, "Object") || sme.property.name != "assign" {
+    fn check_merge_pollution_sinks(&mut self, call: &CallExpression) {
+        if self.is_test_file {
             return;
         }
-        self.check_merge_pollution(
-            call,
-            "Object.assign with JSON.parse() source can pollute prototype. Use {} or Object.create(null) target.",
-        );
-    }
-
-    fn check_lodash_merge_pollution(&mut self, call: &CallExpression) {
-        let Expression::StaticMemberExpression(sme) = &call.callee else {
+        let Some((obj, method)) = ast::member_name(&call.callee) else {
             return;
         };
-        let is_lodash = ast::is_ident(&sme.object, "_") || ast::is_ident(&sme.object, "lodash");
-        if !is_lodash || !matches!(sme.property.name.as_str(), "merge" | "defaultsDeep") {
+        let Some(&(_, _, fix)) = POLLUTION_MERGE_SINKS.iter().find(|(objs, methods, _)| {
+            objs.iter().any(|o| ast::is_ident(obj, o)) && methods.contains(&method)
+        }) else {
             return;
-        }
-        self.check_merge_pollution(
-            call,
-            "lodash merge/defaultsDeep with JSON.parse() source can pollute prototype. Use {} or Object.create(null) target.",
-        );
+        };
+        self.check_assign_with_untrusted_source(call, fix);
     }
 
     fn check_html_assignment(&mut self, expr: &AssignmentExpression) {
@@ -377,8 +376,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_non_literal_require(it);
         self.check_math_random_insecure(it);
         self.check_document_write(it);
-        self.check_object_assign_pollution(it);
-        self.check_lodash_merge_pollution(it);
+        self.check_merge_pollution_sinks(it);
         walk::walk_call_expression(self, it);
     }
 
@@ -499,17 +497,17 @@ fn is_safe_html_value(expr: &Expression) -> bool {
     }
 }
 
-fn is_safe_assign_target(expr: &Expression) -> bool {
-    if matches!(expr, Expression::ObjectExpression(_)) {
-        return true;
-    }
+/// Returns true only for `Object.create(null)`. A plain `{}` is intentionally
+/// rejected because it inherits `Object.prototype` and the `__proto__` setter
+/// fires when the merge source carries that key.
+fn is_null_prototype_target(expr: &Expression) -> bool {
     let Expression::CallExpression(call) = expr else {
         return false;
     };
-    let Expression::StaticMemberExpression(sme) = &call.callee else {
+    let Some((obj, "create")) = ast::member_name(&call.callee) else {
         return false;
     };
-    if !ast::is_ident(&sme.object, "Object") || sme.property.name != "create" {
+    if !ast::is_ident(obj, "Object") {
         return false;
     }
     matches!(
@@ -518,14 +516,47 @@ fn is_safe_assign_target(expr: &Expression) -> bool {
     )
 }
 
+fn is_pollution_key(s: &str) -> bool {
+    matches!(s, "__proto__" | "constructor" | "prototype")
+}
+
+fn assignment_target_has_pollution_segment(target: &AssignmentTarget) -> bool {
+    match target {
+        AssignmentTarget::StaticMemberExpression(sme) => {
+            is_pollution_key(sme.property.name.as_str())
+                || expression_has_pollution_segment(&sme.object)
+        }
+        AssignmentTarget::ComputedMemberExpression(cme) => {
+            computed_key_is_pollution(&cme.expression)
+                || expression_has_pollution_segment(&cme.object)
+        }
+        _ => false,
+    }
+}
+
+fn expression_has_pollution_segment(expr: &Expression) -> bool {
+    match expr {
+        Expression::StaticMemberExpression(sme) => {
+            is_pollution_key(sme.property.name.as_str())
+                || expression_has_pollution_segment(&sme.object)
+        }
+        Expression::ComputedMemberExpression(cme) => {
+            computed_key_is_pollution(&cme.expression)
+                || expression_has_pollution_segment(&cme.object)
+        }
+        _ => false,
+    }
+}
+
+fn computed_key_is_pollution(expr: &Expression) -> bool {
+    matches!(expr, Expression::StringLiteral(s) if is_pollution_key(s.value.as_str()))
+}
+
 fn is_json_parse_call(expr: &Expression) -> bool {
     let Expression::CallExpression(call) = expr else {
         return false;
     };
-    let Expression::StaticMemberExpression(sme) = &call.callee else {
-        return false;
-    };
-    ast::is_ident(&sme.object, "JSON") && sme.property.name == "parse"
+    matches!(ast::member_name(&call.callee), Some((obj, "parse")) if ast::is_ident(obj, "JSON"))
 }
 
 fn is_static_path(expr: &Expression) -> bool {
@@ -1297,9 +1328,9 @@ mod tests {
         assert!(check_js(r#"obj["safeName"] = x;"#).is_empty());
     }
 
-    // T-027: prototype_pollution_constructor_read_allowed
+    // T-027: prototype_pollution_pollution_key_read_allowed
     #[test]
-    fn prototype_pollution_constructor_read_allowed() {
+    fn prototype_pollution_pollution_key_read_allowed() {
         assert!(check_js("if (instance.constructor === Foo) {}").is_empty());
         assert!(check_js("const c = obj.constructor;").is_empty());
         assert!(check_js("const p = obj.__proto__;").is_empty());
@@ -1314,10 +1345,14 @@ mod tests {
         assert_eq!(v[0].severity, Severity::High);
     }
 
-    // T-029: prototype_pollution_object_assign_empty_literal_target_allowed
+    // T-029: prototype_pollution_object_assign_empty_literal_target_blocked
+    // `{}` still inherits Object.prototype, so the parsed payload's `__proto__`
+    // setter fires. Object.create(null) is the only safe target.
     #[test]
-    fn prototype_pollution_object_assign_empty_literal_target_allowed() {
-        assert!(check_js("Object.assign({}, JSON.parse(input));").is_empty());
+    fn prototype_pollution_object_assign_empty_literal_target_blocked() {
+        let v = check_js("Object.assign({}, JSON.parse(input));");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
     }
 
     // T-030: prototype_pollution_object_assign_null_proto_target_allowed
@@ -1385,8 +1420,15 @@ mod tests {
     // T-037: prototype_pollution_lodash_safe_target_allowed
     #[test]
     fn prototype_pollution_lodash_safe_target_allowed() {
-        assert!(check_js("_.merge({}, JSON.parse(input));").is_empty());
         assert!(check_js("_.merge(Object.create(null), JSON.parse(input));").is_empty());
+    }
+
+    // T-037b: prototype_pollution_lodash_empty_literal_target_blocked
+    #[test]
+    fn prototype_pollution_lodash_empty_literal_target_blocked() {
+        let v = check_js("_.merge({}, JSON.parse(input));");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
     }
 
     // T-038: prototype_pollution_record_lookup_patterns_allowed
@@ -1409,6 +1451,54 @@ mod tests {
     fn prototype_pollution_no_call_no_assignment_allowed() {
         assert!(check_js("const p = Object.assign(target, source);").is_empty());
         assert!(check_js("const merged = _.merge({}, defaults);").is_empty());
+    }
+
+    // T-040: prototype_pollution_chain_proto_polluted_blocked
+    #[test]
+    fn prototype_pollution_chain_proto_polluted_blocked() {
+        let v = check_js("obj.__proto__.polluted = value;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-041: prototype_pollution_chain_constructor_prototype_blocked
+    #[test]
+    fn prototype_pollution_chain_constructor_prototype_blocked() {
+        let v = check_js("obj.constructor.prototype.admin = true;");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-042: prototype_pollution_chain_computed_key_blocked
+    #[test]
+    fn prototype_pollution_chain_computed_key_blocked() {
+        let v = check_js(r#"obj["__proto__"]["polluted"] = x;"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-043: prototype_pollution_test_file_skipped
+    // Test files commonly stub prototypes (e.g. `Function.prototype.bind = jest.fn()`).
+    #[test]
+    fn prototype_pollution_test_file_skipped() {
+        for path in [
+            "/src/util.test.ts",
+            "/src/util.spec.tsx",
+            "/src/util.test.js",
+        ] {
+            let v = check("Function.prototype.bind = jest.fn();", path);
+            assert!(v.is_empty(), "expected 0 violations for {path}");
+        }
+    }
+
+    // T-044: prototype_pollution_bracket_form_blocked
+    // ast::member_name unwrap also accepts `Object["assign"]` / `JSON["parse"]` form,
+    // closing a trivial bracket-string bypass.
+    #[test]
+    fn prototype_pollution_bracket_form_blocked() {
+        let v = check_js(r#"Object["assign"](target, JSON["parse"](input));"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
     }
 
     // T-018: nfr001_performance_under_10ms
