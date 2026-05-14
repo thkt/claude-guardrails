@@ -2,6 +2,7 @@ mod architecture;
 mod bundle_size;
 mod cot_leakage_marker;
 mod crypto_weak;
+mod disable_mustache_escape;
 mod dom_access;
 pub(crate) mod eval;
 mod expression_injection;
@@ -59,6 +60,7 @@ pub(crate) mod rule_id {
     pub const MATH_RANDOM_INSECURE: &str = "math-random-insecure";
     pub const COT_LEAKAGE_MARKER: &str = "cot-leakage-marker";
     pub const EXPRESSION_INJECTION: &str = "expression-injection";
+    pub const DISABLE_MUSTACHE_ESCAPE: &str = "disable-mustache-escape";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
@@ -212,6 +214,7 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         raw_html          => raw_html,
         cot_leakage_marker => cot_leakage_marker,
         expression_injection => expression_injection,
+        disable_mustache_escape => disable_mustache_escape,
     );
     rules
 }
@@ -349,7 +352,7 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 19);
+        assert_eq!(rules.len(), 20);
     }
 
     #[test]
