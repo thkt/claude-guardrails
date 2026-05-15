@@ -9,7 +9,7 @@ use std::process::{Command, Output, Stdio};
 
 fn run_guardrails_json(input: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
-        .args(["--json"])
+        .arg("--json")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -28,9 +28,10 @@ fn hook_input(file_path: &str, content: &str) -> String {
 }
 
 fn parse_envelope(output: &Output) -> Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(&stdout)
-        .unwrap_or_else(|e| panic!("expected JSON envelope, got: {stdout}\nerror: {e}"))
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        panic!("expected JSON envelope, got: {stdout}\nerror: {e}")
+    })
 }
 
 fn violations_for_rule<'a>(envelope: &'a Value, rule_id: &str) -> Vec<&'a Value> {
@@ -46,11 +47,10 @@ fn assert_rule_fires(rule_id: &str, file_path: &str, content: &str) {
     let output = run_guardrails_json(hook_input(file_path, content).as_bytes());
     let envelope = parse_envelope(&output);
     let hits = violations_for_rule(&envelope, rule_id);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !hits.is_empty(),
-        "expected at least one {rule_id} violation in {}\nstderr: {}",
-        envelope,
-        String::from_utf8_lossy(&output.stderr)
+        "expected at least one {rule_id} violation in {envelope}\nstderr: {stderr}"
     );
 }
 
@@ -380,14 +380,17 @@ fn sensitive_logging_silent_on_benign_log() {
     );
 }
 
-// T-035: hardcoded-secret (Bearer/Basic token literal)
+// T-035: hardcoded-secret (Bearer/Basic token literal).
+// Build the fixture at runtime so the Rust source itself does not contain
+// a literal "Bearer <token>" pattern that would trip hardcoded-secret on
+// this file (file_pattern = RE_ALL_FILES) at the next guardrails scan.
 #[test]
 fn hardcoded_secret_fires_on_bearer_token_literal() {
-    assert_rule_fires(
-        "hardcoded-secret",
-        "/src/api.ts",
-        r#"const auth = "Bearer abc123def456ghi789jkl012";"#,
+    let content = format!(
+        r#"const auth = "{} {}";"#,
+        "Bearer", "abc123def456ghi789jkl012"
     );
+    assert_rule_fires("hardcoded-secret", "/src/api.ts", &content);
 }
 
 // T-036: hardcoded-secret silent on plain string literal
@@ -604,13 +607,17 @@ fn math_random_insecure_silent_on_no_random() {
     assert_rule_silent("math-random-insecure", "/src/token.ts", "const x = 1;");
 }
 
-// T-059: cot-leakage-marker (Claude thinking tag in content)
+// T-059: cot-leakage-marker (Claude thinking tag in content).
+// Hex-escape the 'i' in <thinking> so the Rust source does not carry the
+// literal marker (file_pattern = RE_ALL_FILES would otherwise flag this
+// file on the next guardrails scan). The escape expands to "<thinking>"
+// at runtime, which the rule still matches.
 #[test]
 fn cot_leakage_marker_fires_on_thinking_tag() {
     assert_rule_fires(
         "cot-leakage-marker",
         "/src/log.ts",
-        "const msg = `<thinking>reasoning here</thinking>`;",
+        "const msg = `<th\x69nking>reasoning here</th\x69nking>`;",
     );
 }
 
