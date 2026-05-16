@@ -16,6 +16,7 @@ mod raw_html;
 mod security;
 mod sensitive_file;
 mod sensitive_logging;
+mod service_worker;
 pub(crate) mod sqli_concat;
 mod sync_io;
 mod test_assertion;
@@ -63,6 +64,7 @@ pub(crate) mod rule_id {
     pub const SQLI_CONCAT: &str = "sqli-concat";
     pub const CORS_WILDCARD: &str = "cors-wildcard";
     pub const UNSAFE_HTML_INJECTION: &str = "unsafe-html-injection";
+    pub const SERVICE_WORKER_SCOPE_ROOT: &str = "service-worker-scope-root";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
@@ -233,6 +235,7 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         http_resource     => http_resource,
         raw_html          => raw_html,
         cot_leakage_marker => cot_leakage_marker,
+        service_worker    => service_worker,
     );
     rules
 }
@@ -414,7 +417,7 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 18);
+        assert_eq!(rules.len(), 19);
     }
 
     #[test]

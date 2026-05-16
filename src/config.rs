@@ -64,6 +64,7 @@ define_rule_config! {
     cot_leakage_marker => "cotLeakageMarker",
     sqli_concat       => "sqliConcat",
     cors_wildcard     => "corsWildcard",
+    service_worker    => "serviceWorker",
 }
 
 #[derive(Debug, Clone, PartialEq)]
