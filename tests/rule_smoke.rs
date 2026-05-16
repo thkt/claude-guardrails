@@ -710,3 +710,23 @@ fn architecture_silent_on_pages_importing_components() {
         "import { Button } from '../components/Button';",
     );
 }
+
+// T-069: service-worker-scope-root (explicit root scope register)
+#[test]
+fn service_worker_scope_root_fires_on_explicit_root_scope() {
+    assert_rule_fires(
+        "service-worker-scope-root",
+        "/src/sw-register.ts",
+        "navigator.serviceWorker.register('/sw.js', { scope: '/' });",
+    );
+}
+
+// T-070: service-worker-scope-root silent on omitted scope
+#[test]
+fn service_worker_scope_root_silent_on_omitted_scope() {
+    assert_rule_silent(
+        "service-worker-scope-root",
+        "/src/sw-register.ts",
+        "navigator.serviceWorker.register('/sw.js');",
+    );
+}
