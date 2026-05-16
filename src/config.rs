@@ -65,6 +65,7 @@ define_rule_config! {
     sqli_concat       => "sqliConcat",
     cors_wildcard     => "corsWildcard",
     service_worker    => "serviceWorker",
+    jwt_client        => "jwtClient",
 }
 
 #[derive(Debug, Clone, PartialEq)]

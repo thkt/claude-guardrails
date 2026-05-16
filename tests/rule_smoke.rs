@@ -730,3 +730,23 @@ fn service_worker_scope_root_silent_on_omitted_scope() {
         "navigator.serviceWorker.register('/sw.js');",
     );
 }
+
+// T-071: jwt-client-decode (jwtDecode function call)
+#[test]
+fn jwt_client_decode_fires_on_jwtdecode_call() {
+    assert_rule_fires(
+        "jwt-client-decode",
+        "/src/auth.ts",
+        "const decoded = jwtDecode(token);",
+    );
+}
+
+// T-072: jwt-client-decode silent on jwtVerify
+#[test]
+fn jwt_client_decode_silent_on_jwtverify() {
+    assert_rule_silent(
+        "jwt-client-decode",
+        "/src/auth.ts",
+        "const { payload } = await jwtVerify(token, secret);",
+    );
+}
