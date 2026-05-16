@@ -1,0 +1,9 @@
+[profile.default]
+fail-fast = false
+
+[profile.ci]
+fail-fast = false
+# Default 60s is too tight for cold CI runs; allow 2 grace periods before killing (max 240s).
+slow-timeout = { period = "120s", terminate-after = 2 }
+# Surface flaky tests in the final report so retries don't hide intermittent failures.
+final-status-level = "flaky"
