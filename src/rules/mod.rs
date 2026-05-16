@@ -9,6 +9,7 @@ mod flaky_test;
 mod generated_file;
 mod hardcoded_secrets;
 mod http_resource;
+mod jwt_client;
 mod naming;
 pub(crate) mod no_use_effect;
 pub(crate) mod open_redirect;
@@ -65,6 +66,7 @@ pub(crate) mod rule_id {
     pub const CORS_WILDCARD: &str = "cors-wildcard";
     pub const UNSAFE_HTML_INJECTION: &str = "unsafe-html-injection";
     pub const SERVICE_WORKER_SCOPE_ROOT: &str = "service-worker-scope-root";
+    pub const JWT_CLIENT_DECODE: &str = "jwt-client-decode";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
@@ -236,6 +238,7 @@ pub fn load_rules(config: &Config) -> Vec<Rule> {
         raw_html          => raw_html,
         cot_leakage_marker => cot_leakage_marker,
         service_worker    => service_worker,
+        jwt_client        => jwt_client,
     );
     rules
 }
@@ -417,7 +420,7 @@ mod tests {
     fn load_rules_default_config_loads_all() {
         let config = Config::default();
         let rules = load_rules(&config);
-        assert_eq!(rules.len(), 19);
+        assert_eq!(rules.len(), 20);
     }
 
     #[test]
