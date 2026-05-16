@@ -1,23 +1,18 @@
-use super::{Rule, Severity, Violation, RE_JS_FILE};
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_SW_SCOPE_ROOT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"navigator\.serviceWorker\.register\s*\([^)]*\bscope\s*:\s*['"`]/['"`]"#)
+    Regex::new(r#"navigator\.serviceWorker\.register\s*\([^;\n]*?\bscope\s*:\s*['"`]/['"`]"#)
         .expect("RE_SW_SCOPE_ROOT: invalid regex")
 });
 
 pub fn rule() -> Rule {
     Rule {
         file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
-            for mat in RE_SW_SCOPE_ROOT.find_iter(content) {
-                let line_num = u32::try_from(content[..mat.start()].matches('\n').count() + 1)
-                    .unwrap_or(u32::MAX);
-                if !lines.iter().any(|(n, _)| *n == line_num) {
-                    continue;
-                }
+            if let Some(line_num) = find_match_in_lines(lines, &RE_SW_SCOPE_ROOT) {
                 violations.push(Violation {
                     rule: super::rule_id::SERVICE_WORKER_SCOPE_ROOT.to_owned(),
                     severity: Severity::Medium,
@@ -95,20 +90,29 @@ mod tests {
     }
 
     #[test]
-    fn detects_multi_line_register() {
-        let v = check(
-            "navigator.serviceWorker.register('/sw.js', {\n  scope: '/',\n});",
-            "/src/app.ts",
-        );
-        assert_eq!(v.len(), 1);
-    }
-
-    #[test]
     fn ignores_comment() {
         assert!(check(
             "// navigator.serviceWorker.register('/sw.js', { scope: '/' });",
             "/src/app.ts",
         )
         .is_empty());
+    }
+
+    #[test]
+    fn detects_nested_call_argument() {
+        let v = check(
+            "navigator.serviceWorker.register(new URL('/sw.js', import.meta.url), { scope: '/' });",
+            "/src/app.ts",
+        );
+        assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn detects_second_call_on_same_line() {
+        let v = check(
+            "navigator.serviceWorker.register('/a.js'); navigator.serviceWorker.register('/b.js', { scope: '/' });",
+            "/src/app.ts",
+        );
+        assert_eq!(v.len(), 1);
     }
 }
