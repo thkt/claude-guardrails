@@ -31,6 +31,11 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Install nextest
+        uses: taiki-e/install-action@184183c2401be73c3bf42c2e61268aa5855379c1 # v2
+        with:
+          tool: cargo-nextest
+
       - name: Clippy
         run: cargo clippy -- -D warnings
 
@@ -38,12 +43,12 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Test
-        run: cargo test
+        run: cargo nextest run --profile ci
 
       # Verify color module respects NO_COLOR (LazyLock in color.rs).
       # Full suite re-run ensures all output-formatting paths work without ANSI codes.
       - name: Test (NO_COLOR)
-        run: cargo test
+        run: cargo nextest run --profile ci
         env:
           NO_COLOR: "1"
 
