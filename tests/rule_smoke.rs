@@ -820,3 +820,13 @@ fn eval_fires_on_new_function_ctor() {
         "const fn = new Function('return 1');",
     );
 }
+
+// T-080: oxlint/eslint(no-new-func) fires on `new Function(...)` (DEFAULT_DENY_RULES wired end-to-end)
+#[test]
+fn oxlint_no_new_func_fires_on_new_function_ctor() {
+    assert_rule_fires(
+        "oxlint/eslint(no-new-func)",
+        "/src/app.ts",
+        "const fn = new Function('return 1');",
+    );
+}
