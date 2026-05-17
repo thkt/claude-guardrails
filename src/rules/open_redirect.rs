@@ -4,7 +4,7 @@ use oxc_ast::ast::{AssignmentExpression, AssignmentTarget, CallExpression, Expre
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
 
-const FIX_MESSAGE: &str = "Validate URL before redirect. Use allowlist or ensure relative path.";
+const FIX_MESSAGE: &str = "Open redirect risk. Validate against an allowlist before redirect (e.g., if (!ALLOWED_PATHS.includes(url)) return).";
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
@@ -288,5 +288,21 @@ mod tests {
     #[test]
     fn empty_file() {
         assert!(check("", "/src/auth.ts").is_empty());
+    }
+
+    #[test]
+    fn fix_message_includes_concrete_snippet() {
+        let v = check("location.href = redirectUrl;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].fix.contains("allowlist"),
+            "fix lacks allowlist anchor: {}",
+            v[0].fix
+        );
+        assert!(
+            v[0].fix.contains("includes(url)"),
+            "fix lacks code snippet anchor: {}",
+            v[0].fix
+        );
     }
 }

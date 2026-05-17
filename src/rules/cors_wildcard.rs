@@ -13,7 +13,7 @@ const WILDCARD: &str = "*";
 const HEADER_METHODS: [&str; 4] = ["setHeader", "header", "appendHeader", "set"];
 
 const FIX_MESSAGE: &str =
-    "CORS wildcard '*' grants any origin. Restrict to a specific URL or an allowlist array.";
+    "CORS wildcard '*' grants any origin. Use cors({ origin: 'https://example.com' }) for a single origin, or pass an allowlist array.";
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
@@ -324,6 +324,22 @@ mod tests {
         assert!(
             per_file_us < 10_000,
             "AST cors-wildcard check exceeded 10ms/file: {per_file_us}us"
+        );
+    }
+
+    #[test]
+    fn fix_message_includes_concrete_snippet() {
+        let v = check_js("app.use(cors({ origin: '*' }));");
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].fix.contains("cors({ origin:"),
+            "fix lacks cors snippet anchor: {}",
+            v[0].fix
+        );
+        assert!(
+            v[0].fix.contains("'https://example.com'"),
+            "fix lacks concrete origin example: {}",
+            v[0].fix
         );
     }
 }
