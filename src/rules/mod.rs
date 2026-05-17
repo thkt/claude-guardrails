@@ -67,6 +67,7 @@ pub(crate) mod rule_id {
     pub const UNSAFE_HTML_INJECTION: &str = "unsafe-html-injection";
     pub const SERVICE_WORKER_SCOPE_ROOT: &str = "service-worker-scope-root";
     pub const JWT_CLIENT_DECODE: &str = "jwt-client-decode";
+    pub const CLIENT_ENV_PUBLIC_LEAK: &str = "client-env-public-leak";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =

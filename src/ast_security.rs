@@ -4,7 +4,7 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
     BindingPattern, CallExpression, Expression, Function, LogicalExpression, LogicalOperator,
     MethodDefinition, ObjectProperty, ObjectPropertyKind, Program, RegExpLiteral,
-    VariableDeclarator,
+    StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -24,6 +24,13 @@ const SENSITIVE_ENV_KEYWORDS: [&str; 6] = [
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
 
 const USE_SERVER_DIRECTIVE: &str = "use server";
+const USE_CLIENT_DIRECTIVE: &str = "use client";
+const NEXT_PUBLIC_PREFIX: &str = "NEXT_PUBLIC_";
+
+// NODE_ENV は React / Next.js / Webpack が client bundle に compile-time embed する
+// 公式 public 値で、`process.env.NODE_ENV === 'production'` 形式の dev/prod 分岐は
+// 一般的。NEXT_PUBLIC_ prefix と並ぶ allow 対象として明示する。
+const CLIENT_ENV_ALLOW_LIST: [&str; 1] = ["NODE_ENV"];
 
 /// crypto API sink。当該 index に `Math.random()` が渡されると Severity::High で blocking する。
 struct CryptoSink {
@@ -231,6 +238,7 @@ pub fn check_program(
 ) -> Vec<Violation> {
     let is_api_file = RE_API_FILE.is_match(file_path);
     let has_top_level_use_server = !is_api_file && has_use_server_directive(&program.directives);
+    let has_use_client = !is_api_file && has_use_client_directive(&program.directives);
     let mut visitor = SecurityVisitor {
         violations: Vec::new(),
         file_path,
@@ -240,6 +248,7 @@ pub fn check_program(
         is_server_context: is_api_file || has_top_level_use_server,
         use_server_depth: 0,
         in_security_named_fn: false,
+        has_use_client,
     };
     visitor.visit_program(program);
     visitor.violations
@@ -249,6 +258,12 @@ fn has_use_server_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
     directives
         .iter()
         .any(|d| d.directive.as_str() == USE_SERVER_DIRECTIVE)
+}
+
+fn has_use_client_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
+    directives
+        .iter()
+        .any(|d| d.directive.as_str() == USE_CLIENT_DIRECTIVE)
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -278,6 +293,7 @@ struct SecurityVisitor<'s> {
     is_server_context: bool,
     use_server_depth: u32,
     in_security_named_fn: bool,
+    has_use_client: bool,
 }
 
 impl SecurityVisitor<'_> {
@@ -437,6 +453,30 @@ impl SecurityVisitor<'_> {
             Severity::High,
             "Throw an error when required env var is missing. Never fall back to a hardcoded secret.",
             expr.span,
+        );
+    }
+
+    fn check_client_env_public_leak(&mut self, sme: &StaticMemberExpression) {
+        if !self.has_use_client {
+            return;
+        }
+        if self.use_server_depth > 0 {
+            return;
+        }
+        let Some(name) = process_env_access_name_from_sme(sme) else {
+            return;
+        };
+        if name.starts_with(NEXT_PUBLIC_PREFIX) {
+            return;
+        }
+        if CLIENT_ENV_ALLOW_LIST.contains(&name) {
+            return;
+        }
+        self.push_violation(
+            rule_id::CLIENT_ENV_PUBLIC_LEAK,
+            Severity::High,
+            "process.env in a 'use client' module is bundled to the browser. Move to a server component, or use a NEXT_PUBLIC_ prefix if the value is public.",
+            sme.span,
         );
     }
 
@@ -754,6 +794,11 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         walk::walk_logical_expression(self, it);
     }
 
+    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
+        self.check_client_env_public_leak(it);
+        walk::walk_static_member_expression(self, it);
+    }
+
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         self.check_math_random_keyword_var(decl);
         let prev = self.in_security_named_fn;
@@ -789,6 +834,10 @@ fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
     let Expression::StaticMemberExpression(outer) = expr else {
         return None;
     };
+    process_env_access_name_from_sme(outer)
+}
+
+fn process_env_access_name_from_sme<'a>(outer: &'a StaticMemberExpression) -> Option<&'a str> {
     let Expression::StaticMemberExpression(inner) = &outer.object else {
         return None;
     };
@@ -2241,5 +2290,138 @@ mod tests {
         );
         assert_eq!(v.len(), 1, "root app/route.ts must flag: {:?}", v);
         assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
+    }
+
+    #[test]
+    fn client_env_leak_fires_with_use_client_directive() {
+        let code = "\"use client\";\nconst key = process.env.SECRET_API_KEY;";
+        let v = check(code, "/src/components/Profile.tsx");
+        let leaks: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
+            .collect();
+        assert_eq!(leaks.len(), 1, "client env leak must flag: {:?}", v);
+        assert_eq!(leaks[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn client_env_leak_silent_on_next_public_prefix() {
+        let code = "\"use client\";\nconst url = process.env.NEXT_PUBLIC_API_URL;";
+        let v = check(code, "/src/components/Profile.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "NEXT_PUBLIC_ prefix is allowed: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_silent_without_directive() {
+        let code = "const key = process.env.SECRET_API_KEY;";
+        let v = check(code, "/src/lib/util.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "no use client directive: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_silent_in_api_route_even_with_use_client() {
+        let code = "\"use client\";\nconst key = process.env.SECRET_API_KEY;";
+        let v = check(code, "/src/app/api/users/route.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "API route never executes in browser: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_fires_in_function_call_argument() {
+        let code = "\"use client\";\nlogger.debug(process.env.JWT_SECRET);";
+        let v = check(code, "/src/components/Profile.tsx");
+        let leaks: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
+            .collect();
+        assert_eq!(
+            leaks.len(),
+            1,
+            "process.env access nested in call still leaks: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_fires_with_single_quote_directive() {
+        let code = "'use client';\nconst key = process.env.SECRET_API_KEY;";
+        let v = check(code, "/src/components/Profile.tsx");
+        let leaks: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
+            .collect();
+        assert_eq!(leaks.len(), 1, "single-quoted directive must work: {:?}", v);
+    }
+
+    #[test]
+    fn client_env_leak_silent_with_use_server_directive() {
+        let code = "\"use server\";\nconst key = process.env.SECRET_API_KEY;";
+        let v = check(code, "/src/components/Form.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "use server is server-side: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_fires_for_every_violation_in_file() {
+        let code = "\"use client\";\nconst a = process.env.SECRET_API_KEY;\nconst b = process.env.DATABASE_URL;";
+        let v = check(code, "/src/components/Profile.tsx");
+        let leaks: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
+            .collect();
+        assert_eq!(leaks.len(), 2, "every violation must be reported: {:?}", v);
+    }
+
+    #[test]
+    fn client_env_leak_silent_on_computed_access() {
+        let code = "\"use client\";\nconst key = process.env[\"SECRET_API_KEY\"];";
+        let v = check(code, "/src/components/Profile.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "computed access is out of scope per draft: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_silent_on_node_env() {
+        let code = "\"use client\";\nif (process.env.NODE_ENV === 'production') {}";
+        let v = check(code, "/src/components/Profile.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "NODE_ENV is a framework-provided public compile-time value: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn client_env_leak_silent_inside_inline_use_server_in_client_component() {
+        let code = r#"
+            "use client";
+            async function submit() {
+                "use server";
+                const key = process.env.SECRET_API_KEY;
+            }
+        "#;
+        let v = check(code, "/src/components/Profile.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
+            "inline 'use server' body runs server-side, not in client bundle: {:?}",
+            v
+        );
     }
 }
