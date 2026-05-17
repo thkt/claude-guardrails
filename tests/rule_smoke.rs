@@ -810,3 +810,13 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
         "window.addEventListener('message', (event) => { if (event.origin !== 'https://trusted.example.com') return; processData(event.data); });",
     );
 }
+
+// T-079: eval fires on `new Function(...)` (no-new-func via oxlint adds defense-in-depth)
+#[test]
+fn eval_fires_on_new_function_ctor() {
+    assert_rule_fires(
+        "eval",
+        "/src/app.ts",
+        "const fn = new Function('return 1');",
+    );
+}

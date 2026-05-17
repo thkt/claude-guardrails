@@ -10,6 +10,7 @@ const DEFAULT_DENY_RULES: &[&str] = &[
     "typescript/no-explicit-any",
     "typescript/no-non-null-assertion",
     "eslint/no-console",
+    "eslint/no-new-func",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -163,13 +164,13 @@ mod tests {
         assert_eq!(violations[0].line, None);
     }
 
-    // T-007: default config → 4 deny flags
+    // T-007: default config → 5 deny flags
     #[test]
-    fn build_args_default_has_four_deny() {
+    fn build_args_default_has_five_deny() {
         let config = OxlintConfig::default();
         let args = build_args(&config);
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
-        assert_eq!(deny_count, 4);
+        assert_eq!(deny_count, 5);
         assert!(args.contains(&"--format".to_owned()));
         assert!(args.contains(&"json".to_owned()));
     }
@@ -183,7 +184,7 @@ mod tests {
         };
         let args = build_args(&config);
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
-        assert_eq!(deny_count, 5);
+        assert_eq!(deny_count, 6);
         assert!(args.contains(&"eslint/curly".to_owned()));
     }
 
@@ -196,7 +197,7 @@ mod tests {
         };
         let args = build_args(&config);
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
-        assert_eq!(deny_count, 3);
+        assert_eq!(deny_count, 4);
         assert!(!args.contains(&"eslint/no-console".to_owned()));
     }
 }
