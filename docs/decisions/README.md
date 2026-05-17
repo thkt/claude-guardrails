@@ -16,6 +16,7 @@ This directory contains important decisions about the project's architecture.
 | [0008](0008-unsafe-html-injection-rule-id-separation.md) | ast_security 配下の innerHTML / document.write を unsafe-html-injection に分離 | accepted | 2026-05-14 |
 | [0009](0009-custom-rule-overlap-eval.md) | eval 検出を custom AST rule に集約し oxlint の同等 rule を抑止する | accepted | 2026-05-17 |
 | [0010](0010-reporter-output-design-intent.md) | reporter stderr の `━` 装飾と anti-circumvention 文言を維持する | accepted | 2026-05-17 |
+| [0011](0011-column-not-needed-fix-snippet-suffices.md) | 同一行複数違反では column 番号を出力せず fix message snippet で対象を特定する | accepted | 2026-05-17 |
 
 ## By Status
 
@@ -31,6 +32,7 @@ This directory contains important decisions about the project's architecture.
 - **0008**: ast_security 配下の innerHTML / document.write を unsafe-html-injection に分離
 - **0009**: eval 検出を custom AST rule に集約し oxlint の同等 rule を抑止する
 - **0010**: reporter stderr の `━` 装飾と anti-circumvention 文言を維持する
+- **0011**: 同一行複数違反では column 番号を出力せず fix message snippet で対象を特定する
 
 ## About MADR Format
 
