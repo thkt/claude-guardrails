@@ -2,9 +2,10 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionExpression, AssignmentExpression,
-    AssignmentTarget, BinaryOperator, BindingPattern, CallExpression, Expression, Function,
-    LogicalExpression, LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind,
-    Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
+    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, CallExpression,
+    ComputedMemberExpression, Expression, Function, FunctionBody, LogicalExpression,
+    LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind, Program, RegExpLiteral,
+    ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -701,6 +702,58 @@ impl SecurityVisitor<'_> {
         );
     }
 
+    fn check_postmessage_origin_missing(&mut self, call: &CallExpression<'_>) {
+        let callee_ok = match &call.callee {
+            Expression::Identifier(id) => id.name == "addEventListener",
+            Expression::StaticMemberExpression(sme) => {
+                sme.property.name == "addEventListener"
+                    && matches!(
+                        &sme.object,
+                        Expression::Identifier(id) if matches!(id.name.as_str(), "window" | "self")
+                    )
+            }
+            _ => false,
+        };
+        if !callee_ok {
+            return;
+        }
+        let Some(Argument::StringLiteral(event_name)) = call.arguments.first() else {
+            return;
+        };
+        if event_name.value != "message" {
+            return;
+        }
+        let Some(handler) = call.arguments.get(1) else {
+            return;
+        };
+        let (params, body) = match handler {
+            Argument::ArrowFunctionExpression(arrow) => (&arrow.params, arrow.body.as_ref()),
+            Argument::FunctionExpression(func) => {
+                let Some(body) = func.body.as_deref() else {
+                    return;
+                };
+                (&func.params, body)
+            }
+            _ => return,
+        };
+        let Some(first_param) = params.items.first() else {
+            return;
+        };
+        let BindingPattern::BindingIdentifier(ident) = &first_param.pattern else {
+            return;
+        };
+        let binding = ident.name.as_str();
+        if has_origin_reference(body, binding) {
+            return;
+        }
+        self.push_violation(
+            rule_id::POSTMESSAGE_ORIGIN_MISSING,
+            Severity::High,
+            "Validate event.origin against an allowlist before handling postMessage. Drop messages from unexpected origins.",
+            call.span,
+        );
+    }
+
     fn check_math_random_insecure(&mut self, call: &CallExpression) {
         if self.is_test_file {
             return;
@@ -864,6 +917,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_math_random_to_string_other(it);
         self.check_document_write(it);
         self.check_merge_pollution_sinks(it);
+        self.check_postmessage_origin_missing(it);
         walk::walk_call_expression(self, it);
     }
 
@@ -981,6 +1035,101 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         walk::walk_variable_declarator(self, decl);
         self.in_direct_ssr_target = prev_target;
         self.in_security_named_fn = prev_named;
+    }
+}
+
+/// `event.origin` / `event["origin"]` / `const { origin } = event` /
+/// `({ origin } = event)` のいずれかの形で param binding が `origin` プロパティへ
+/// 触っているかを callback body 内で走査する。
+fn has_origin_reference(body: &FunctionBody<'_>, binding: &str) -> bool {
+    let mut finder = OriginReferenceFinder {
+        binding,
+        found: false,
+    };
+    finder.visit_function_body(body);
+    finder.found
+}
+
+struct OriginReferenceFinder<'b> {
+    binding: &'b str,
+    found: bool,
+}
+
+impl OriginReferenceFinder<'_> {
+    fn binding_target(&self, expr: &Expression) -> bool {
+        matches!(expr, Expression::Identifier(id) if id.name == self.binding)
+    }
+
+    fn pattern_destructures_origin(pat: &BindingPattern) -> bool {
+        let BindingPattern::ObjectPattern(obj) = pat else {
+            return false;
+        };
+        obj.properties
+            .iter()
+            .any(|p| p.key.static_name().is_some_and(|n| n == "origin"))
+    }
+
+    fn target_destructures_origin(target: &AssignmentTarget) -> bool {
+        let AssignmentTarget::ObjectAssignmentTarget(obj) = target else {
+            return false;
+        };
+        obj.properties.iter().any(|p| match p {
+            AssignmentTargetProperty::AssignmentTargetPropertyIdentifier(id) => {
+                id.binding.name == "origin"
+            }
+            AssignmentTargetProperty::AssignmentTargetPropertyProperty(prop) => {
+                prop.name.static_name().is_some_and(|n| n == "origin")
+            }
+        })
+    }
+}
+
+impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
+    fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
+        if !self.found && it.property.name == "origin" && self.binding_target(&it.object) {
+            self.found = true;
+            return;
+        }
+        if !self.found {
+            walk::walk_static_member_expression(self, it);
+        }
+    }
+
+    fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
+        if !self.found {
+            if let Expression::StringLiteral(s) = &it.expression {
+                if s.value == "origin" && self.binding_target(&it.object) {
+                    self.found = true;
+                    return;
+                }
+            }
+            walk::walk_computed_member_expression(self, it);
+        }
+    }
+
+    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
+        if !self.found {
+            if let Some(init) = &it.init {
+                if self.binding_target(init) && Self::pattern_destructures_origin(&it.id) {
+                    self.found = true;
+                    return;
+                }
+            }
+            walk::walk_variable_declarator(self, it);
+        }
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if !self.found
+            && self.binding_target(&it.right)
+            && Self::target_destructures_origin(&it.left)
+        {
+            self.found = true;
+            return;
+        }
+        if !self.found {
+            walk::walk_assignment_expression(self, it);
+        }
     }
 }
 
@@ -2800,5 +2949,169 @@ mod tests {
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
         assert_eq!(bleeds.len(), 1, "deeply nested secret must flag: {:?}", v);
+    }
+
+    fn assert_postmessage_fires(code: &str) {
+        let v = check(code, "/src/page.ts");
+        let hits: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::POSTMESSAGE_ORIGIN_MISSING)
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "expected fire for: {code}\nviolations: {v:?}"
+        );
+    }
+
+    fn assert_postmessage_silent(code: &str) {
+        let v = check(code, "/src/page.ts");
+        assert!(
+            v.iter()
+                .all(|x| x.rule != rule_id::POSTMESSAGE_ORIGIN_MISSING),
+            "expected silent for: {code}\nviolations: {v:?}"
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_window_arrow_without_origin_check() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (event) => { processData(event.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_bare_addeventlistener() {
+        assert_postmessage_fires(
+            "addEventListener('message', (event) => { handle(event.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_self_addeventlistener() {
+        assert_postmessage_fires("self.addEventListener('message', (e) => { handle(e.data); });");
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_function_expression_handler() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', function (e) { handle(e.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_with_alternative_param_name() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (msg) => { handle(msg.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_origin_guard() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { if (event.origin !== 'https://x.example') return; processData(event.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_allowlist_check() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { const ALLOWED = ['https://a.example']; if (!ALLOWED.includes(event.origin)) return; processData(event.data); });",
+        );
+    }
+
+    // Issue letter: bare origin reference is enough for advisory pass even if
+    // actual validation isn't proven. Keeps scope narrow.
+    #[test]
+    fn postmessage_origin_missing_silent_on_origin_reference_only() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { console.log(event.origin); processData(event.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_computed_origin_access() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { if (event['origin'] !== 'https://x') return; });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_body_destructure() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { const { origin, data } = event; if (origin !== 'https://x') return; handle(data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_body_destructure_renamed() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { const { origin: o, data } = event; if (o !== 'https://x') return; handle(data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_assignment_destructure() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { let origin, data; ({ origin, data } = event); if (origin !== 'https://x') return; });",
+        );
+    }
+
+    // Param-side destructure (`({ origin }) => ...`) is out of scope per Issue.
+    // Silent test keeps the boundary durable.
+    #[test]
+    fn postmessage_origin_missing_silent_on_param_destructure() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', ({ origin, data }) => { if (origin !== 'https://x') return; handle(data); });",
+        );
+    }
+
+    // External handler reference is out of scope: 1-file scope cannot follow
+    // the body. Issue states this explicitly.
+    #[test]
+    fn postmessage_origin_missing_silent_on_external_handler() {
+        assert_postmessage_silent(
+            "function onMsg(e) { handle(e.data); }\nwindow.addEventListener('message', onMsg);",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_non_message_event() {
+        assert_postmessage_silent(
+            "window.addEventListener('click', (event) => { handle(event); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_zero_arg_callback() {
+        assert_postmessage_silent("window.addEventListener('message', () => {});");
+    }
+
+    // Issue letter limits the receiver to `window` / `self` / bare global.
+    // `globalThis.addEventListener` is out of scope by Issue letter; silent
+    // until expanded with explicit user request.
+    #[test]
+    fn postmessage_origin_missing_silent_on_globalthis_addeventlistener() {
+        assert_postmessage_silent(
+            "globalThis.addEventListener('message', (e) => { handle(e.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_worker_addeventlistener() {
+        assert_postmessage_silent(
+            "const w = new Worker('w.js');\nw.addEventListener('message', (e) => { handle(e.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_for_each_violating_listener() {
+        let code = "window.addEventListener('message', (e) => { handle(e.data); });\nself.addEventListener('message', (m) => { handle(m.data); });";
+        let v = check(code, "/src/page.ts");
+        let hits: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::POSTMESSAGE_ORIGIN_MISSING)
+            .collect();
+        assert_eq!(hits.len(), 2, "expected two violations: {:?}", v);
     }
 }

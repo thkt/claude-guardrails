@@ -790,3 +790,23 @@ fn ssr_secret_bleed_silent_on_safe_props() {
         "export async function getServerSideProps() {\n  return { props: { username: 'alice', itemCount: 3 } };\n}",
     );
 }
+
+// T-077: postmessage-origin-missing (message listener without origin validation)
+#[test]
+fn postmessage_origin_missing_fires_on_message_listener_without_origin() {
+    assert_rule_fires(
+        "postmessage-origin-missing",
+        "/src/page.ts",
+        "window.addEventListener('message', (event) => { processData(event.data); });",
+    );
+}
+
+// T-078: postmessage-origin-missing silent when handler reads event.origin
+#[test]
+fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
+    assert_rule_silent(
+        "postmessage-origin-missing",
+        "/src/page.ts",
+        "window.addEventListener('message', (event) => { if (event.origin !== 'https://trusted.example.com') return; processData(event.data); });",
+    );
+}
