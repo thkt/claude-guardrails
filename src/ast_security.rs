@@ -1,10 +1,10 @@
 use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, BinaryOperator,
-    BindingPattern, CallExpression, Expression, Function, LogicalExpression, LogicalOperator,
-    MethodDefinition, ObjectProperty, ObjectPropertyKind, Program, RegExpLiteral,
-    StaticMemberExpression, VariableDeclarator,
+    Argument, ArrayExpressionElement, ArrowFunctionExpression, AssignmentExpression,
+    AssignmentTarget, BinaryOperator, BindingPattern, CallExpression, Expression, Function,
+    LogicalExpression, LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind,
+    Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -31,6 +31,13 @@ const NEXT_PUBLIC_PREFIX: &str = "NEXT_PUBLIC_";
 // 公式 public 値で、`process.env.NODE_ENV === 'production'` 形式の dev/prod 分岐は
 // 一般的。NEXT_PUBLIC_ prefix と並ぶ allow 対象として明示する。
 const CLIENT_ENV_ALLOW_LIST: [&str; 1] = ["NODE_ENV"];
+
+// Underscore-free lowercase needles paired with `ascii_fold_underscore_contains`
+// so `apiKey`, `API_KEY`, `db_token` all match the same `apikey` / `token` entry.
+// Kept separate from `SENSITIVE_ENV_KEYWORDS` (used on the SCREAMING_SNAKE value
+// side via plain `contains`) so each side can evolve independently.
+const SSR_SECRET_KEYWORDS: [&str; 6] =
+    ["secret", "token", "password", "apikey", "jwt", "credential"];
 
 /// crypto API sink。当該 index に `Math.random()` が渡されると Severity::High で blocking する。
 struct CryptoSink {
@@ -147,6 +154,48 @@ fn name_matches_security_keyword(name: &str) -> bool {
         .any(|kw| ascii_fold_contains(bytes, kw.as_bytes()))
 }
 
+/// Return true when `name`, ASCII-lowercase folded and with `_` removed, contains any
+/// `SSR_SECRET_KEYWORDS` entry as a substring. Targets SSR return-object property names
+/// (`apiKey`, `API_KEY`, `db_token`, `password`, …) across camelCase, snake_case and
+/// SCREAMING_SNAKE forms.
+fn name_matches_ssr_secret_keyword(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    SSR_SECRET_KEYWORDS
+        .iter()
+        .any(|kw| ascii_fold_underscore_contains(bytes, kw.as_bytes()))
+}
+
+/// Like `ascii_fold_contains` but treats `_` in the haystack as if it were not present,
+/// so `API_KEY` matches `apikey`. The needle must already be underscore-free lowercase.
+fn ascii_fold_underscore_contains(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    for start in 0..haystack.len() {
+        let mut hi = start;
+        let mut ni = 0;
+        while hi < haystack.len() && ni < needle.len() {
+            let h = haystack[hi];
+            if h == b'_' {
+                hi += 1;
+                continue;
+            }
+            if h.to_ascii_lowercase() != needle[ni] {
+                break;
+            }
+            hi += 1;
+            ni += 1;
+        }
+        if ni == needle.len() {
+            return true;
+        }
+    }
+    false
+}
+
 /// `haystack` を per-byte ASCII-lowercase で fold した結果に `needle` (lowercase ASCII) が
 /// 含まれるか調べる。`needle.len() <= haystack.len()` のときのみ true を返す。
 fn ascii_fold_contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -246,7 +295,10 @@ pub fn check_program(
         is_test_file: RE_TEST_FILE.is_match(file_path),
         is_api_or_route: RE_API_OR_ROUTE_FILE.is_match(file_path),
         is_server_context: is_api_file || has_top_level_use_server,
+        has_top_level_use_server,
         use_server_depth: 0,
+        in_direct_ssr_target: false,
+        function_depth: 0,
         in_security_named_fn: false,
         has_use_client,
     };
@@ -291,7 +343,10 @@ struct SecurityVisitor<'s> {
     is_test_file: bool,
     is_api_or_route: bool,
     is_server_context: bool,
+    has_top_level_use_server: bool,
     use_server_depth: u32,
+    in_direct_ssr_target: bool,
+    function_depth: u32,
     in_security_named_fn: bool,
     has_use_client: bool,
 }
@@ -303,6 +358,28 @@ impl SecurityVisitor<'_> {
 
     fn in_server_context(&self) -> bool {
         self.is_server_context || self.use_server_depth > 0
+    }
+
+    /// True when the current `Function` is itself a serialized SSR target —
+    /// `getServerSideProps`, a `'use server'` directive body, or any function
+    /// directly exported from a top-level `'use server'` file. False inside any
+    /// nested helper, whose return is not sent to the client.
+    fn is_ssr_target_function(&self, func: &Function) -> bool {
+        if func
+            .id
+            .as_ref()
+            .is_some_and(|id| id.name == "getServerSideProps")
+        {
+            return true;
+        }
+        if func
+            .body
+            .as_deref()
+            .is_some_and(|b| has_use_server_directive(&b.directives))
+        {
+            return true;
+        }
+        self.has_top_level_use_server && self.function_depth == 0
     }
 
     fn push_violation(&mut self, rule: &str, severity: Severity, fix: &str, span: Span) {
@@ -478,6 +555,60 @@ impl SecurityVisitor<'_> {
             "process.env in a 'use client' module is bundled to the browser. Move to a server component, or use a NEXT_PUBLIC_ prefix if the value is public.",
             sme.span,
         );
+    }
+
+    fn check_ssr_secret_bleed_return(&mut self, stmt: &ReturnStatement) {
+        if !self.in_direct_ssr_target {
+            return;
+        }
+        let Some(arg) = &stmt.argument else {
+            return;
+        };
+        self.check_ssr_secret_object(arg);
+    }
+
+    /// Walk an SSR return value: for each direct property of an `ObjectExpression`,
+    /// flag secret-named keys, flag `process.env.<SECRET>` values, otherwise recurse
+    /// into nested object literals (so `{ props: { user: { token: ... } } }` and any
+    /// other depth is reached). Non-object values and spread elements are skipped;
+    /// variable-bound returns never reach here.
+    fn check_ssr_secret_object(&mut self, expr: &Expression) {
+        let expr = unwrap_parenthesized(expr);
+        let Expression::ObjectExpression(obj) = expr else {
+            return;
+        };
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(op) = prop else {
+                continue;
+            };
+            let Some(key_name) = op.key.static_name() else {
+                continue;
+            };
+            if name_matches_ssr_secret_keyword(&key_name) {
+                self.push_violation(
+                    rule_id::SSR_SECRET_BLEED,
+                    Severity::High,
+                    "SSR/Server Action return is sent to the client. Move secret-named field server-side or rename if value is public.",
+                    op.span,
+                );
+                continue;
+            }
+            if let Some(env_name) = process_env_access_name(&op.value) {
+                if SENSITIVE_ENV_KEYWORDS
+                    .iter()
+                    .any(|kw| env_name.contains(kw))
+                {
+                    self.push_violation(
+                        rule_id::SSR_SECRET_BLEED,
+                        Severity::High,
+                        "SSR/Server Action return is sent to the client. process.env secret leaks to the browser; return only render-needed data.",
+                        op.span,
+                    );
+                    continue;
+                }
+            }
+            self.check_ssr_secret_object(&op.value);
+        }
     }
 
     fn check_prototype_pollution(&mut self, expr: &AssignmentExpression) {
@@ -737,7 +868,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
-        let prev = self.in_security_named_fn;
+        let prev_named = self.in_security_named_fn;
         if let Some(id) = &func.id {
             if name_matches_security_keyword(&id.name) {
                 self.in_security_named_fn = true;
@@ -750,11 +881,32 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         if entered_use_server {
             self.use_server_depth += 1;
         }
+        let prev_target = self.in_direct_ssr_target;
+        self.in_direct_ssr_target = self.is_ssr_target_function(func);
+        self.function_depth += 1;
         walk::walk_function(self, func, flags);
+        self.function_depth -= 1;
+        self.in_direct_ssr_target = prev_target;
         if entered_use_server {
             self.use_server_depth -= 1;
         }
-        self.in_security_named_fn = prev;
+        self.in_security_named_fn = prev_named;
+    }
+
+    fn visit_arrow_function_expression(&mut self, arrow: &ArrowFunctionExpression<'a>) {
+        let prev_target = self.in_direct_ssr_target;
+        if self.function_depth > 0 {
+            self.in_direct_ssr_target = false;
+        }
+        self.function_depth += 1;
+        if self.in_direct_ssr_target && arrow.expression {
+            if let Some(Statement::ExpressionStatement(expr_stmt)) = arrow.body.statements.first() {
+                self.check_ssr_secret_object(&expr_stmt.expression);
+            }
+        }
+        walk::walk_arrow_function_expression(self, arrow);
+        self.function_depth -= 1;
+        self.in_direct_ssr_target = prev_target;
     }
 
     fn visit_method_definition(&mut self, it: &MethodDefinition<'a>) {
@@ -799,14 +951,36 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         walk::walk_static_member_expression(self, it);
     }
 
+    fn visit_return_statement(&mut self, stmt: &ReturnStatement<'a>) {
+        self.check_ssr_secret_bleed_return(stmt);
+        walk::walk_return_statement(self, stmt);
+    }
+
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         self.check_math_random_keyword_var(decl);
-        let prev = self.in_security_named_fn;
+        let prev_named = self.in_security_named_fn;
         if binds_security_named_function(decl) {
             self.in_security_named_fn = true;
         }
+        let prev_target = self.in_direct_ssr_target;
+        // `export const getServerSideProps = async () => ...` form: the arrow is
+        // SSR-serialized only when bound at program scope (function_depth == 0).
+        if self.function_depth == 0
+            && matches!(
+                &decl.id,
+                BindingPattern::BindingIdentifier(id)
+                    if id.name == "getServerSideProps"
+            )
+            && matches!(
+                &decl.init,
+                Some(Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_))
+            )
+        {
+            self.in_direct_ssr_target = true;
+        }
         walk::walk_variable_declarator(self, decl);
-        self.in_security_named_fn = prev;
+        self.in_direct_ssr_target = prev_target;
+        self.in_security_named_fn = prev_named;
     }
 }
 
@@ -2423,5 +2597,208 @@ mod tests {
             "inline 'use server' body runs server-side, not in client bundle: {:?}",
             v
         );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_apikey_prop_in_get_server_side_props() {
+        let code =
+            "export async function getServerSideProps() { return { props: { apiKey: 'x' } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(
+            bleeds.len(),
+            1,
+            "apiKey property in props must flag: {:?}",
+            v
+        );
+        assert_eq!(bleeds[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_env_secret_value_in_props() {
+        let code = "export async function getServerSideProps() { return { props: { x: process.env.DATABASE_TOKEN } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(
+            bleeds.len(),
+            1,
+            "secret env value in props must flag: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_in_use_server_action_return() {
+        let code = "'use server';\nexport async function fetchData() { return { password: 'p', user: { name: 'x' } }; }";
+        let v = check(code, "/src/app/actions.ts");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(
+            bleeds.len(),
+            1,
+            "'use server' return with password property must flag: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_arrow_get_server_side_props() {
+        let code =
+            "export const getServerSideProps = async () => { return { props: { token: 't' } }; };";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(bleeds.len(), 1, "arrow form must flag: {:?}", v);
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_uppercase_property_name() {
+        let code =
+            "export async function getServerSideProps() { return { props: { API_KEY: 'x' } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(bleeds.len(), 1, "case-insensitive substring match: {:?}", v);
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_multiple_violations_in_same_return() {
+        let code = "export async function getServerSideProps() { return { props: { apiKey: 'a', dbToken: process.env.DATABASE_TOKEN } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(
+            bleeds.len(),
+            2,
+            "every violating property must be reported: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_outside_ssr_scope() {
+        let code = "function helper() { return { token: 'x' }; }";
+        let v = check(code, "/src/lib/util.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "helper function with no SSR context is silent: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_safe_property_names() {
+        let code = "export async function getServerSideProps() { return { props: { username: 'alice', itemCount: 3 } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "non-secret property names are silent: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_variable_referenced_return() {
+        let code = "export async function getServerSideProps() { const data = { props: { apiKey: 'x' } }; return data; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "variable-bound return is out of scope: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_spread_property() {
+        let code =
+            "export async function getServerSideProps() { return { props: { ...secretData } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "spread element is out of scope (separate issue): {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_in_named_function_other_than_gssp() {
+        let code = "export async function getStaticProps() { return { props: { apiKey: 'x' } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "getStaticProps is not in scope for this rule: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_safe_use_server_return() {
+        let code = "'use server';\nexport async function loadUser() { return { name: 'alice', age: 30 }; }";
+        let v = check(code, "/src/app/actions.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "'use server' return with safe properties is silent: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_helper_function_inside_gssp() {
+        let code = "export async function getServerSideProps() {\n  function buildHeaders() { return { token: 'h' }; }\n  return { props: { name: 'alice' } };\n}";
+        let v = check(code, "/pages/dashboard.tsx");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "helper function return is not serialized: {:?}",
+            v
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_helper_function_inside_use_server_file() {
+        let code = "'use server';\nexport async function loadUser() {\n  function inner() { return { password: 'p' }; }\n  return { name: 'alice' };\n}";
+        let v = check(code, "/src/app/actions.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "inner helper return is not serialized: {:?}",
+            v
+        );
+    }
+
+    // Concise arrow body `() => ({ ... })` has no ReturnStatement, so the check
+    // must run from `visit_arrow_function_expression` instead.
+    #[test]
+    fn ssr_secret_bleed_fires_on_concise_arrow_get_server_side_props() {
+        let code = "export const getServerSideProps = async () => ({ props: { apiKey: 'x' } });";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(bleeds.len(), 1, "concise arrow body must flag: {:?}", v);
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_nested_object_in_props() {
+        let code = "export async function getServerSideProps() { return { props: { user: { token: process.env.JWT_SECRET } } }; }";
+        let v = check(code, "/pages/dashboard.tsx");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(bleeds.len(), 1, "deeply nested secret must flag: {:?}", v);
     }
 }

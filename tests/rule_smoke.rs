@@ -770,3 +770,23 @@ fn client_env_public_leak_silent_on_next_public_prefix() {
         "\"use client\";\nconst apiUrl = process.env.NEXT_PUBLIC_API_URL;",
     );
 }
+
+// T-075: ssr-secret-bleed (getServerSideProps returning props with secret env)
+#[test]
+fn ssr_secret_bleed_fires_on_env_secret_in_get_server_side_props() {
+    assert_rule_fires(
+        "ssr-secret-bleed",
+        "/pages/dashboard.tsx",
+        "export async function getServerSideProps() {\n  return { props: { apiKey: process.env.SECRET_API_KEY } };\n}",
+    );
+}
+
+// T-076: ssr-secret-bleed silent when no secret keyword
+#[test]
+fn ssr_secret_bleed_silent_on_safe_props() {
+    assert_rule_silent(
+        "ssr-secret-bleed",
+        "/pages/dashboard.tsx",
+        "export async function getServerSideProps() {\n  return { props: { username: 'alice', itemCount: 3 } };\n}",
+    );
+}

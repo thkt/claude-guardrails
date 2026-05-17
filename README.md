@@ -194,6 +194,7 @@ Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the A
 | `prototype-pollution`     | High     | `Object.assign({}, untrusted)`, `_.merge`, `Object.create` with `__proto__`/`constructor`                                                  |
 | `math-random-insecure`    | Mixed    | `Math.random()` in token/ID/secret contexts. High when usage is concrete (`toString(36)` idiom or crypto-API argument); Medium when only inferable from naming heuristics (security-named var/fn, other `toString` radix). See [ADR-0003](docs/decisions/0003-math-random-severity-policy.md). |
 | `unsafe-html-injection`   | Mixed    | Non-literal assignment to `innerHTML` (High) / `outerHTML` (Medium) / `document.write[ln]` (High). See [ADR-0008](docs/decisions/0008-unsafe-html-injection-rule-id-separation.md). |
+| `ssr-secret-bleed`        | High     | Prevents server-only secrets from leaking to the browser via SSR returns. Flags secret-named properties (`apiKey`, `token`, …) or `process.env.*` secret values returned from `getServerSideProps` / `'use server'` Server Actions, since Next.js serializes those returns into the client payload. |
 
 ## Subcommands
 
