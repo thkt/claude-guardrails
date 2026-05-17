@@ -82,6 +82,27 @@ fn violation_exits_two() {
 }
 
 #[test]
+fn pipe_stderr_omits_ansi_escape() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);"
+        }
+    });
+    let output = run_guardrails_json(&json.to_string());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("BLOCKED"),
+        "sanity check: expected BLOCKED footer, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains('\x1b'),
+        "stderr captured via pipe must not contain ANSI escape (got: {stderr:?})"
+    );
+}
+
+#[test]
 fn invalid_json_exits_input_error() {
     let output = run_guardrails_json("not json");
     assert_eq!(
