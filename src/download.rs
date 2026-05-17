@@ -115,7 +115,7 @@ where
 
     let url = download_url(version, platform);
     let bytes = fetch(&url)?;
-    extract_to_cache(&bytes, cache, version)
+    extract_to_cache(&bytes, cache, version, platform)
 }
 
 const MAX_DOWNLOAD_SIZE: u64 = 50_000_000;
@@ -135,7 +135,12 @@ fn fetch_url(url: &str) -> Result<Vec<u8>, OxlintError> {
     Ok(bytes)
 }
 
-fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Result<PathBuf, OxlintError> {
+fn extract_to_cache(
+    bytes: &[u8],
+    cache: &Path,
+    version: &str,
+    platform: &str,
+) -> Result<PathBuf, OxlintError> {
     fs::create_dir_all(cache).map_err(|e| {
         OxlintError::ExtractFailure(format!(
             "failed to create cache dir {}: {e}",
@@ -174,7 +179,7 @@ fn extract_to_cache(bytes: &[u8], cache: &Path, version: &str) -> Result<PathBuf
         )));
     }
 
-    let extracted = cache.join("oxlint");
+    let extracted = cache.join(format!("oxlint-{platform}"));
     if extracted != target {
         fs::rename(&extracted, &target).map_err(|e| {
             let _ = fs::remove_file(&extracted);
@@ -264,13 +269,15 @@ mod tests {
         assert!(matches!(result, Err(OxlintError::NetworkFailure(_))));
     }
 
-    // T-004: download + extract + cache
+    // T-004: download + extract + cache (tarball binary は `oxlint-{triple}` 形式)
     #[test]
     fn downloads_extracts_and_caches() {
         let tmp = TempDir::new().unwrap();
         let staging = TempDir::new().unwrap();
 
-        let dummy = staging.path().join("oxlint");
+        let platform = detect_platform().expect("test host must be a supported platform");
+        let entry_name = format!("oxlint-{platform}");
+        let dummy = staging.path().join(&entry_name);
         fs::write(&dummy, "#!/bin/sh\necho test").unwrap();
 
         #[cfg(unix)]
@@ -285,7 +292,7 @@ mod tests {
             .arg(&tar)
             .arg("-C")
             .arg(staging.path())
-            .arg("oxlint")
+            .arg(&entry_name)
             .status()
             .unwrap()
             .success());
