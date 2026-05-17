@@ -7,7 +7,7 @@ Code quality checker for Claude Code's PreToolCall hook. Combines external linte
 ## Features
 
 - **oxlint auto-provision**: Automatically resolves or downloads [oxlint](https://oxc.rs) — no manual install needed
-- **AI-tuned deny rules**: Enables `no-explicit-any`, `ban-ts-comment`, `no-non-null-assertion`, `no-console` by default via `--deny`
+- **AI-tuned deny rules**: Enables `no-explicit-any`, `ban-ts-comment`, `no-non-null-assertion`, `no-console`, `no-new-func` by default via `--deny`
 - **Custom rules**: Security patterns external linters don't cover (JS/TS)
 - **AST-based security checks**: Deep analysis via [oxc](https://oxc.rs) parser (command injection, stack exposure, path traversal)
 - **Claude-optimized output**: Actionable fix suggestions in stderr
@@ -127,12 +127,13 @@ Use it to:
 
 guardrails enables these oxlint rules via `--deny` (off by default in oxlint, important for AI-generated code):
 
-| Rule                               | Why                                      |
-| ---------------------------------- | ---------------------------------------- |
-| `typescript/no-explicit-any`       | AI uses `any` / `as any` to bypass types |
-| `typescript/ban-ts-comment`        | AI uses `@ts-ignore` to suppress errors  |
-| `typescript/no-non-null-assertion` | AI uses `!` to skip null checks          |
-| `eslint/no-console`                | AI leaves debug `console.log`            |
+| Rule                               | Why                                          |
+| ---------------------------------- | -------------------------------------------- |
+| `typescript/no-explicit-any`       | AI uses `any` / `as any` to bypass types     |
+| `typescript/ban-ts-comment`        | AI uses `@ts-ignore` to suppress errors      |
+| `typescript/no-non-null-assertion` | AI uses `!` to skip null checks              |
+| `eslint/no-console`                | AI leaves debug `console.log`                |
+| `eslint/no-new-func`               | AI uses `new Function(...)` for dynamic code |
 
 Customize via `oxlint.deny` / `oxlint.allow` in config (see below).
 

@@ -9,7 +9,7 @@ Claude CodeのPreToolCall hook用コード品質チェッカー。外部リン�
 | 機能                          | 説明                                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
 | oxlint自動確保                | [oxlint](https://oxc.rs)を自動検出・ダウンロード（手動インストール不要）                                |
-| AI向けdenyルール              | `no-explicit-any`、`ban-ts-comment`、`no-non-null-assertion`、`no-console` をデフォルト有効化           |
+| AI向けdenyルール              | `no-explicit-any`、`ban-ts-comment`、`no-non-null-assertion`、`no-console`、`no-new-func` をデフォルト有効化 |
 | カスタムルール                | 外部リンターがカバーしないセキュリティパターン（JS/TS）                                                 |
 | ASTベースセキュリティチェック | [oxc](https://oxc.rs)パーサーによる深層解析（コマンドインジェクション、スタック露出、パストラバーサル） |
 | Claude最適化出力              | stderrに修正提案を出力                                                                                  |
@@ -129,12 +129,13 @@ guardrails prefetch
 
 guardrailsはAIコード生成で重要な以下のルールを `--deny` で有効化します（oxlintデフォルトではOFF）。
 
-| ルール                             | 理由                                   |
-| ---------------------------------- | -------------------------------------- |
-| `typescript/no-explicit-any`       | AIが `any` / `as any` で型を逃がす     |
-| `typescript/ban-ts-comment`        | AIが `@ts-ignore` で型エラーを黙殺する |
-| `typescript/no-non-null-assertion` | AIが `!` でnullチェックをサボる        |
-| `eslint/no-console`                | AIがデバッグ用 `console.log` を残す    |
+| ルール                             | 理由                                            |
+| ---------------------------------- | ----------------------------------------------- |
+| `typescript/no-explicit-any`       | AIが `any` / `as any` で型を逃がす              |
+| `typescript/ban-ts-comment`        | AIが `@ts-ignore` で型エラーを黙殺する          |
+| `typescript/no-non-null-assertion` | AIが `!` でnullチェックをサボる                 |
+| `eslint/no-console`                | AIがデバッグ用 `console.log` を残す             |
+| `eslint/no-new-func`               | AIが `new Function(...)` で動的にコード生成する |
 
 `oxlint.deny` / `oxlint.allow` でカスタマイズ可能です（設定セクション参照）。
 
