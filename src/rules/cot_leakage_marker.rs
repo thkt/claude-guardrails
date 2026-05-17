@@ -13,8 +13,12 @@ pub fn rule() -> Rule {
         checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
             // Self-exclusion: this file legitimately contains every marker as literal
             // for detection and tests. Without skipping, any future edit to this rule
-            // would be blocked by itself.
-            if file_path.ends_with("src/rules/cot_leakage_marker.rs") {
+            // would be blocked by itself. `replace('\\', "/")` normalizes Windows
+            // backslash separators so the suffix match works cross-platform.
+            if file_path
+                .replace('\\', "/")
+                .ends_with("src/rules/cot_leakage_marker.rs")
+            {
                 return Vec::new();
             }
             let mut violations = Vec::new();
@@ -190,6 +194,19 @@ mod tests {
             v.len(),
             1,
             "files merely ending in cot_leakage_marker.rs (e.g. unrelated copies, fixtures, or other crates) must still be scanned"
+        );
+    }
+
+    // T-015: Windows-style backslash separator is normalized for self-exclusion
+    #[test]
+    fn skips_own_source_with_windows_separator() {
+        let v = check(
+            "<thinking>\nto=functions.run",
+            r"C:\Users\x\repo\src\rules\cot_leakage_marker.rs",
+        );
+        assert!(
+            v.is_empty(),
+            "self-exclusion must work for Windows-style paths (backslash separator)"
         );
     }
 }
