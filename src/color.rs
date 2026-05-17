@@ -1,9 +1,15 @@
 use std::env;
+use std::io::{stderr, IsTerminal};
 use std::sync::LazyLock;
 
 fn use_color() -> bool {
-    static COLOR: LazyLock<bool> = LazyLock::new(|| env::var_os("NO_COLOR").is_none());
+    static COLOR: LazyLock<bool> =
+        LazyLock::new(|| use_color_with(env::var_os("NO_COLOR").is_none(), stderr().is_terminal()));
     *COLOR
+}
+
+fn use_color_with(no_color_unset: bool, stderr_is_tty: bool) -> bool {
+    no_color_unset && stderr_is_tty
 }
 
 fn wrap(ansi_code: &str, text: &str) -> String {
@@ -68,6 +74,22 @@ mod tests {
     fn wrap_returns_plain_text_without_color() {
         for code in ["31", "33", "1;31"] {
             assert_eq!(wrap_with(false, code, "text"), "text", "code={code}");
+        }
+    }
+
+    #[test]
+    fn use_color_requires_tty_and_no_color_unset() {
+        for (no_color_unset, stderr_is_tty, expected) in [
+            (true, true, true),
+            (false, true, false),
+            (true, false, false),
+            (false, false, false),
+        ] {
+            assert_eq!(
+                use_color_with(no_color_unset, stderr_is_tty),
+                expected,
+                "no_color_unset={no_color_unset} stderr_is_tty={stderr_is_tty}"
+            );
         }
     }
 }
