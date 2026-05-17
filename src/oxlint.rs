@@ -13,6 +13,12 @@ const DEFAULT_DENY_RULES: &[&str] = &[
     "eslint/no-new-func",
 ];
 
+// oxlint default で発火するが guardrails の AST rule が同一 file:line を
+// より高い severity / 深い解析で押さえるため、subprocess に `--allow` で
+// 抑止指示を渡す rule のリスト。両方が出力すると AI agent から見て同一
+// 違反の重複に見え、修正対象の数を誤認させる。
+const OXLINT_OVERLAP_ALLOW: &[&str] = &["eslint/no-eval"];
+
 #[derive(Debug, Deserialize)]
 struct OxlintOutput {
     diagnostics: Vec<OxlintDiagnostic>,
@@ -70,6 +76,11 @@ fn build_args(config: &OxlintConfig) -> Vec<String> {
             args.push("--deny".to_owned());
             args.push(rule);
         }
+    }
+
+    for rule in OXLINT_OVERLAP_ALLOW {
+        args.push("--allow".to_owned());
+        args.push((*rule).to_owned());
     }
 
     args
@@ -199,5 +210,38 @@ mod tests {
         let deny_count = args.windows(2).filter(|w| w[0] == "--deny").count();
         assert_eq!(deny_count, 4);
         assert!(!args.contains(&"eslint/no-console".to_owned()));
+    }
+
+    // T-081: oxlint default `no-eval` is suppressed so it does not duplicate the
+    // custom AST `eval` rule (issue #124).
+    #[test]
+    fn build_args_allows_eval_to_defer_to_custom_rule() {
+        let config = OxlintConfig::default();
+        let args = build_args(&config);
+        let pair = args
+            .windows(2)
+            .find(|w| w[0] == "--allow" && w[1] == "eslint/no-eval");
+        assert!(
+            pair.is_some(),
+            "expected `--allow eslint/no-eval` so oxlint defers eval to the custom rule, got: {args:?}"
+        );
+    }
+
+    // T-082: user-supplied `config.deny` does not override the overlap allow —
+    // the custom rule always owns eval detection.
+    #[test]
+    fn build_args_overlap_allow_holds_even_with_user_deny() {
+        let config = OxlintConfig {
+            deny: vec!["eslint/no-eval".to_owned()],
+            allow: vec![],
+        };
+        let args = build_args(&config);
+        let allow_pair = args
+            .windows(2)
+            .find(|w| w[0] == "--allow" && w[1] == "eslint/no-eval");
+        assert!(
+            allow_pair.is_some(),
+            "overlap allow must apply even if user adds eslint/no-eval to deny: {args:?}"
+        );
     }
 }
