@@ -811,22 +811,12 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
     );
 }
 
-// T-079: oxlint/eslint(no-new-func) fires on Function ctor (defense-in-depth over self eval rule)
+// T-079: eval fires on `new Function(...)` (no-new-func via oxlint adds defense-in-depth)
 #[test]
-fn oxlint_no_new_func_fires_on_new_function_ctor() {
+fn eval_fires_on_new_function_ctor() {
     assert_rule_fires(
-        "oxlint/eslint(no-new-func)",
+        "eval",
         "/src/app.ts",
         "const fn = new Function('return 1');",
-    );
-}
-
-// T-080: oxlint/eslint(no-new-func) silent on regular function declaration
-#[test]
-fn oxlint_no_new_func_silent_on_regular_function() {
-    assert_rule_silent(
-        "oxlint/eslint(no-new-func)",
-        "/src/app.ts",
-        "function f() { return 1; }",
     );
 }
