@@ -750,3 +750,23 @@ fn jwt_client_decode_silent_on_jwtverify() {
         "const { payload } = await jwtVerify(token, secret);",
     );
 }
+
+// T-073: client-env-public-leak (use client + non-NEXT_PUBLIC env access)
+#[test]
+fn client_env_public_leak_fires_on_secret_in_client_component() {
+    assert_rule_fires(
+        "client-env-public-leak",
+        "/src/components/Profile.tsx",
+        "\"use client\";\nconst apiKey = process.env.SECRET_API_KEY;",
+    );
+}
+
+// T-074: client-env-public-leak silent on NEXT_PUBLIC_ prefix
+#[test]
+fn client_env_public_leak_silent_on_next_public_prefix() {
+    assert_rule_silent(
+        "client-env-public-leak",
+        "/src/components/Profile.tsx",
+        "\"use client\";\nconst apiUrl = process.env.NEXT_PUBLIC_API_URL;",
+    );
+}
