@@ -470,13 +470,16 @@ fn json_mode_violation_emits_block_decision() {
         parsed["degraded"].is_boolean(),
         "envelope must carry a boolean degraded field; got: {parsed}"
     );
+    let violations = parsed["data"]["violations"].as_array().unwrap();
     assert!(
-        parsed["data"]["violations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|v| v["rule"] == "eval"),
+        violations.iter().any(|v| v["rule"] == "eval"),
         "expected eval violation in: {parsed}"
+    );
+    assert!(
+        !violations
+            .iter()
+            .any(|v| v["rule"] == "oxlint/eslint(no-eval)"),
+        "oxlint must not also report eslint(no-eval) for the same file:line; custom `eval` rule owns the detection: {parsed}"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
