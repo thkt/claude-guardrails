@@ -68,6 +68,7 @@ pub(crate) mod rule_id {
     pub const SERVICE_WORKER_SCOPE_ROOT: &str = "service-worker-scope-root";
     pub const JWT_CLIENT_DECODE: &str = "jwt-client-decode";
     pub const CLIENT_ENV_PUBLIC_LEAK: &str = "client-env-public-leak";
+    pub const SSR_SECRET_BLEED: &str = "ssr-secret-bleed";
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
