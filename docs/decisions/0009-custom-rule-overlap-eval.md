@@ -38,10 +38,10 @@ AI agent から見ると同じ修正対象が 2 回 listing され、`BLOCKED: F
 選定対象を表に集約する定数を導入:
 
 ```rust
-const OXLINT_OVERLAP_ALLOW: &[&str] = &["eslint/no-eval"];
+const OXLINT_RULES_OWNED_BY_CUSTOM: &[&str] = &["eslint/no-eval"];
 ```
 
-`build_args` で `OXLINT_OVERLAP_ALLOW` を `--allow <rule>` として subprocess 引数に展開する。ユーザー `config.deny` に同じ rule_id が含まれても上書きはせず、`--deny` と `--allow` の双方が引数列に出るが、oxlint CLI は左から右に処理し最後の指定 (= `--allow`) が勝つため、custom rule に責務が残る。
+`build_args` で `OXLINT_RULES_OWNED_BY_CUSTOM` を `--allow <rule>` として subprocess 引数に展開する。ユーザー `config.deny` に同じ rule_id が含まれても上書きはせず、`--deny` と `--allow` の双方が引数列に出るが、oxlint CLI は左から右に処理し最後の指定 (= `--allow`) が勝つため、custom rule に責務が残る。
 
 ### Scope
 
@@ -53,9 +53,9 @@ const OXLINT_OVERLAP_ALLOW: &[&str] = &["eslint/no-eval"];
 - Good: custom AST 検出 (alias / namespace / CJS / bracket) を失わない
 - Good: HIGH severity を維持し、blocking が確実に発火する
 - Good: subprocess 引数を 2 個 (`--allow`, `<rule>`) 増やすだけで起動コスト変化は無視できる
-- Good: 将来 oxlint 側が同等以上の AST 検出をリリースしたとき、`OXLINT_OVERLAP_ALLOW` から該当 entry を外し custom rule を retire するルートが残る
+- Good: 将来 oxlint 側が同等以上の AST 検出をリリースしたとき、`OXLINT_RULES_OWNED_BY_CUSTOM` から該当 entry を外し custom rule を retire するルートが残る
 - Bad: oxlint config (`config.allow` / `config.deny`) を通じてユーザーが `eslint/no-eval` を有効化することは出来なくなる。ユーザー観点では「custom `eval` rule で同等以上の検出をしている」ため実害は無いが、契約として README に明記する必要がある
-- Bad: 将来 overlap が増えたとき、新 rule_id を `OXLINT_OVERLAP_ALLOW` に追加し ADR を作成する手間が rule ごとに発生する
+- Bad: 将来 overlap が増えたとき、新 rule_id を `OXLINT_RULES_OWNED_BY_CUSTOM` に追加し ADR を作成する手間が rule ごとに発生する
 
 ### Verification
 
