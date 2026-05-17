@@ -2153,7 +2153,7 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::Medium);
-        assert!(v[0].fix.contains("replaceWith"));
+        assert!(v[0].fix.contains("el.replaceWith(node)"));
     }
 
     // T-020: allows_outer_html_string_literal
