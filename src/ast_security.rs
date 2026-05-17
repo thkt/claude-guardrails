@@ -665,9 +665,12 @@ impl SecurityVisitor<'_> {
         let (severity, fix) = match sme.property.name.as_str() {
             "innerHTML" => (
                 Severity::High,
-                "Use textContent or DOMPurify.sanitize() instead",
+                "Use el.textContent = x for plain text, or el.innerHTML = DOMPurify.sanitize(x) when HTML is required",
             ),
-            "outerHTML" => (Severity::Medium, "Use DOM methods instead"),
+            "outerHTML" => (
+                Severity::Medium,
+                "Use el.replaceWith(node) or el.outerHTML = DOMPurify.sanitize(html) instead of raw outerHTML assignment",
+            ),
             _ => return,
         };
         if is_safe_html_value(&expr.right) {
@@ -697,7 +700,7 @@ impl SecurityVisitor<'_> {
         self.push_violation(
             rule_id::UNSAFE_HTML_INJECTION,
             Severity::High,
-            "Use createElement/appendChild instead",
+            "Use document.createElement(tag) + parent.appendChild(el) instead of document.write()",
             call.span,
         );
     }
@@ -2150,7 +2153,7 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
         assert_eq!(v[0].severity, Severity::Medium);
-        assert!(v[0].fix.contains("DOM methods"));
+        assert!(v[0].fix.contains("el.replaceWith(node)"));
     }
 
     // T-020: allows_outer_html_string_literal
