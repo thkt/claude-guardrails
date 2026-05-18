@@ -1055,14 +1055,13 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
                 &decl.init,
                 Some(Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_))
             )
+            && (self.has_top_level_use_server
+                || matches!(
+                    &decl.id,
+                    BindingPattern::BindingIdentifier(id) if id.name == "getServerSideProps"
+                ))
         {
-            let is_gssp_binding = matches!(
-                &decl.id,
-                BindingPattern::BindingIdentifier(id) if id.name == "getServerSideProps"
-            );
-            if is_gssp_binding || self.has_top_level_use_server {
-                self.in_direct_ssr_target = true;
-            }
+            self.in_direct_ssr_target = true;
         }
         walk::walk_variable_declarator(self, decl);
         self.in_direct_ssr_target = prev_target;
