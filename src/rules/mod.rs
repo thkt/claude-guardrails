@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::LazyLock;
 
-/// rule_id catalog. 新規 rule_id を追加するときは:
+/// `rule_id` catalog. 新規 `rule_id` を追加するときは:
 ///
 /// - (a) ここに定数追加 + 単一 module から発火 → `REGISTERED_RULE_IDS` にも追加
 /// - (b) `ast_security` 内 / oxlint 委譲 / 別 path 発火 → `UNREGISTERED_RULE_IDS` に追加
@@ -38,7 +38,7 @@ use std::sync::LazyLock;
 ///
 /// 整合性は `tests::rule_id_catalog_entries_match_allowlists` で gate される。
 pub(crate) mod rule_id {
-    /// 各 rule_id を `pub const` と `RULE_ID_CATALOG` (test 専用) に同時定義する macro。
+    /// 各 `rule_id` を `pub const` と `RULE_ID_CATALOG` (test 専用) に同時定義する macro。
     macro_rules! define_rule_ids {
         ( $( $name:ident = $value:literal ),* $(,)? ) => {
             $( pub const $name: &str = $value; )*
@@ -90,7 +90,7 @@ pub(crate) mod rule_id {
     }
 }
 
-/// `security` module だけ 2 rule_id (SECURITY / DANGEROUS_INNER_HTML) emit する。
+/// `security` module だけ 2 `rule_id` (SECURITY / `DANGEROUS_INNER_HTML`) emit する。
 #[cfg(test)]
 const REGISTERED_RULE_IDS: &[&str] = &[
     rule_id::SENSITIVE_FILE,
@@ -116,7 +116,7 @@ const REGISTERED_RULE_IDS: &[&str] = &[
     rule_id::JWT_CLIENT_DECODE,
 ];
 
-/// `register_rules!` 経由で load されない rule_id の allowlist。emit 元を 1 行で明示する。
+/// `register_rules!` 経由で load されない `rule_id` の allowlist。emit 元を 1 行で明示する。
 #[cfg(test)]
 const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::BIDI_CHARACTERS,            // ast_security::check_bidi
@@ -157,16 +157,13 @@ pub static RE_API_FILE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(API_PREFIX_PAT).expect("RE_API_FILE: invalid regex"));
 
 pub static RE_API_OR_MIDDLEWARE_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!("{}|(^|/)middleware\\.[jt]sx?$", API_PREFIX_PAT))
+    Regex::new(&format!("{API_PREFIX_PAT}|(^|/)middleware\\.[jt]sx?$"))
         .expect("RE_API_OR_MIDDLEWARE_FILE: invalid regex")
 });
 
 pub static RE_API_OR_ROUTE_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        "{}|(^|/)app/(.*/)?route\\.[jt]sx?$",
-        API_PREFIX_PAT
-    ))
-    .expect("RE_API_OR_ROUTE_FILE: invalid regex")
+    Regex::new(&format!("{API_PREFIX_PAT}|(^|/)app/(.*/)?route\\.[jt]sx?$"))
+        .expect("RE_API_OR_ROUTE_FILE: invalid regex")
 });
 
 /// Matches `* ` (with space) or bare `*` to avoid `x * y` false positives.
@@ -249,7 +246,7 @@ impl fmt::Display for Severity {
             Severity::Medium => "MEDIUM",
             Severity::Low => "LOW",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -504,15 +501,13 @@ mod tests {
         let orphaned: Vec<&&str> = declared.difference(&covered).collect();
         assert!(
             orphaned.is_empty(),
-            "rule_id 定数が REGISTERED_RULE_IDS にも UNREGISTERED_RULE_IDS にも含まれていない: {:?}",
-            orphaned
+            "rule_id 定数が REGISTERED_RULE_IDS にも UNREGISTERED_RULE_IDS にも含まれていない: {orphaned:?}"
         );
 
         let extra: Vec<&&str> = covered.difference(&declared).collect();
         assert!(
             extra.is_empty(),
-            "REGISTERED/UNREGISTERED に rule_id::RULE_ID_CATALOG にない entry: {:?}",
-            extra
+            "REGISTERED/UNREGISTERED に rule_id::RULE_ID_CATALOG にない entry: {extra:?}"
         );
     }
 
@@ -524,8 +519,7 @@ mod tests {
         let overlap: Vec<&&str> = registered.intersection(&unregistered).collect();
         assert!(
             overlap.is_empty(),
-            "rule_id が REGISTERED と UNREGISTERED の両方に登録されている: {:?}",
-            overlap
+            "rule_id が REGISTERED と UNREGISTERED の両方に登録されている: {overlap:?}"
         );
     }
 }

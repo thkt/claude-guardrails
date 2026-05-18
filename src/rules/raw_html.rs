@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn detects_html_concat_with_variable() {
-        let v = check(r#"const html = '<div>' + userInput;"#, "/src/render.ts");
+        let v = check(r"const html = '<div>' + userInput;", "/src/render.ts");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].severity, Severity::High);
     }
@@ -96,15 +96,15 @@ mod tests {
 
     #[test]
     fn detects_html_join() {
-        let content = r#"const parts = ['<div>', userInput, '</div>'];
-const html = parts.join('');"#;
+        let content = r"const parts = ['<div>', userInput, '</div>'];
+const html = parts.join('');";
         let v = check(content, "/src/render.ts");
         assert_eq!(v.len(), 1);
     }
 
     #[test]
     fn allows_literal_only_concat() {
-        assert!(check(r#"const html = '<div>' + '</div>';"#, "/src/render.ts").is_empty());
+        assert!(check(r"const html = '<div>' + '</div>';", "/src/render.ts").is_empty());
     }
 
     #[test]
@@ -114,7 +114,7 @@ const html = parts.join('');"#;
 
     #[test]
     fn ignores_distant_join() {
-        let mut lines = vec![r#"const tags = ['<br>'];"#.to_owned()];
+        let mut lines = vec![r"const tags = ['<br>'];".to_owned()];
         for _ in 0..10 {
             lines.push("const x = doSomething();".to_owned());
         }

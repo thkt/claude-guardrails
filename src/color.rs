@@ -18,7 +18,7 @@ fn wrap(ansi_code: &str, text: &str) -> String {
 
 pub(crate) fn wrap_with(color: bool, ansi_code: &str, text: &str) -> String {
     if color {
-        format!("\x1b[{}m{}\x1b[0m", ansi_code, text)
+        format!("\x1b[{ansi_code}m{text}\x1b[0m")
     } else {
         text.to_owned()
     }

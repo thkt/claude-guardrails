@@ -83,7 +83,7 @@ pub fn rule() -> Rule {
         checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
             let mut violations = Vec::new();
 
-            for issue in SECURITY_ISSUES.iter() {
+            for issue in &SECURITY_ISSUES {
                 if !issue.file_pattern.is_match(file_path) {
                     continue;
                 }
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn detects_insecure_postmessage() {
-        let content = r#"window.postMessage(data, '*');"#;
+        let content = r"window.postMessage(data, '*');";
         assert_eq!(check(content, "/src/messenger.ts").len(), 1);
     }
 
@@ -154,11 +154,11 @@ mod tests {
     fn detects_dangerously_set_inner_html_in_tsx_and_jsx() {
         for (content, path) in [
             (
-                r#"<div dangerouslySetInnerHTML={{ __html: x }} />"#,
+                r"<div dangerouslySetInnerHTML={{ __html: x }} />",
                 "/src/Component.tsx",
             ),
             (
-                r#"<Component dangerouslySetInnerHTML={{ __html: y }} />"#,
+                r"<Component dangerouslySetInnerHTML={{ __html: y }} />",
                 "/src/Component.jsx",
             ),
         ] {
@@ -188,7 +188,7 @@ mod tests {
     // T-007: detects_dangerously_set_inner_html_with_whitespace
     #[test]
     fn detects_dangerously_set_inner_html_with_whitespace() {
-        let content = r#"<div dangerouslySetInnerHTML = { dangerousObject } />"#;
+        let content = r"<div dangerouslySetInnerHTML = { dangerousObject } />";
         let v = check(content, "/src/Component.tsx");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, super::super::rule_id::DANGEROUS_INNER_HTML);

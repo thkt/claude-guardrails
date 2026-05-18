@@ -149,7 +149,7 @@ impl Config {
     // LLM-controlled paths from influencing config discovery.
     pub fn with_project_overrides(self) -> Result<Self, String> {
         let cwd =
-            env::current_dir().map_err(|e| format!("cannot determine working directory: {}", e))?;
+            env::current_dir().map_err(|e| format!("cannot determine working directory: {e}"))?;
         self.with_overrides_from_root(&cwd)
     }
 
@@ -163,14 +163,14 @@ impl Config {
         match fs::read_to_string(&tools_path) {
             Ok(content) => {
                 let tools: ToolsConfig = serde_json::from_str(&content)
-                    .map_err(|e| format!("invalid config {:?}: {}", tools_path, e))?;
+                    .map_err(|e| format!("invalid config {tools_path:?}: {e}"))?;
                 if let Some(project) = tools.guardrails {
                     return Ok(self.merge(project));
                 }
                 return Ok(self);
             }
             Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(format!("cannot read config {:?}: {}", tools_path, e));
+                return Err(format!("cannot read config {tools_path:?}: {e}"));
             }
             Err(_) => {}
         }
@@ -179,14 +179,11 @@ impl Config {
         match fs::read_to_string(&legacy_path) {
             Ok(content) => {
                 let project: ProjectConfig = serde_json::from_str(&content)
-                    .map_err(|e| format!("invalid project config {:?}: {}", legacy_path, e))?;
+                    .map_err(|e| format!("invalid project config {legacy_path:?}: {e}"))?;
                 return Ok(self.merge(project));
             }
             Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(format!(
-                    "cannot read project config {:?}: {}",
-                    legacy_path, e
-                ));
+                return Err(format!("cannot read project config {legacy_path:?}: {e}"));
             }
             Err(_) => {}
         }
@@ -326,7 +323,7 @@ mod tests {
     #[test]
     fn merge_empty_project_config_no_change() {
         let base = Config::default();
-        let project: ProjectConfig = serde_json::from_str(r#"{}"#).unwrap();
+        let project: ProjectConfig = serde_json::from_str(r"{}").unwrap();
 
         let merged = base.merge(project);
         assert!(merged.enabled);
@@ -460,7 +457,7 @@ mod tests {
     #[test]
     fn merge_sets_explicit_source() {
         let base = Config::default();
-        let project: ProjectConfig = serde_json::from_str(r#"{}"#).unwrap();
+        let project: ProjectConfig = serde_json::from_str(r"{}").unwrap();
         let merged = base.merge(project);
         assert_eq!(merged.source, ConfigSource::Explicit);
     }

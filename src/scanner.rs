@@ -119,7 +119,7 @@ impl<'a> StringScanner<'a> {
                     *self
                         .template_interp_depth
                         .last_mut()
-                        .expect("in interpolation branch") += 1
+                        .expect("in interpolation branch") += 1;
                 }
                 b'}' => {
                     // SAFETY: same invariant as the `{` arm — interpolation

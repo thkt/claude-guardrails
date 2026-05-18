@@ -150,25 +150,25 @@ mod tests {
         ];
         for (content, keyword) in cases {
             let violations = check(content);
-            assert_eq!(violations.len(), 1, "Should detect: {}", keyword);
+            assert_eq!(violations.len(), 1, "Should detect: {keyword}");
         }
     }
 
     #[test]
     fn detects_template_literal_with_sensitive() {
-        let content = r#"console.log(`User ${username} password: ${password}`);"#;
+        let content = r"console.log(`User ${username} password: ${password}`);";
         assert!(!check(content).is_empty());
     }
 
     #[test]
     fn allows_safe_logging() {
         let cases = [
-            r#"console.log('Password:', '***MASKED***');"#,
-            r#"console.log('User logged in:', userId);"#,
-            r#"console.log('Request received');"#,
+            r"console.log('Password:', '***MASKED***');",
+            r"console.log('User logged in:', userId);",
+            r"console.log('Request received');",
         ];
         for content in cases {
-            assert!(check(content).is_empty(), "Should allow: {}", content);
+            assert!(check(content).is_empty(), "Should allow: {content}");
         }
     }
 
@@ -180,13 +180,13 @@ mod tests {
 
     #[test]
     fn detects_nested_function_call() {
-        let content = r#"console.log(getUser(id), password);"#;
+        let content = r"console.log(getUser(id), password);";
         assert_eq!(check(content).len(), 1);
     }
 
     #[test]
     fn detects_deeply_nested_calls() {
-        let content = r#"console.log(getUser(getSession(token)), secret);"#;
+        let content = r"console.log(getUser(getSession(token)), secret);";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
     }
@@ -200,14 +200,14 @@ mod tests {
 
     #[test]
     fn no_duplicate_violations() {
-        let content = r#"console.log(password, secret);"#;
+        let content = r"console.log(password, secret);";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn detects_sensitive_in_template_interpolation() {
-        let content = r#"console.log(`value: ${getPassword(password)}`);"#;
+        let content = r"console.log(`value: ${getPassword(password)}`);";
         assert_eq!(check(content).len(), 1);
     }
 

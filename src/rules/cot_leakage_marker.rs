@@ -29,8 +29,7 @@ pub fn rule() -> Rule {
                             rule: super::rule_id::COT_LEAKAGE_MARKER.to_owned(),
                             severity: Severity::High,
                             fix: format!(
-                                "AI CoT leakage marker '{}' detected. Remove before writing.",
-                                marker
+                                "AI CoT leakage marker '{marker}' detected. Remove before writing."
                             ),
                             file: file_path.to_owned(),
                             line: Some(u32::try_from(idx + 1).unwrap_or(u32::MAX)),
@@ -100,8 +99,7 @@ mod tests {
         for content in cases {
             assert!(
                 check(content, "/src/app.ts").is_empty(),
-                "should pass: {}",
-                content
+                "should pass: {content}"
             );
         }
     }
@@ -131,7 +129,7 @@ mod tests {
             ("/data.json", "<|channel|>"),
         ];
         for (path, content) in cases {
-            assert_eq!(check(content, path).len(), 1, "should detect in: {}", path);
+            assert_eq!(check(content, path).len(), 1, "should detect in: {path}");
         }
     }
 

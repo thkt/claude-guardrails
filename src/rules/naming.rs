@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn detects_lowercase_component() {
-        let content = r#"const myComponent = () => { return <div>Hello</div>; };"#;
+        let content = r"const myComponent = () => { return <div>Hello</div>; };";
         let violations = check(content, "/src/components/MyComponent.tsx");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("PascalCase"));
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn detects_non_use_hook() {
-        let content = r#"const fetchData = () => { const [data] = useState(null); return data; };"#;
+        let content = r"const fetchData = () => { const [data] = useState(null); return data; };";
         let violations = check(content, "/src/hooks/useFetch.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("useXxx"));
@@ -159,7 +159,7 @@ mod tests {
             ("type UserRole = 'admin' | 'user';", "/src/types.ts"),
         ];
         for (content, path) in cases {
-            assert!(check(content, path).is_empty(), "Should allow: {}", content);
+            assert!(check(content, path).is_empty(), "Should allow: {content}");
         }
     }
 }

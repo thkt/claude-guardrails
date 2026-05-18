@@ -98,33 +98,33 @@ mod tests {
             ("const date = new Date();", "new Date"),
         ];
         for (code, expected) in cases {
-            let content = format!("it('test', () => {{ {} }});", code);
+            let content = format!("it('test', () => {{ {code} }});");
             let violations = check(&content);
-            assert_eq!(violations.len(), 1, "Should detect: {}", expected);
+            assert_eq!(violations.len(), 1, "Should detect: {expected}");
             assert!(violations[0].fix.contains(expected));
         }
     }
 
     #[test]
     fn allows_fake_timers_usage() {
-        let content = r#"
+        let content = r"
             beforeEach(() => {
                 jest.useFakeTimers();
             });
             it('should advance time', () => {
                 jest.advanceTimersByTime(1000);
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_waitfor_pattern() {
-        let content = r#"
+        let content = r"
             it('should wait for element', async () => {
                 await waitFor(() => expect(element).toBeVisible());
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
@@ -136,12 +136,12 @@ mod tests {
 
     #[test]
     fn ignores_comments() {
-        let content = r#"
+        let content = r"
             // Don't use setTimeout(() => done(), 1000);
             it('should work', () => {
                 expect(true).toBe(true);
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 }

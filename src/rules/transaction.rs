@@ -45,8 +45,7 @@ pub fn rule() -> Rule {
                 rule: super::rule_id::TRANSACTION_BOUNDARY.to_owned(),
                 severity: Severity::Medium,
                 fix: format!(
-                    "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {} write ops detected",
-                    write_count
+                    "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {write_count} write ops detected"
                 ),
                 file: file_path.to_owned(),
                 line: first_write_line,
@@ -65,12 +64,12 @@ mod tests {
 
     #[test]
     fn detects_multiple_writes_without_transaction() {
-        let content = r#"
+        let content = r"
             async function handle() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         let violations = check(content, "/src/usecases/handler.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("2 write ops"));
@@ -96,115 +95,115 @@ mod tests {
 
     #[test]
     fn skips_non_target_directories() {
-        let content = r#"
+        let content = r"
             async function handle() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         let violations = check(content, "/src/utils/helper.ts");
         assert!(violations.is_empty());
     }
 
     #[test]
     fn skips_single_write() {
-        let content = r#"
+        let content = r"
             async function handle() {
                 await user.save();
             }
-        "#;
+        ";
         let violations = check(content, "/src/usecases/handler.ts");
         assert!(violations.is_empty());
     }
 
     #[test]
     fn no_false_positive_for_set_add() {
-        let content = r#"
+        let content = r"
             function process() {
                 mySet.add(item);
                 myMap.set(key, value);
             }
-        "#;
+        ";
         let violations = check(content, "/src/usecases/handler.ts");
         assert!(violations.is_empty());
     }
 
     #[test]
     fn detects_in_domain_directory() {
-        let content = r#"
+        let content = r"
             async function handle() {
                 await entity.save();
                 await aggregate.persist();
             }
-        "#;
+        ";
         let violations = check(content, "/src/domain/order/handler.ts");
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn detects_in_app_api_route() {
-        let content = r#"
+        let content = r"
             export async function POST() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         assert_eq!(check(content, "/app/api/orders/route.ts").len(), 1);
     }
 
     #[test]
     fn detects_in_pages_api() {
-        let content = r#"
+        let content = r"
             export default async function handler() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         assert_eq!(check(content, "/pages/api/orders.ts").len(), 1);
     }
 
     #[test]
     fn detects_in_server_directory() {
-        let content = r#"
+        let content = r"
             async function handle() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         assert_eq!(check(content, "/server/orders/handler.ts").len(), 1);
     }
 
     #[test]
     fn detects_in_app_route_segment() {
-        let content = r#"
+        let content = r"
             export async function POST() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         assert_eq!(check(content, "/app/orders/[id]/route.tsx").len(), 1);
     }
 
     #[test]
     fn detects_when_keyword_in_variable_name() {
-        let content = r#"
+        let content = r"
             async function handle(transactionId: string) {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         assert_eq!(check(content, "/src/usecases/handler.ts").len(), 1);
     }
 
     #[test]
     fn detects_when_keyword_in_comment() {
-        let content = r#"
+        let content = r"
             // TODO: wrap in unitOfWork later
             async function handle() {
                 await user.save();
                 await order.create();
             }
-        "#;
+        ";
         assert_eq!(check(content, "/src/usecases/handler.ts").len(), 1);
     }
 }

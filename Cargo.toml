@@ -4,26 +4,45 @@ version = "0.14.1"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
+publish = false
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = ">=1"
-regex = ">=1"
-tempfile = ">=3"
-libc = ">=0.2"
-oxc_allocator = ">=0.121.0"
-oxc_parser = ">=0.121.0"
-oxc_ast = ">=0.121.0"
-oxc_span = ">=0.121.0"
-oxc_ast_visit = ">=0.121.0"
-oxc_syntax = ">=0.121.0"
-ureq = ">=3"
+serde_json = "1"
+regex = "1"
+tempfile = "3"
+libc = "0.2"
+oxc_allocator = "0.121"
+oxc_parser = "0.121"
+oxc_ast = "0.121"
+oxc_span = "0.121"
+oxc_ast_visit = "0.121"
+oxc_syntax = "0.121"
+ureq = "3"
 
 [lints.rust]
 unsafe_code = "forbid"
 
 [lints.clippy]
+# Groups
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# Pedantic opt-outs (common false positives for a hook CLI binary)
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+struct_excessive_bools = "allow"
+struct_field_names = "allow"
+# `Path`/`PathBuf` have no `Display`; `{path:?}` keeps the quoted form
+# that error messages rely on for readability.
+unnecessary_debug_formatting = "allow"
+# Test fixtures generate file extensions; case-insensitive comparison
+# is not meaningful here.
+case_sensitive_file_extension_comparisons = "allow"
+
 # absolute paths
 absolute_paths = "deny"
 # idiomatic iterators

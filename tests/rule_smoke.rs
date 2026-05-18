@@ -1,6 +1,6 @@
-//! rule_id 単位のスモークテスト (Issue #98 受け入れ条件 #2)。
+//! `rule_id` 単位のスモークテスト (Issue #98 受け入れ条件 #2)。
 //! 各ルールについて違反 1 件 + 健全 1 件のペアを `--json` envelope の
-//! `data.violations[].rule` で assert する。健全側は file_pattern が match
+//! `data.violations[].rule` で assert する。健全側は `file_pattern` が match
 //! する正常コードを使い、「ルールが skip されただけ」を検出から除外する。
 
 use serde_json::Value;
@@ -409,7 +409,7 @@ fn raw_html_fires_on_string_concat() {
     assert_rule_fires(
         "raw-html",
         "/src/render.ts",
-        r#"const out = '<div>' + userName + '</div>';"#,
+        r"const out = '<div>' + userName + '</div>';",
     );
 }
 
@@ -419,7 +419,7 @@ fn raw_html_silent_on_literal_only() {
     assert_rule_silent(
         "raw-html",
         "/src/render.ts",
-        r#"const out = '<div>static</div>';"#,
+        r"const out = '<div>static</div>';",
     );
 }
 

@@ -24,23 +24,23 @@ pub(crate) fn write_temp_in(
         .unwrap_or(fallback_dir);
 
     let temp_file = match Builder::new()
-        .suffix(&format!(".{}", extension))
+        .suffix(&format!(".{extension}"))
         .tempfile_in(dir)
     {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("guardrails: {}: failed to create temp file: {}", tool, e);
+            eprintln!("guardrails: {tool}: failed to create temp file: {e}");
             return None;
         }
     };
 
     if let Err(e) = temp_file.as_file().write_all(content.as_bytes()) {
-        eprintln!("guardrails: {}: failed to write temp file: {}", tool, e);
+        eprintln!("guardrails: {tool}: failed to write temp file: {e}");
         return None;
     }
 
     if let Err(e) = temp_file.as_file().flush() {
-        eprintln!("guardrails: {}: failed to flush temp file: {}", tool, e);
+        eprintln!("guardrails: {tool}: failed to flush temp file: {e}");
         return None;
     }
 

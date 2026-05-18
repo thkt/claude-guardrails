@@ -37,7 +37,7 @@ fn wait_with_timeout(child: Child, tool: &'static str) -> Option<ExitStatus> {
     match rx.recv_timeout(LINTER_TIMEOUT) {
         Ok(Ok(s)) => Some(s),
         Ok(Err(e)) => {
-            eprintln!("guardrails: {}: process error: {}", tool, e);
+            eprintln!("guardrails: {tool}: process error: {e}");
             None
         }
         Err(_) => {
@@ -71,7 +71,7 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
     let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("guardrails: {}: failed to spawn: {}", tool, e);
+            eprintln!("guardrails: {tool}: failed to spawn: {e}");
             return None;
         }
     };
@@ -145,8 +145,7 @@ mod tests {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
             stdout.contains("hello"),
-            "expected 'hello' in stdout, got: {:?}",
-            stdout
+            "expected 'hello' in stdout, got: {stdout:?}"
         );
     }
 
@@ -160,8 +159,7 @@ mod tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains("err"),
-            "expected 'err' in stderr, got: {:?}",
-            stderr
+            "expected 'err' in stderr, got: {stderr:?}"
         );
     }
 

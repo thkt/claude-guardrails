@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 /// 10 MB upper bound for stdin and on-disk reads (Claude Code hook stdin cap +
-/// DoS / OOM guard). See ADR-0004 resource boundary axis (fail-closed exit 64).
+/// `DoS` / OOM guard). See ADR-0004 resource boundary axis (fail-closed exit 64).
 const MAX_INPUT_SIZE: u64 = 10_000_000;
 const SYSEXIT_USAGE: i32 = 64;
 
@@ -150,7 +150,7 @@ impl DegradedReason {
 /// - `Full`: full file content reconstructed (post-write semantic intact).
 /// - `Degraded`: caller wanted full context, failed for a documented reason.
 /// - `NotApplicable`: full-file analysis not attempted (non-JS file, missing
-///   old_string, etc.). Silent fallback to snippet is correct here.
+///   `old_string`, etc.). Silent fallback to snippet is correct here.
 enum ContentResolution {
     Full(String),
     Degraded(DegradedReason),
@@ -253,7 +253,7 @@ fn apply_edit(
     }
 }
 
-/// Bound on-disk file read at MAX_INPUT_SIZE to mirror the stdin cap.
+/// Bound on-disk file read at `MAX_INPUT_SIZE` to mirror the stdin cap.
 /// Canonicalizes the path; when `project_root` is `Some`, rejects targets
 /// resolving outside that root (defense against symlink / `..` path
 /// traversal). Production callers pass canonical cwd; `None` disables the
@@ -355,10 +355,7 @@ fn lint_with_external_tools(
 
     let Some(bin) = oxlint::resolve(file_path) else {
         if env::var_os("GUARDRAILS_VERBOSE").is_some() {
-            eprintln!(
-                "guardrails: warning: oxlint not available for {}",
-                file_path
-            );
+            eprintln!("guardrails: warning: oxlint not available for {file_path}");
         }
         return (
             Vec::new(),
@@ -498,7 +495,7 @@ fn partition_violations<'a>(
 }
 
 fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit: i32) -> i32 {
-    eprintln!("guardrails: {}", message);
+    eprintln!("guardrails: {message}");
     emit_error_envelope_if_enabled(
         json_mode,
         ErrorPayload {
@@ -527,7 +524,7 @@ fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput,
             fail(
                 json_mode,
                 ErrorCode::IoError,
-                format!("failed to read stdin: {}", e),
+                format!("failed to read stdin: {e}"),
                 "Pass valid Claude Code hook JSON via stdin",
                 input_error_exit,
             )
@@ -537,10 +534,7 @@ fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput,
         return Err(fail(
             json_mode,
             ErrorCode::DataError,
-            format!(
-                "input too large (>{} bytes), blocking as precaution",
-                MAX_INPUT_SIZE
-            ),
+            format!("input too large (>{MAX_INPUT_SIZE} bytes), blocking as precaution"),
             "Reduce input size or split into smaller hook calls",
             input_error_exit,
         ));
@@ -550,7 +544,7 @@ fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput,
         fail(
             json_mode,
             ErrorCode::DataError,
-            format!("invalid JSON input: {}", e),
+            format!("invalid JSON input: {e}"),
             "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
             input_error_exit,
         )
@@ -626,7 +620,7 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
 fn print_json_line<T: Serialize>(value: &T) {
     let json = serde_json::to_string(value).expect("envelope serialization is infallible");
     // Ignore write errors (e.g. BrokenPipe) so the caller's exit code is preserved.
-    let _ = writeln!(io::stdout().lock(), "{}", json);
+    let _ = writeln!(io::stdout().lock(), "{json}");
 }
 
 fn emit_json_if_enabled(
@@ -718,8 +712,7 @@ fn run_hook(json_mode: bool) -> i32 {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
-                "guardrails: config error (using defaults: all rules enabled, block_on=[critical,high]): {}",
-                e
+                "guardrails: config error (using defaults: all rules enabled, block_on=[critical,high]): {e}"
             );
             Config::default()
         }
@@ -1153,7 +1146,7 @@ mod tests {
         fs::write(&path, "a".repeat(size)).unwrap();
         match read_file_capped(path.to_str().unwrap(), None) {
             ContentResolution::Full(c) => {
-                assert_eq!(u64::try_from(c.len()).unwrap(), MAX_INPUT_SIZE)
+                assert_eq!(u64::try_from(c.len()).unwrap(), MAX_INPUT_SIZE);
             }
             _ => panic!("expected Full at exact MAX_INPUT_SIZE boundary"),
         }
@@ -1292,8 +1285,7 @@ mod tests {
             collect_violations("/src/app.ts", "export function main() {}\n", &config);
         assert!(
             violations.is_empty(),
-            "unexpected violations: {:?}",
-            violations
+            "unexpected violations: {violations:?}"
         );
     }
 
