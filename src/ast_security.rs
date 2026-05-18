@@ -2,10 +2,10 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionExpression, AssignmentExpression,
-    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, CallExpression,
-    ComputedMemberExpression, Expression, Function, FunctionBody, LogicalExpression,
-    LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind, Program, RegExpLiteral,
-    ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
+    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, BlockStatement,
+    CallExpression, ComputedMemberExpression, Expression, FormalParameters, Function, FunctionBody,
+    LogicalExpression, LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind,
+    Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;
@@ -729,24 +729,13 @@ impl SecurityVisitor<'_> {
         let Some(handler) = call.arguments.get(1) else {
             return;
         };
-        let (params, body) = match handler {
-            Argument::ArrowFunctionExpression(arrow) => (&arrow.params, arrow.body.as_ref()),
-            Argument::FunctionExpression(func) => {
-                let Some(body) = func.body.as_deref() else {
-                    return;
-                };
-                (&func.params, body)
-            }
-            _ => return,
+        let Some((params, body)) = handler_signature_from_argument(handler) else {
+            return;
         };
         let Some(first_param) = params.items.first() else {
             return;
         };
-        let BindingPattern::BindingIdentifier(ident) = &first_param.pattern else {
-            return;
-        };
-        let binding = ident.name.as_str();
-        if has_origin_reference(body, binding) {
+        if handler_validates_origin(&first_param.pattern, body) {
             return;
         }
         self.push_violation(
@@ -754,6 +743,35 @@ impl SecurityVisitor<'_> {
             Severity::High,
             "Validate event.origin against an allowlist before handling postMessage. Drop messages from unexpected origins.",
             call.span,
+        );
+    }
+
+    fn check_onmessage_origin_missing(&mut self, expr: &AssignmentExpression<'_>) {
+        let receiver_ok = match &expr.left {
+            AssignmentTarget::StaticMemberExpression(sme) => {
+                sme.property.name == "onmessage"
+                    && (ast::is_ident(&sme.object, "window") || ast::is_ident(&sme.object, "self"))
+            }
+            AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "onmessage",
+            _ => false,
+        };
+        if !receiver_ok {
+            return;
+        }
+        let Some((params, body)) = handler_signature_from_expression(&expr.right) else {
+            return;
+        };
+        let Some(first_param) = params.items.first() else {
+            return;
+        };
+        if handler_validates_origin(&first_param.pattern, body) {
+            return;
+        }
+        self.push_violation(
+            rule_id::POSTMESSAGE_ORIGIN_MISSING,
+            Severity::High,
+            "Validate event.origin against an allowlist before handling postMessage. Drop messages from unexpected origins.",
+            expr.span,
         );
     }
 
@@ -906,6 +924,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
         self.check_html_assignment(expr);
         self.check_prototype_pollution(expr);
+        self.check_onmessage_origin_missing(expr);
         walk::walk_assignment_expression(self, expr);
     }
 
@@ -1041,6 +1060,42 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     }
 }
 
+/// Identifier param は body 内で `event.origin` を参照しているか。
+/// ObjectPattern は param 段階で `origin` を取り出していれば検査経路ありとみなす。
+/// その他 (ArrayPattern, rest 等) は経路なし扱いで保守的に fire。
+fn handler_validates_origin(pat: &BindingPattern, body: &FunctionBody<'_>) -> bool {
+    if let BindingPattern::BindingIdentifier(ident) = pat {
+        return has_origin_reference(body, ident.name.as_str());
+    }
+    OriginReferenceFinder::pattern_destructures_origin(pat)
+}
+
+fn handler_signature_from_argument<'a, 'b>(
+    arg: &'b Argument<'a>,
+) -> Option<(&'b FormalParameters<'a>, &'b FunctionBody<'a>)> {
+    match arg {
+        Argument::ArrowFunctionExpression(arrow) => Some((&arrow.params, arrow.body.as_ref())),
+        Argument::FunctionExpression(func) => {
+            let body = func.body.as_deref()?;
+            Some((&func.params, body))
+        }
+        _ => None,
+    }
+}
+
+fn handler_signature_from_expression<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<(&'b FormalParameters<'a>, &'b FunctionBody<'a>)> {
+    match expr {
+        Expression::ArrowFunctionExpression(arrow) => Some((&arrow.params, arrow.body.as_ref())),
+        Expression::FunctionExpression(func) => {
+            let body = func.body.as_deref()?;
+            Some((&func.params, body))
+        }
+        _ => None,
+    }
+}
+
 /// `event.origin` / `event["origin"]` / `const { origin } = event` /
 /// `({ origin } = event)` のいずれかの形で param binding が `origin` プロパティへ
 /// 触っているかを callback body 内で走査する。
@@ -1048,6 +1103,7 @@ fn has_origin_reference(body: &FunctionBody<'_>, binding: &str) -> bool {
     let mut finder = OriginReferenceFinder {
         binding,
         found: false,
+        shadowed: false,
     };
     finder.visit_function_body(body);
     finder.found
@@ -1056,6 +1112,10 @@ fn has_origin_reference(body: &FunctionBody<'_>, binding: &str) -> bool {
 struct OriginReferenceFinder<'b> {
     binding: &'b str,
     found: bool,
+    /// Issue #137 暫定対応: handler 引数と同名の `const`/`let`/`var` 宣言が現れたら
+    /// 以降の `event.origin` 参照は外側 binding を保証しない (TDZ や inner scope
+    /// 由来の false negative を防ぐ)。完全 scope-aware walk は別 issue で対応。
+    shadowed: bool,
 }
 
 impl OriginReferenceFinder<'_> {
@@ -1085,54 +1145,76 @@ impl OriginReferenceFinder<'_> {
             }
         })
     }
+
+    fn stop(&self) -> bool {
+        self.found || self.shadowed
+    }
 }
 
 impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
+    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
+        if self.stop() {
+            return;
+        }
+        let prev_shadowed = self.shadowed;
+        walk::walk_block_statement(self, it);
+        if !self.found {
+            self.shadowed = prev_shadowed;
+        }
+    }
+
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        if !self.found && it.property.name == "origin" && self.binding_target(&it.object) {
+        if self.stop() {
+            return;
+        }
+        if it.property.name == "origin" && self.binding_target(&it.object) {
             self.found = true;
             return;
         }
-        if !self.found {
-            walk::walk_static_member_expression(self, it);
-        }
+        walk::walk_static_member_expression(self, it);
     }
 
     fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
-        if !self.found {
-            if let Expression::StringLiteral(s) = &it.expression {
-                if s.value == "origin" && self.binding_target(&it.object) {
-                    self.found = true;
-                    return;
-                }
-            }
-            walk::walk_computed_member_expression(self, it);
+        if self.stop() {
+            return;
         }
+        if let Expression::StringLiteral(s) = &it.expression {
+            if s.value == "origin" && self.binding_target(&it.object) {
+                self.found = true;
+                return;
+            }
+        }
+        walk::walk_computed_member_expression(self, it);
     }
 
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        if !self.found {
-            if let Some(init) = &it.init {
-                if self.binding_target(init) && Self::pattern_destructures_origin(&it.id) {
-                    self.found = true;
-                    return;
-                }
-            }
-            walk::walk_variable_declarator(self, it);
+        if self.stop() {
+            return;
         }
+        if let BindingPattern::BindingIdentifier(ident) = &it.id {
+            if ident.name.as_str() == self.binding {
+                self.shadowed = true;
+                return;
+            }
+        }
+        if let Some(init) = &it.init {
+            if self.binding_target(init) && Self::pattern_destructures_origin(&it.id) {
+                self.found = true;
+                return;
+            }
+        }
+        walk::walk_variable_declarator(self, it);
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        if !self.found
-            && self.binding_target(&it.right)
-            && Self::target_destructures_origin(&it.left)
-        {
+        if self.stop() {
+            return;
+        }
+        if self.binding_target(&it.right) && Self::target_destructures_origin(&it.left) {
             self.found = true;
             return;
         }
-        if !self.found {
-            walk::walk_assignment_expression(self, it);
-        }
+        walk::walk_assignment_expression(self, it);
     }
 }
 
@@ -3060,8 +3142,8 @@ mod tests {
         );
     }
 
-    // Param-side destructure (`({ origin }) => ...`) is out of scope per Issue.
-    // Silent test keeps the boundary durable.
+    // Param-side destructure that pulls out `origin` counts as an origin-check
+    // hint; silent keeps the false-positive rate low.
     #[test]
     fn postmessage_origin_missing_silent_on_param_destructure() {
         assert_postmessage_silent(
@@ -3116,5 +3198,105 @@ mod tests {
             .filter(|x| x.rule == rule_id::POSTMESSAGE_ORIGIN_MISSING)
             .collect();
         assert_eq!(hits.len(), 2, "expected two violations: {:?}", v);
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_param_destructure_without_origin() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', ({ data }) => { document.body.innerHTML = data; });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_param_destructure_origin_only() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', ({ origin }) => { if (origin !== 'https://x') return; });",
+        );
+    }
+
+    // Handler signatures with no origin-check path (array destructure, rest
+    // pattern, etc.) fire conservatively: no recognized validation path.
+    #[test]
+    fn postmessage_origin_missing_fires_on_param_array_pattern() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', ([first]) => { handle(first); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_window_onmessage_without_origin() {
+        assert_postmessage_fires(
+            "window.onmessage = (event) => { document.body.innerHTML = event.data; };",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_self_onmessage_without_origin() {
+        assert_postmessage_fires("self.onmessage = (event) => { handle(event.data); };");
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_window_onmessage_with_origin_check() {
+        assert_postmessage_silent(
+            "window.onmessage = (event) => { if (event.origin !== 'https://x') return; handle(event.data); };",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_window_onmessage_function_expression() {
+        assert_postmessage_fires("window.onmessage = function (event) { handle(event.data); };");
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_window_onmessage_param_destructure_origin_only() {
+        assert_postmessage_silent(
+            "window.onmessage = ({ origin }) => { if (origin !== 'https://x') return; };",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_window_onmessage_param_destructure_without_origin() {
+        assert_postmessage_fires(
+            "window.onmessage = ({ data }) => { document.body.innerHTML = data; };",
+        );
+    }
+
+    // Receiver allowlist is `window` / `self` / bare global only; `globalThis`
+    // is intentionally excluded so the boundary matches `addEventListener`.
+    #[test]
+    fn postmessage_origin_missing_silent_on_globalthis_onmessage() {
+        assert_postmessage_silent("globalThis.onmessage = (event) => { handle(event.data); };");
+    }
+
+    // Interim shadowing detection: inner `event` binding hides the handler
+    // param, so the inner `event.origin` must not satisfy the origin check.
+    // Full scope-aware walk is deferred to a follow-up.
+    #[test]
+    fn postmessage_origin_missing_fires_on_shadowed_event_binding() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (event) => { const event = { origin: 'attacker' }; console.log(event.origin); });",
+        );
+    }
+
+    // Shadowing inside a nested block must not invalidate the outer origin
+    // check. Lexically scoped restoration on block exit prevents the
+    // false-positive that the flat shadow flag caused.
+    #[test]
+    fn postmessage_origin_missing_silent_on_shadowed_event_in_inner_block() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { if (debug) { const event = { origin: 'local' }; console.log(event.origin); } if (event.origin !== 'https://x') return; handle(event.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_bare_onmessage_without_origin() {
+        assert_postmessage_fires("onmessage = (event) => { handle(event.data); };");
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_bare_onmessage_with_origin_check() {
+        assert_postmessage_silent(
+            "onmessage = (event) => { if (event.origin !== 'https://x') return; handle(event.data); };",
+        );
     }
 }
