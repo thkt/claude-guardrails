@@ -208,9 +208,14 @@ fn get_file_and_content(
 fn join_new_strings(edits: &[EditItem]) -> String {
     edits
         .iter()
-        .filter_map(|e| e.new_string.clone())
-        .collect::<Vec<_>>()
-        .join("\n")
+        .filter_map(|e| e.new_string.as_deref())
+        .fold(String::new(), |mut acc, s| {
+            if !acc.is_empty() {
+                acc.push('\n');
+            }
+            acc.push_str(s);
+            acc
+        })
 }
 
 fn apply_edit(

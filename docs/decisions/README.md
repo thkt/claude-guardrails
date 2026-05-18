@@ -23,27 +23,6 @@ This directory contains important decisions about the project's architecture.
 | [0015](0015-cot-leakage-marker-design.md) | `cot-leakage-marker` rule の marker 選定 / self-exclusion / Windows path normalize の方針 | accepted | 2026-05-17 |
 | [0016](0016-framework-coverage-axis-nextjs-api-middleware.md) | Server-side rule の scope は Next.js `app/api` + `pages/api` + `middleware` に揃え、shared regex pool 経由で統一する | accepted | 2026-05-17 |
 
-## By Status
-
-### Accepted
-
-- **0001**: Adopt install.sh prefetch for oxlint provisioning
-- **0002**: Publish release binaries to sentinels via orphan-branch mirror
-- **0003**: Math.random ルールの severity policy
-- **0004**: Fail-mode policy
-- **0005**: JSON envelope と sysexits exit code の採用
-- **0006**: Legacy config migration policy
-- **0007**: Post-edit content resolution と degradation contract
-- **0008**: ast_security 配下の innerHTML / document.write を unsafe-html-injection に分離
-- **0009**: eval 検出を custom AST rule に集約し oxlint の同等 rule を抑止する
-- **0010**: reporter stderr の `━` 装飾と anti-circumvention 文言を維持する
-- **0011**: 同一行複数違反では column 番号を出力せず fix message snippet で対象を特定する
-- **0012**: SSR target detection は Pages Router の `getServerSideProps` と `'use server'` directive に限定し App Router route handler / Remix loader,action は対象外とする
-- **0013**: `client-env-public-leak` は allow-list 哲学を採用し Next.js `NEXT_PUBLIC_` prefix を一級扱い、Vite/CRA/Storybook prefix は延期する
-- **0014**: `ssr-secret-bleed` は shape-based 検出を採用し、spread / 変数バインディング / dynamic getter は 1-file 静的解析制約により intentional carve-out として記録する
-- **0015**: `cot-leakage-marker` rule の marker 選定 / self-exclusion / Windows path normalize の方針
-- **0016**: Server-side rule の scope は Next.js `app/api` + `pages/api` + `middleware` に揃え、shared regex pool 経由で統一する
-
 ## About MADR Format
 
 This project uses [MADR (Markdown Any Decision Records)](https://adr.github.io/madr/) format, v4.

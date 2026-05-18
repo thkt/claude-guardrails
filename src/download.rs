@@ -167,7 +167,16 @@ fn extract_to_cache(
         "tar",
     );
 
-    let _ = fs::remove_file(&tar_path);
+    // Best-effort cleanup of the downloaded tarball. A leftover archive in
+    // the cache directory is not fatal, but trace it so disk pressure or
+    // permission regressions are not invisible.
+    if let Err(e) = fs::remove_file(&tar_path) {
+        eprintln!(
+            "guardrails: warning: failed to remove {}: {}",
+            tar_path.display(),
+            e
+        );
+    }
 
     let output = output.ok_or_else(|| {
         OxlintError::ExtractFailure(String::from("tar invocation failed or timed out"))
@@ -182,7 +191,16 @@ fn extract_to_cache(
     let extracted = cache.join(format!("oxlint-{platform}"));
     if extracted != target {
         fs::rename(&extracted, &target).map_err(|e| {
-            let _ = fs::remove_file(&extracted);
+            // Rename failed — try to clean up the orphan so the next attempt
+            // does not see stale extracted state. Cleanup failure is itself
+            // non-fatal, but worth surfacing.
+            if let Err(re) = fs::remove_file(&extracted) {
+                eprintln!(
+                    "guardrails: warning: failed to remove orphan {}: {}",
+                    extracted.display(),
+                    re
+                );
+            }
             OxlintError::ExtractFailure(format!("failed to rename oxlint binary: {e}"))
         })?;
     }

@@ -6,14 +6,22 @@ use tempfile::{Builder, NamedTempFile};
 /// Create a temp file in the same directory as `file_path` so linters inherit project config.
 /// Falls back to the system temp directory when the parent directory does not exist.
 pub fn write_temp(content: &str, file_path: &str, tool: &str) -> Option<NamedTempFile> {
+    write_temp_in(content, file_path, tool, &env::temp_dir())
+}
+
+pub(crate) fn write_temp_in(
+    content: &str,
+    file_path: &str,
+    tool: &str,
+    fallback_dir: &Path,
+) -> Option<NamedTempFile> {
     let path = Path::new(file_path);
     let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("ts");
 
-    let temp_dir = env::temp_dir();
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty() && p.is_dir())
-        .unwrap_or(&temp_dir);
+        .unwrap_or(fallback_dir);
 
     let temp_file = match Builder::new()
         .suffix(&format!(".{}", extension))
@@ -75,6 +83,24 @@ mod tests {
     fn falls_back_to_temp_dir_when_parent_missing() {
         let tf = write_temp("content", "/nonexistent/dir/app.ts", "test").unwrap();
         assert!(tf.path().to_str().unwrap().ends_with(".ts"));
+    }
+
+    #[test]
+    fn fallback_dir_injection_lands_in_supplied_directory() {
+        let injected = tempfile::TempDir::new().unwrap();
+        let injected_canon = fs::canonicalize(injected.path()).unwrap();
+        let tf = write_temp_in(
+            "content",
+            "/nonexistent/dir/app.ts",
+            "test",
+            injected.path(),
+        )
+        .unwrap();
+        let tf_canon = fs::canonicalize(tf.path()).unwrap();
+        assert!(
+            tf_canon.starts_with(&injected_canon),
+            "expected {tf_canon:?} under {injected_canon:?}"
+        );
     }
 
     #[test]

@@ -220,13 +220,6 @@ pub fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32
         .map(|(line_num, _)| *line_num)
 }
 
-pub fn count_matches_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> usize {
-    lines
-        .iter()
-        .filter(|(_, line)| pattern.is_match(line))
-        .count()
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -389,13 +382,6 @@ mod tests {
         let re = Regex::new(r"TODO").unwrap();
         let content = "/*\nTODO: fix this\n*/\nlet x = 1;";
         assert_eq!(find_match_in_lines(&non_comment_lines(content), &re), None);
-    }
-
-    #[test]
-    fn count_matches_in_lines_skips_block_comments() {
-        let re = Regex::new(r"unsafe").unwrap();
-        let content = "/*\nunsafe block\nunsafe fn\n*/\nunsafe { real }";
-        assert_eq!(count_matches_in_lines(&non_comment_lines(content), &re), 1);
     }
 
     #[test]

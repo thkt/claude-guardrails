@@ -1,7 +1,4 @@
-use super::{
-    count_matches_in_lines, find_match_in_lines, Rule, Severity, Violation, RE_API_OR_ROUTE_FILE,
-    RE_JS_FILE,
-};
+use super::{find_match_in_lines, Rule, Severity, Violation, RE_API_OR_ROUTE_FILE, RE_JS_FILE};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -30,7 +27,12 @@ pub fn rule() -> Rule {
                 return Vec::new();
             }
 
-            let write_count = count_matches_in_lines(lines, &RE_WRITE_OPS);
+            let (write_count, first_write_line) = lines
+                .iter()
+                .filter(|(_, line)| RE_WRITE_OPS.is_match(line))
+                .fold((0usize, None::<u32>), |(count, first), (n, _)| {
+                    (count + 1, first.or(Some(*n)))
+                });
             if write_count < 2 {
                 return Vec::new();
             }
@@ -47,7 +49,7 @@ pub fn rule() -> Rule {
                     write_count
                 ),
                 file: file_path.to_owned(),
-                line: find_match_in_lines(lines, &RE_WRITE_OPS),
+                line: first_write_line,
             }]
         }),
     }
