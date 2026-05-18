@@ -349,6 +349,8 @@ struct SecurityVisitor<'s> {
     in_direct_ssr_target: bool,
     function_depth: u32,
     in_security_named_fn: bool,
+    // Tracks only file-level `'use client'` directives. Re-declarations inside nested
+    // modules or components are out of scope, so a flat flag suffices.
     has_use_client: bool,
 }
 
@@ -529,7 +531,7 @@ impl SecurityVisitor<'_> {
         self.push_violation(
             rule_id::ENV_VAR_FALLBACK,
             Severity::High,
-            "Throw an error when required env var is missing. Never fall back to a hardcoded secret.",
+            "Throw an error when required env var is missing. Never fall back to a hardcoded secret. Only string-literal fallbacks are flagged; identifier-bound fallbacks like `process.env.X || fallbackVar` are out of scope.",
             expr.span,
         );
     }
