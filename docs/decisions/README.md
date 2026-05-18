@@ -62,6 +62,18 @@ This project uses [MADR (Markdown Any Decision Records)](https://adr.github.io/m
 - **Deprecated**: Retired without a replacement ADR
 - **Superseded**: Replaced by another ADR (e.g. `superseded by ADR-0042`)
 
+### Authoring Convention
+
+ADR Decision 本文の code 引用は **関数名 / const 名 / test 関数名** ベースで書く。`file:line` 形式の line ref は使わない (code 進化と共に陳腐化するため)。
+
+| OK                                                                | NG                                       |
+| ----------------------------------------------------------------- | ---------------------------------------- |
+| `src/ast_security.rs` の `check_client_env_public_leak`           | `src/ast_security.rs:537-559`            |
+| `CLIENT_ENV_ALLOW_LIST` const                                     | `src/ast_security.rs:31-34`              |
+| `getStaticProps_is_not_in_scope_for_this_rule` test               | `src/ast_security.rs:2889-2898`          |
+
+ファイル path 自体は記載してよい。symbol 名で uniqueness が確保できない場合のみ補助的に範囲 ref を併記する。
+
 ---
 
 *Last updated: 2026-05-18*

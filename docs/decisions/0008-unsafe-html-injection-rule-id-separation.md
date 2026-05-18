@@ -10,10 +10,11 @@ decision-makers: thkt
 
 `rule_id::SECURITY` ("security") が 2 つの異なる toggle 配下で同一 ID として発火している。
 
-| 発火元                                                            | toggle              | 検出対象                                                                                          |
-| ----------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
-| `src/rules/security.rs` の `SECURITY_ISSUES`                      | `config.rules.security`     | `setTimeout('str')` / `setInterval('str')` / `postMessage(_, '*')` / sensitive `localStorage` / sensitive `sessionStorage` |
-| `src/ast_security.rs` の `check_html_assignment` / `check_document_write` | `config.rules.ast_security` | `innerHTML = nonliteral` / `outerHTML = nonliteral` / `document.write[ln](nonliteral)`            |
+| 発火元                                                                       | rule_id 発火                | toggle                      | 検出対象                                                                                                                  |
+| ---------------------------------------------------------------------------- | --------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `src/rules/security.rs` の `SECURITY_ISSUES` (1〜5 番目)                     | `SECURITY`                  | `config.rules.security`     | `setTimeout('str')` / `setInterval('str')` / `postMessage(_, '*')` / sensitive `localStorage` / sensitive `sessionStorage` |
+| `src/rules/security.rs` の `SECURITY_ISSUES` (6 番目, `RE_DANGEROUS_INNER_HTML`) | `DANGEROUS_INNER_HTML`      | `config.rules.security`     | React JSX の `<X dangerouslySetInnerHTML={...}>`                                                                          |
+| `src/ast_security.rs` の `check_html_assignment` / `check_document_write`    | `SECURITY` (本 ADR 前)      | `config.rules.ast_security` | `innerHTML = nonliteral` / `outerHTML = nonliteral` / `document.write[ln](nonliteral)`                                    |
 
 JSON envelope の violation を rule で振り分ける consumer (CI 集計 / dashboard / ignore-list) からは両者を区別できない。一方で toggle は分離しているため、`security: false` でも innerHTML 検出は残り、`astSecurity: false` でも setTimeout 検出は残る。この toggle と ID の対応のズレが BREAKING を伴わない部分的な無効化を不可能にしている。
 
@@ -42,6 +43,8 @@ JSON envelope の violation を rule で振り分ける consumer (CI 集計 / da
 | `check_document_write`               | `document.write[ln](nonliteral)`      | High (HTML 解釈 sink、確定)    |
 
 `src/rules/security.rs` の SECURITY_ISSUES (setTimeout/setInterval/postMessage/storage 系) はそのまま `rule_id::SECURITY` を発火する。`config.rules.security` toggle 配下のまま維持。
+
+> Note: `SECURITY_ISSUES` array は 1 つの array で複数 rule_id (`SECURITY` の 5 entries と `DANGEROUS_INNER_HTML` の 1 entry) を内包する設計。`config.rules.security` toggle で gate する単位として共有しており、`SecurityIssue` struct の `rule_id` field で entry ごとに発火 ID を分離する。`src/rules/mod.rs` の `REGISTERED_RULE_IDS` でも 2 rule_id 同居が明示されている。
 
 ### Consequences
 

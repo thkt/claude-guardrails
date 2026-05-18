@@ -42,7 +42,7 @@ guardrails は AI エージェント向け hook として、AST 解析で検出�
 * Good, AI エージェントが blocking と advisory の意味を信頼できる (blocking = 用法確定的に誤り)
 * Good, 用法確定性の枠組みは他 ast_security ルール (innerHTML / document.write / prototype pollution 等) の severity 再評価でも参照できる
 * Bad, 既存 `Math.random().toString(36)` が Medium → High に変わる BREAKING。既存 PR で通った token 生成コードは新版で blocking 化する
-* Bad, 既存テスト T-011 (`src/ast_security.rs:1100`) の severity assertion を Medium → High に更新する必要
+* Bad, 既存テスト T-011 (`math_random_insecure_to_string_36_blocked` in `src/ast_security.rs`) の severity assertion を Medium → High に更新する必要
 
 ### Confirmation
 
