@@ -26,7 +26,7 @@ pub fn format_violations(violations: &[&Violation]) -> String {
 
     let mut lines = vec![
         String::new(),
-        color::bold_red(&format!("Guardrails {}", HEADER_SEPARATOR)),
+        color::bold_red(&format!("Guardrails {HEADER_SEPARATOR}")),
     ];
 
     for v in violations {
@@ -164,7 +164,7 @@ mod tests {
         let v1 = make_violation("eval", Severity::High, "fix1");
         let v2 = make_violation("security", Severity::Critical, "fix2");
         let output = strip_ansi(&format_violations(&[&v1, &v2]));
-        assert!(output.contains("2"));
+        assert!(output.contains('2'));
     }
 
     #[test]

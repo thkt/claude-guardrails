@@ -2,11 +2,11 @@
 //!
 //! | Exit | Source       | Meaning                                   |
 //! |------|--------------|-------------------------------------------|
-//! | 0    | EX_OK        | allow (lint pass)                         |
+//! | 0    | `EX_OK`        | allow (lint pass)                         |
 //! | 1    | convention   | advisory failure (severity=warn)          |
 //! | 2    | convention   | blocking failure (severity=error)         |
-//! | 64   | EX_USAGE     | hook input JSON malformed                 |
-//! | 70   | EX_SOFTWARE  | internal panic / invariant violation      |
+//! | 64   | `EX_USAGE`     | hook input JSON malformed                 |
+//! | 70   | `EX_SOFTWARE`  | internal panic / invariant violation      |
 //!
 //! `ErrorCode` (in `envelope.rs`) covers the JSON `error.code` field for
 //! human/agent-readable diagnostics; this enum maps to the process exit code

@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn detects_read_file_sync() {
-        let content = r#"const data = fs.readFileSync('file.txt', 'utf8');"#;
+        let content = r"const data = fs.readFileSync('file.txt', 'utf8');";
         let violations = check(content, "/src/utils/file.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("readFileSync"));
@@ -115,54 +115,54 @@ mod tests {
 
     #[test]
     fn detects_write_file_sync() {
-        let content = r#"fs.writeFileSync('file.txt', data);"#;
+        let content = r"fs.writeFileSync('file.txt', data);";
         let violations = check(content, "/src/utils/file.ts");
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn detects_exists_sync() {
-        let content = r#"if (fs.existsSync(path)) { }"#;
+        let content = r"if (fs.existsSync(path)) { }";
         let violations = check(content, "/src/utils/file.ts");
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn allows_in_config_files() {
-        let content = r#"const data = fs.readFileSync('config.json', 'utf8');"#;
+        let content = r"const data = fs.readFileSync('config.json', 'utf8');";
         assert!(check(content, "/webpack.config.js").is_empty());
         assert!(check(content, "/vite.config.ts").is_empty());
     }
 
     #[test]
     fn allows_in_next_config() {
-        let content = r#"const data = fs.readFileSync('config.json', 'utf8');"#;
+        let content = r"const data = fs.readFileSync('config.json', 'utf8');";
         assert!(check(content, "/next.config.ts").is_empty());
         assert!(check(content, "/next.config.js").is_empty());
     }
 
     #[test]
     fn allows_in_scripts() {
-        let content = r#"const data = fs.readFileSync('data.json', 'utf8');"#;
+        let content = r"const data = fs.readFileSync('data.json', 'utf8');";
         assert!(check(content, "/scripts/build.ts").is_empty());
         assert!(check(content, "/cli/index.ts").is_empty());
     }
 
     #[test]
     fn allows_async_versions() {
-        let content = r#"
+        let content = r"
             const data = await fs.readFile('file.txt', 'utf8');
             await fs.writeFile('file.txt', data);
-        "#;
+        ";
         assert!(check(content, "/src/utils/file.ts").is_empty());
     }
 
     #[test]
     fn ignores_comments() {
-        let content = r#"
+        let content = r"
             // Don't use readFileSync
             const data = await fs.readFile('file.txt', 'utf8');
-        "#;
+        ";
         assert!(check(content, "/src/utils/file.ts").is_empty());
     }
 }

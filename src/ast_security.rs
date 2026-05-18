@@ -40,7 +40,7 @@ const CLIENT_ENV_ALLOW_LIST: [&str; 1] = ["NODE_ENV"];
 const SSR_SECRET_KEYWORDS: [&str; 6] =
     ["secret", "token", "password", "apikey", "jwt", "credential"];
 
-/// crypto API sink。当該 index に `Math.random()` が渡されると Severity::High で blocking する。
+/// crypto API sink。当該 index に `Math.random()` が渡されると `Severity::High` で blocking する。
 struct CryptoSink {
     object_aliases: &'static [&'static str],
     method: &'static str,
@@ -76,7 +76,7 @@ const CRYPTO_SINK_METHODS: &[CryptoSink] = &[
 ];
 
 /// Variable / function name substring (case-insensitive) が一致したら、
-/// その文脈で使われる `Math.random()` を Severity::Medium で advisory する。
+/// その文脈で使われる `Math.random()` を `Severity::Medium` で advisory する。
 const MATH_RANDOM_SECURITY_KEYWORDS: [&str; 12] = [
     "token",
     "secret",
@@ -157,8 +157,8 @@ fn name_matches_security_keyword(name: &str) -> bool {
 
 /// Return true when `name`, ASCII-lowercase folded and with `_` removed, contains any
 /// `SSR_SECRET_KEYWORDS` entry as a substring. Targets SSR return-object property names
-/// (`apiKey`, `API_KEY`, `db_token`, `password`, …) across camelCase, snake_case and
-/// SCREAMING_SNAKE forms.
+/// (`apiKey`, `API_KEY`, `db_token`, `password`, …) across camelCase, `snake_case` and
+/// `SCREAMING_SNAKE` forms.
 fn name_matches_ssr_secret_keyword(name: &str) -> bool {
     let bytes = name.as_bytes();
     SSR_SECRET_KEYWORDS
@@ -319,6 +319,8 @@ fn has_use_client_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
         .any(|d| d.directive.as_str() == USE_CLIENT_DIRECTIVE)
 }
 
+// MAX_INPUT_SIZE (10 MB cap in main.rs) keeps `i` within u32::MAX, so the
+// `i as u32` casts below cannot truncate.
 #[allow(clippy::cast_possible_truncation)]
 pub fn check_bidi(content: &str, file_path: &str, line_offsets: &[usize]) -> Option<Violation> {
     for (i, ch) in content.char_indices() {
@@ -1064,8 +1066,8 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
 }
 
 /// Identifier param は body 内で `event.origin` を参照しているか。
-/// ObjectPattern は param 段階で `origin` を取り出していれば検査経路ありとみなす。
-/// その他 (ArrayPattern, rest 等) は経路なし扱いで保守的に fire。
+/// `ObjectPattern` は param 段階で `origin` を取り出していれば検査経路ありとみなす。
+/// その他 (`ArrayPattern`, rest 等) は経路なし扱いで保守的に fire。
 fn handler_validates_origin(pat: &BindingPattern, body: &FunctionBody<'_>) -> bool {
     if let BindingPattern::BindingIdentifier(ident) = pat {
         return has_origin_reference(body, ident.name.as_str());
@@ -1442,6 +1444,10 @@ fn skip_char_class(bytes: &[u8], start: usize) -> Option<usize> {
     None
 }
 
+// Group-depth bookkeeping uses a fixed 16-slot stack. Patterns nested
+// deeper than 16 groups silently skip the inner-quantifier check (false
+// negative); real-world ReDoS patterns rarely exceed that depth, and
+// growing to a `Vec` only matters once a concrete pattern shows up.
 fn has_nested_quantifiers(pattern: &str) -> bool {
     let bytes = pattern.as_bytes();
     let mut group_has_quantifier = [false; 16];
@@ -2583,19 +2589,19 @@ mod tests {
             "res.json({ stack: err.stack });",
             "/src/components/ErrorView.tsx",
         );
-        assert!(v.is_empty(), "UI component must skip err-stack: {:?}", v);
+        assert!(v.is_empty(), "UI component must skip err-stack: {v:?}");
     }
 
     #[test]
     fn err_stack_skipped_in_util_file() {
         let v = check("res.json({ stack: err.stack });", "/src/utils/format.ts");
-        assert!(v.is_empty(), "util must skip err-stack: {:?}", v);
+        assert!(v.is_empty(), "util must skip err-stack: {v:?}");
     }
 
     #[test]
     fn err_stack_detected_in_pages_api() {
         let v = check("res.json({ stack: err.stack });", "/src/pages/api/users.ts");
-        assert_eq!(v.len(), 1, "pages/api must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "pages/api must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
@@ -2605,7 +2611,7 @@ mod tests {
             "export async function GET() { res.json({ stack: err.stack }); }",
             "/src/app/orders/[id]/route.ts",
         );
-        assert_eq!(v.len(), 1, "app/**/route.ts must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "app/**/route.ts must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
@@ -2615,19 +2621,19 @@ mod tests {
             "'use server';\nres.json({ stack: err.stack });",
             "/src/lib/helpers.ts",
         );
-        assert!(v.is_empty(), "err-stack requires api/route path: {:?}", v);
+        assert!(v.is_empty(), "err-stack requires api/route path: {v:?}");
     }
 
     #[test]
     fn fs_path_skipped_in_ui_component() {
         let v = check("fs.readFile(userInput, cb);", "/src/components/View.tsx");
-        assert!(v.is_empty(), "UI component must skip fs-path: {:?}", v);
+        assert!(v.is_empty(), "UI component must skip fs-path: {v:?}");
     }
 
     #[test]
     fn fs_path_skipped_in_util_file() {
         let v = check("fs.readFile(userInput, cb);", "/src/utils/loader.ts");
-        assert!(v.is_empty(), "util must skip fs-path: {:?}", v);
+        assert!(v.is_empty(), "util must skip fs-path: {v:?}");
     }
 
     #[test]
@@ -2636,60 +2642,60 @@ mod tests {
             "'use server';\nfs.readFile(userInput, cb);",
             "/src/lib/actions.ts",
         );
-        assert_eq!(v.len(), 1, "use server must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "use server must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
     }
 
     #[test]
     fn require_skipped_in_ui_component() {
         let v = check("require(variable);", "/src/components/View.tsx");
-        assert!(v.is_empty(), "UI component must skip require: {:?}", v);
+        assert!(v.is_empty(), "UI component must skip require: {v:?}");
     }
 
     #[test]
     fn require_detected_with_use_server_directive() {
         let v = check("'use server';\nrequire(variable);", "/src/lib/actions.ts");
-        assert_eq!(v.len(), 1, "use server must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "use server must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::NON_LITERAL_REQUIRE);
     }
 
     #[test]
     fn child_process_skipped_in_ui_component() {
         let v = check("exec(userInput);", "/src/components/View.tsx");
-        assert!(v.is_empty(), "UI component must skip exec: {:?}", v);
+        assert!(v.is_empty(), "UI component must skip exec: {v:?}");
     }
 
     #[test]
     fn child_process_detected_with_use_server_directive() {
         let v = check("'use server';\nexec(userInput);", "/src/lib/actions.ts");
-        assert_eq!(v.len(), 1, "use server must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "use server must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::CHILD_PROCESS_INJECTION);
     }
 
     #[test]
     fn detects_inline_use_server_inside_function_body() {
-        let code = r#"
+        let code = r"
             export async function submitForm(formData) {
                 'use server';
                 fs.readFile(formData.get('path'), cb);
             }
-        "#;
+        ";
         let v = check(code, "/src/app/page.tsx");
-        assert_eq!(v.len(), 1, "inline use server must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "inline use server must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::NON_LITERAL_FS_PATH);
     }
 
     #[test]
     fn inline_use_server_scope_exits_with_function() {
-        let code = r#"
+        let code = r"
             async function action() {
                 'use server';
                 require(modulePath);
             }
             fs.readFile(unsafePath, cb);
-        "#;
+        ";
         let v = check(code, "/src/components/Form.tsx");
-        assert_eq!(v.len(), 1, "only inner call flags: {:?}", v);
+        assert_eq!(v.len(), 1, "only inner call flags: {v:?}");
         assert_eq!(v[0].rule, rule_id::NON_LITERAL_REQUIRE);
     }
 
@@ -2699,7 +2705,7 @@ mod tests {
             "export async function GET() { res.json({ stack: err.stack }); }",
             "/src/app/route.ts",
         );
-        assert_eq!(v.len(), 1, "root app/route.ts must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "root app/route.ts must flag: {v:?}");
         assert_eq!(v[0].rule, rule_id::ERR_STACK_EXPOSURE);
     }
 
@@ -2711,7 +2717,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
             .collect();
-        assert_eq!(leaks.len(), 1, "client env leak must flag: {:?}", v);
+        assert_eq!(leaks.len(), 1, "client env leak must flag: {v:?}");
         assert_eq!(leaks[0].severity, Severity::High);
     }
 
@@ -2721,8 +2727,7 @@ mod tests {
         let v = check(code, "/src/components/Profile.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "NEXT_PUBLIC_ prefix is allowed: {:?}",
-            v
+            "NEXT_PUBLIC_ prefix is allowed: {v:?}"
         );
     }
 
@@ -2732,8 +2737,7 @@ mod tests {
         let v = check(code, "/src/lib/util.ts");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "no use client directive: {:?}",
-            v
+            "no use client directive: {v:?}"
         );
     }
 
@@ -2743,8 +2747,7 @@ mod tests {
         let v = check(code, "/src/app/api/users/route.ts");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "API route never executes in browser: {:?}",
-            v
+            "API route never executes in browser: {v:?}"
         );
     }
 
@@ -2759,8 +2762,7 @@ mod tests {
         assert_eq!(
             leaks.len(),
             1,
-            "process.env access nested in call still leaks: {:?}",
-            v
+            "process.env access nested in call still leaks: {v:?}"
         );
     }
 
@@ -2772,7 +2774,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
             .collect();
-        assert_eq!(leaks.len(), 1, "single-quoted directive must work: {:?}", v);
+        assert_eq!(leaks.len(), 1, "single-quoted directive must work: {v:?}");
     }
 
     #[test]
@@ -2781,8 +2783,7 @@ mod tests {
         let v = check(code, "/src/components/Form.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "use server is server-side: {:?}",
-            v
+            "use server is server-side: {v:?}"
         );
     }
 
@@ -2794,7 +2795,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
             .collect();
-        assert_eq!(leaks.len(), 2, "every violation must be reported: {:?}", v);
+        assert_eq!(leaks.len(), 2, "every violation must be reported: {v:?}");
     }
 
     #[test]
@@ -2803,8 +2804,7 @@ mod tests {
         let v = check(code, "/src/components/Profile.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "computed access is out of scope per draft: {:?}",
-            v
+            "computed access is out of scope per draft: {v:?}"
         );
     }
 
@@ -2814,8 +2814,7 @@ mod tests {
         let v = check(code, "/src/components/Profile.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "NODE_ENV is a framework-provided public compile-time value: {:?}",
-            v
+            "NODE_ENV is a framework-provided public compile-time value: {v:?}"
         );
     }
 
@@ -2831,8 +2830,7 @@ mod tests {
         let v = check(code, "/src/components/Profile.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::CLIENT_ENV_PUBLIC_LEAK),
-            "inline 'use server' body runs server-side, not in client bundle: {:?}",
-            v
+            "inline 'use server' body runs server-side, not in client bundle: {v:?}"
         );
     }
 
@@ -2845,12 +2843,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
-        assert_eq!(
-            bleeds.len(),
-            1,
-            "apiKey property in props must flag: {:?}",
-            v
-        );
+        assert_eq!(bleeds.len(), 1, "apiKey property in props must flag: {v:?}");
         assert_eq!(bleeds[0].severity, Severity::High);
     }
 
@@ -2865,8 +2858,7 @@ mod tests {
         assert_eq!(
             bleeds.len(),
             1,
-            "secret env value in props must flag: {:?}",
-            v
+            "secret env value in props must flag: {v:?}"
         );
     }
 
@@ -2881,8 +2873,7 @@ mod tests {
         assert_eq!(
             bleeds.len(),
             1,
-            "'use server' return with password property must flag: {:?}",
-            v
+            "'use server' return with password property must flag: {v:?}"
         );
     }
 
@@ -2895,7 +2886,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
-        assert_eq!(bleeds.len(), 1, "arrow form must flag: {:?}", v);
+        assert_eq!(bleeds.len(), 1, "arrow form must flag: {v:?}");
     }
 
     #[test]
@@ -2907,7 +2898,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
-        assert_eq!(bleeds.len(), 1, "case-insensitive substring match: {:?}", v);
+        assert_eq!(bleeds.len(), 1, "case-insensitive substring match: {v:?}");
     }
 
     #[test]
@@ -2921,8 +2912,7 @@ mod tests {
         assert_eq!(
             bleeds.len(),
             2,
-            "every violating property must be reported: {:?}",
-            v
+            "every violating property must be reported: {v:?}"
         );
     }
 
@@ -2932,8 +2922,7 @@ mod tests {
         let v = check(code, "/src/lib/util.ts");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "helper function with no SSR context is silent: {:?}",
-            v
+            "helper function with no SSR context is silent: {v:?}"
         );
     }
 
@@ -2943,8 +2932,7 @@ mod tests {
         let v = check(code, "/pages/dashboard.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "non-secret property names are silent: {:?}",
-            v
+            "non-secret property names are silent: {v:?}"
         );
     }
 
@@ -2954,8 +2942,7 @@ mod tests {
         let v = check(code, "/pages/dashboard.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "variable-bound return is out of scope: {:?}",
-            v
+            "variable-bound return is out of scope: {v:?}"
         );
     }
 
@@ -2966,8 +2953,7 @@ mod tests {
         let v = check(code, "/pages/dashboard.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "spread element is out of scope (separate issue): {:?}",
-            v
+            "spread element is out of scope (separate issue): {v:?}"
         );
     }
 
@@ -2977,8 +2963,7 @@ mod tests {
         let v = check(code, "/pages/dashboard.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "getStaticProps is not in scope for this rule: {:?}",
-            v
+            "getStaticProps is not in scope for this rule: {v:?}"
         );
     }
 
@@ -2988,8 +2973,7 @@ mod tests {
         let v = check(code, "/src/app/actions.ts");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "'use server' return with safe properties is silent: {:?}",
-            v
+            "'use server' return with safe properties is silent: {v:?}"
         );
     }
 
@@ -2999,8 +2983,7 @@ mod tests {
         let v = check(code, "/pages/dashboard.tsx");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "helper function return is not serialized: {:?}",
-            v
+            "helper function return is not serialized: {v:?}"
         );
     }
 
@@ -3010,8 +2993,7 @@ mod tests {
         let v = check(code, "/src/app/actions.ts");
         assert!(
             v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
-            "inner helper return is not serialized: {:?}",
-            v
+            "inner helper return is not serialized: {v:?}"
         );
     }
 
@@ -3025,7 +3007,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
-        assert_eq!(bleeds.len(), 1, "concise arrow body must flag: {:?}", v);
+        assert_eq!(bleeds.len(), 1, "concise arrow body must flag: {v:?}");
     }
 
     #[test]
@@ -3036,7 +3018,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
-        assert_eq!(bleeds.len(), 1, "deeply nested secret must flag: {:?}", v);
+        assert_eq!(bleeds.len(), 1, "deeply nested secret must flag: {v:?}");
     }
 
     fn assert_postmessage_fires(code: &str) {
@@ -3200,7 +3182,7 @@ mod tests {
             .iter()
             .filter(|x| x.rule == rule_id::POSTMESSAGE_ORIGIN_MISSING)
             .collect();
-        assert_eq!(hits.len(), 2, "expected two violations: {:?}", v);
+        assert_eq!(hits.len(), 2, "expected two violations: {v:?}");
     }
 
     #[test]

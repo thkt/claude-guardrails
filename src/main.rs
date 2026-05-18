@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 /// 10 MB upper bound for stdin and on-disk reads (Claude Code hook stdin cap +
-/// DoS / OOM guard). See ADR-0004 resource boundary axis (fail-closed exit 64).
+/// `DoS` / OOM guard). See ADR-0004 resource boundary axis (fail-closed exit 64).
 const MAX_INPUT_SIZE: u64 = 10_000_000;
 const SYSEXIT_USAGE: i32 = 64;
 
@@ -150,7 +150,7 @@ impl DegradedReason {
 /// - `Full`: full file content reconstructed (post-write semantic intact).
 /// - `Degraded`: caller wanted full context, failed for a documented reason.
 /// - `NotApplicable`: full-file analysis not attempted (non-JS file, missing
-///   old_string, etc.). Silent fallback to snippet is correct here.
+///   `old_string`, etc.). Silent fallback to snippet is correct here.
 enum ContentResolution {
     Full(String),
     Degraded(DegradedReason),
@@ -208,7 +208,7 @@ fn get_file_and_content(
 fn join_new_strings(edits: &[EditItem]) -> String {
     edits
         .iter()
-        .filter_map(|e| e.new_string.clone())
+        .filter_map(|e| e.new_string.as_deref())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -248,7 +248,7 @@ fn apply_edit(
     }
 }
 
-/// Bound on-disk file read at MAX_INPUT_SIZE to mirror the stdin cap.
+/// Bound on-disk file read at `MAX_INPUT_SIZE` to mirror the stdin cap.
 /// Canonicalizes the path; when `project_root` is `Some`, rejects targets
 /// resolving outside that root (defense against symlink / `..` path
 /// traversal). Production callers pass canonical cwd; `None` disables the
@@ -350,10 +350,7 @@ fn lint_with_external_tools(
 
     let Some(bin) = oxlint::resolve(file_path) else {
         if env::var_os("GUARDRAILS_VERBOSE").is_some() {
-            eprintln!(
-                "guardrails: warning: oxlint not available for {}",
-                file_path
-            );
+            eprintln!("guardrails: warning: oxlint not available for {file_path}");
         }
         return (
             Vec::new(),
@@ -375,6 +372,19 @@ fn lint_with_ast(
     file_path: &str,
     config: &Config,
 ) -> (Vec<Violation>, Option<String>) {
+    // Skip the parse when every AST-driven rule is disabled. The flag list
+    // here must stay in lockstep with the per-rule dispatch arms below; a
+    // missing rule on either side reintroduces the drift that motivated
+    // removing the outer `has_ast_rules` guard.
+    if !config.rules.ast_security
+        && !config.rules.no_use_effect
+        && !config.rules.open_redirect
+        && !config.rules.eval
+        && !config.rules.sqli_concat
+        && !config.rules.cors_wildcard
+    {
+        return (Vec::new(), None);
+    }
     let result = ast::with_parsed_program(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
         if config.rules.ast_security {
@@ -461,13 +471,7 @@ fn collect_violations(
         violations.extend(rule.check(content, file_path, &lines));
     }
 
-    let has_ast_rules = config.rules.ast_security
-        || config.rules.no_use_effect
-        || config.rules.open_redirect
-        || config.rules.eval
-        || config.rules.sqli_concat
-        || config.rules.cors_wildcard;
-    if is_js && has_ast_rules {
+    if is_js {
         let (vs, note) = lint_with_ast(content, file_path, config);
         violations.extend(vs);
         if let Some(n) = note {
@@ -488,7 +492,7 @@ fn partition_violations<'a>(
 }
 
 fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit: i32) -> i32 {
-    eprintln!("guardrails: {}", message);
+    eprintln!("guardrails: {message}");
     emit_error_envelope_if_enabled(
         json_mode,
         ErrorPayload {
@@ -504,16 +508,20 @@ fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit
 
 // Fail-closed: reject oversized input rather than silently truncating.
 fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
+    parse_stdin_from(&mut io::stdin().lock(), json_mode)
+}
+
+fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput, i32> {
     let input_error_exit = i32::from(HookExitCode::InputError.code());
     let mut input_str = String::new();
-    io::stdin()
+    reader
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
         .map_err(|e| {
             fail(
                 json_mode,
                 ErrorCode::IoError,
-                format!("failed to read stdin: {}", e),
+                format!("failed to read stdin: {e}"),
                 "Pass valid Claude Code hook JSON via stdin",
                 input_error_exit,
             )
@@ -523,10 +531,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
         return Err(fail(
             json_mode,
             ErrorCode::DataError,
-            format!(
-                "input too large (>{} bytes), blocking as precaution",
-                MAX_INPUT_SIZE
-            ),
+            format!("input too large (>{MAX_INPUT_SIZE} bytes), blocking as precaution"),
             "Reduce input size or split into smaller hook calls",
             input_error_exit,
         ));
@@ -536,7 +541,7 @@ fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
         fail(
             json_mode,
             ErrorCode::DataError,
-            format!("invalid JSON input: {}", e),
+            format!("invalid JSON input: {e}"),
             "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
             input_error_exit,
         )
@@ -574,6 +579,14 @@ fn config_hint_action(git_root: &Path, config: &Config) -> HintAction {
     }
 }
 
+fn try_create_tools_json(path: &Path) -> io::Result<()> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(DEFAULT_TOOLS_JSON.as_bytes()))
+}
+
 fn show_config_hint(config: &Config) {
     let Some(ref git_root) = config.git_root else {
         return;
@@ -581,12 +594,7 @@ fn show_config_hint(config: &Config) {
     match config_hint_action(git_root, config) {
         HintAction::Skip => {}
         HintAction::CreateAndHint(path) => {
-            if let Err(e) = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .and_then(|mut f| f.write_all(DEFAULT_TOOLS_JSON.as_bytes()))
-            {
+            if let Err(e) = try_create_tools_json(&path) {
                 eprintln!("guardrails: failed to create {}: {}", path.display(), e);
             }
             eprintln!("{}", color::yellow(CONFIG_HINT_MESSAGE));
@@ -609,7 +617,7 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
 fn print_json_line<T: Serialize>(value: &T) {
     let json = serde_json::to_string(value).expect("envelope serialization is infallible");
     // Ignore write errors (e.g. BrokenPipe) so the caller's exit code is preserved.
-    let _ = writeln!(io::stdout().lock(), "{}", json);
+    let _ = writeln!(io::stdout().lock(), "{json}");
 }
 
 fn emit_json_if_enabled(
@@ -701,8 +709,7 @@ fn run_hook(json_mode: bool) -> i32 {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
-                "guardrails: config error (using defaults: all rules enabled, block_on=[critical,high]): {}",
-                e
+                "guardrails: config error (using defaults: all rules enabled, block_on=[critical,high]): {e}"
             );
             Config::default()
         }
@@ -844,6 +851,34 @@ mod tests {
         };
         let (_, content, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "line1\nline2");
+    }
+
+    #[test]
+    fn multi_edit_join_preserves_separator_before_empty_string() {
+        // Regression: the fold-based join silently dropped the leading
+        // separator when the first edit's new_string was empty, shifting
+        // line offsets in downstream snippet analysis.
+        let input = ToolInput {
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some("/nonexistent/path.ts".to_owned()),
+                edits: Some(vec![
+                    EditItem {
+                        old_string: Some("foo".to_owned()),
+                        new_string: Some(String::new()),
+                        ..EditItem::default()
+                    },
+                    EditItem {
+                        old_string: Some("bar".to_owned()),
+                        new_string: Some("kept".to_owned()),
+                        ..EditItem::default()
+                    },
+                ]),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        assert_eq!(content, "\nkept");
     }
 
     #[test]
@@ -1136,7 +1171,7 @@ mod tests {
         fs::write(&path, "a".repeat(size)).unwrap();
         match read_file_capped(path.to_str().unwrap(), None) {
             ContentResolution::Full(c) => {
-                assert_eq!(u64::try_from(c.len()).unwrap(), MAX_INPUT_SIZE)
+                assert_eq!(u64::try_from(c.len()).unwrap(), MAX_INPUT_SIZE);
             }
             _ => panic!("expected Full at exact MAX_INPUT_SIZE boundary"),
         }
@@ -1275,8 +1310,7 @@ mod tests {
             collect_violations("/src/app.ts", "export function main() {}\n", &config);
         assert!(
             violations.is_empty(),
-            "unexpected violations: {:?}",
-            violations
+            "unexpected violations: {violations:?}"
         );
     }
 
@@ -1426,6 +1460,59 @@ mod tests {
 
         let config = Config::default();
         assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);
+    }
+
+    #[test]
+    fn try_create_tools_json_writes_default_payload() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tools.json");
+        try_create_tools_json(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), DEFAULT_TOOLS_JSON);
+    }
+
+    #[test]
+    fn try_create_tools_json_errors_when_file_exists() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tools.json");
+        fs::write(&path, "existing").unwrap();
+        let err = try_create_tools_json(&path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "existing");
+    }
+
+    #[test]
+    fn parse_stdin_from_accepts_valid_write_payload() {
+        let json =
+            r#"{"tool_name":"Write","tool_input":{"file_path":"/x.ts","content":"const x=1;"}}"#;
+        let mut cursor = io::Cursor::new(json.as_bytes());
+        match parse_stdin_from(&mut cursor, false) {
+            Ok(parsed) => {
+                assert_eq!(parsed.tool_name, "Write");
+                assert_eq!(parsed.tool_input.file_path.as_deref(), Some("/x.ts"));
+                assert_eq!(parsed.tool_input.content.as_deref(), Some("const x=1;"));
+            }
+            Err(exit) => panic!("expected Ok, got Err({exit})"),
+        }
+    }
+
+    #[test]
+    fn parse_stdin_from_rejects_invalid_json() {
+        let mut cursor = io::Cursor::new(&b"not json"[..]);
+        match parse_stdin_from(&mut cursor, false) {
+            Err(exit) => assert_eq!(exit, i32::from(HookExitCode::InputError.code())),
+            Ok(_) => panic!("expected Err for invalid JSON"),
+        }
+    }
+
+    #[test]
+    fn parse_stdin_from_rejects_oversized_input() {
+        let size = usize::try_from(MAX_INPUT_SIZE + 1).unwrap();
+        let payload = vec![b'a'; size];
+        let mut cursor = io::Cursor::new(payload);
+        match parse_stdin_from(&mut cursor, false) {
+            Err(exit) => assert_eq!(exit, i32::from(HookExitCode::InputError.code())),
+            Ok(_) => panic!("expected Err for oversized input"),
+        }
     }
 
     #[test]

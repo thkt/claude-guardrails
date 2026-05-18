@@ -106,26 +106,26 @@ mod tests {
         ];
         for (content, expected) in cases {
             let violations = check(content);
-            assert_eq!(violations.len(), 1, "Should detect: {}", expected);
+            assert_eq!(violations.len(), 1, "Should detect: {expected}");
             assert!(violations[0].fix.contains(expected));
         }
     }
 
     #[test]
     fn allows_strong_algorithms() {
-        let content = r#"
+        let content = r"
             const hash = crypto.createHash('sha256').update(data).digest('hex');
             const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn ignores_comments() {
-        let content = r#"
+        let content = r"
             // Don't use createHash('md5') - it's weak
             const hash = crypto.createHash('sha256').update(data).digest('hex');
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 }

@@ -21,8 +21,8 @@ pub fn rule() -> Rule {
             let line_offsets = build_line_offsets(content);
 
             for caps in RE_TEST_START.captures_iter(content) {
-                let test_name = caps.get(2).map(|m| m.as_str()).unwrap_or("unknown");
-                let match_end = caps.get(0).map(|m| m.end()).unwrap_or(0);
+                let test_name = caps.get(2).map_or("unknown", |m| m.as_str());
+                let match_end = caps.get(0).map_or(0, |m| m.end());
 
                 let test_body =
                     extract_delimited_content(content, match_end, b'{', b'}').unwrap_or("");
@@ -36,15 +36,14 @@ pub fn rule() -> Rule {
                     continue;
                 }
 
-                let test_start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                let test_start = caps.get(0).map_or(0, |m| m.start());
                 let line_num = offset_to_line(&line_offsets, test_start);
 
                 violations.push(Violation {
                     rule: super::rule_id::TEST_ASSERTION.to_owned(),
                     severity: Severity::Medium,
                     fix: format!(
-                        "Test '{}' has no assertions. Add expect() or assert calls.",
-                        test_name
+                        "Test '{test_name}' has no assertions. Add expect() or assert calls."
                     ),
                     file: file_path.to_owned(),
                     line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
@@ -70,11 +69,11 @@ mod tests {
 
     #[test]
     fn detects_test_without_assertion() {
-        let content = r#"
+        let content = r"
             it('should do something', () => {
                 const result = doSomething();
             });
-        "#;
+        ";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("should do something"));
@@ -82,68 +81,68 @@ mod tests {
 
     #[test]
     fn allows_test_with_expect() {
-        let content = r#"
+        let content = r"
             it('should return true', () => {
                 const result = doSomething();
                 expect(result).toBe(true);
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_test_with_assert() {
-        let content = r#"
+        let content = r"
             it('should return true', () => {
                 const result = doSomething();
                 assert.equal(result, true);
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_empty_test_placeholder() {
-        let content = r#"
+        let content = r"
             it('should do something', () => {
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_async_test_with_assertion() {
-        let content = r#"
+        let content = r"
             it('should fetch data', async () => {
                 const result = await fetchData();
                 expect(result).toBeDefined();
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_test_with_nested_braces_and_assertion() {
-        let content = r#"
+        let content = r"
             it('should handle conditional', () => {
                 if (condition) {
                     doSomething();
                 }
                 expect(result).toBe(true);
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn detects_test_with_nested_braces_no_assertion() {
-        let content = r#"
+        let content = r"
             it('should handle conditional', () => {
                 if (condition) {
                     doSomething();
                 }
             });
-        "#;
+        ";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
     }
@@ -161,35 +160,35 @@ mod tests {
 
     #[test]
     fn handles_braces_in_single_quotes() {
-        let content = r#"
+        let content = r"
             it('should handle single quoted braces', () => {
                 const s = '{ brace }';
                 expect(s).toBeDefined();
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn handles_braces_in_template_literals() {
-        let content = r#"
+        let content = r"
             it('should handle template literal braces', () => {
                 const s = `{ template ${brace} }`;
                 expect(s).toBeTruthy();
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn handles_braces_in_comments() {
-        let content = r#"
+        let content = r"
             it('should handle comment braces', () => {
                 // { this is a comment }
                 /* { block comment } */
                 expect(true).toBe(true);
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
@@ -219,25 +218,25 @@ mod tests {
 
     #[test]
     fn handles_nested_template_interpolation() {
-        let content = r#"
+        let content = r"
             it('should handle nested interpolation', () => {
                 const obj = { a: 1 };
                 const s = `value: ${obj.a > 0 ? 'positive' : 'negative'}`;
                 expect(s).toBeDefined();
             });
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn detects_missing_assertion_with_template_interpolation() {
-        let content = r#"
+        let content = r"
             it('should fail without assertion', () => {
                 const fn = () => { return 42; };
                 const s = `result: ${fn()}`;
                 console.log(s);
             });
-        "#;
+        ";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
     }

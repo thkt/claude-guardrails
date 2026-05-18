@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn detects_utils_importing_ui() {
-        let content = r#"import { Button } from '../components/Button';"#;
+        let content = r"import { Button } from '../components/Button';";
         let violations = check(content, "/src/utils/formatter.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("utils should not depend on UI"));
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn detects_services_importing_ui() {
-        let content = r#"import { useAuth } from '../hooks/useAuth';"#;
+        let content = r"import { useAuth } from '../hooks/useAuth';";
         let violations = check(content, "/src/services/api.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0]
@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn detects_components_importing_pages() {
-        let content = r#"import { HomePage } from '../pages/Home';"#;
+        let content = r"import { HomePage } from '../pages/Home';";
         let violations = check(content, "/src/components/Header.tsx");
         assert_eq!(violations.len(), 1);
         assert!(violations[0]
@@ -113,24 +113,22 @@ mod tests {
     fn allows_valid_imports() {
         let cases = [
             (
-                r#"import { format } from '../utils/date';"#,
+                r"import { format } from '../utils/date';",
                 "/src/components/Calendar.tsx",
             ),
             (
-                r#"import { api } from '../services/api';"#,
+                r"import { api } from '../services/api';",
                 "/src/hooks/useData.ts",
             ),
             (
-                r#"import { Button } from '../components/Button';"#,
+                r"import { Button } from '../components/Button';",
                 "/src/pages/Home.tsx",
             ),
         ];
         for (content, path) in cases {
             assert!(
                 check(content, path).is_empty(),
-                "Should allow: {} in {}",
-                content,
-                path
+                "Should allow: {content} in {path}"
             );
         }
     }

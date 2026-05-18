@@ -307,12 +307,18 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.17.1"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
 ]
+
+[[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "heck"
@@ -486,21 +492,21 @@ dependencies = [
 
 [[package]]
 name = "oxc_allocator"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3727d7415ee92082a6e320a327516cc83982c2082dfe343e31332f1ad6f8df1"
+checksum = "c17ece0d1edc5e92822be95428460bc6b12f0dce8f95a9efabf751189a75f9f2"
 dependencies = [
  "allocator-api2",
- "hashbrown 0.17.1",
+ "hashbrown 0.16.1",
  "oxc_data_structures",
  "rustc-hash",
 ]
 
 [[package]]
 name = "oxc_ast"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20c9019b852098e62fdf6f7386f78a13a5de67afb673de824bb41557c6ed284b"
+checksum = "06ec0e9560cce8917197c7b13be7288707177f48a6f0ca116d0b53689e18bbc3"
 dependencies = [
  "bitflags",
  "oxc_allocator",
@@ -510,15 +516,14 @@ dependencies = [
  "oxc_estree",
  "oxc_regular_expression",
  "oxc_span",
- "oxc_str",
  "oxc_syntax",
 ]
 
 [[package]]
 name = "oxc_ast_macros"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70c6d516ecb635f3bb87e14fd416efd3d3f907a7fa2a419f153edb40b88d2bfd"
+checksum = "f266c05258e76cb84d7eee538e4fc75e2687f4220e1b2f141c490b35025a6443"
 dependencies = [
  "phf",
  "proc-macro2",
@@ -528,9 +533,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_ast_visit"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9adeae52ab4d0e0295f8fde6a102e3c703b137444e5c5733adddda1aa49b1ea5"
+checksum = "3477ca0b6dd5bebcb1d3bf4c825b65999975d6ca91d6f535bf067e979fad113a"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -540,15 +545,15 @@ dependencies = [
 
 [[package]]
 name = "oxc_data_structures"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb57dfe7494ab130a195c526bcad6b19bab963f67d67bf12e0b1558e8e2aec5"
+checksum = "d8701946f2acbd655610a331cf56f0aa58349ef792e6bf2fb65c56785b87fe8e"
 
 [[package]]
 name = "oxc_diagnostics"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f04143d1df5670f1a6a6b4d36559f450ac8b46db08f815cfc9281d8aa1f5845"
+checksum = "b04ea16e6016eceb281fb61bbac5f860f075864e93ae15ec18b6c2d0b152e435"
 dependencies = [
  "cow-utils",
  "oxc-miette",
@@ -557,9 +562,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_ecmascript"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e964cb4e71bbd8dca4870358f28e7637284257595a2083329b699e8b6019a7f"
+checksum = "f4b107cae9b8bce541a45463623e1c4b1bb073e81d966483720f0e831facdcb1"
 dependencies = [
  "cow-utils",
  "num-bigint",
@@ -573,9 +578,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_estree"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad3b88b4a49146d870e7dfe8bf55a6fcb14fec6a418417cfb871c43b611e850b"
+checksum = "57b79c9e9684eab83293d67dcbbfd2b1a1f062d27a8188411eb700c6e17983fa"
 
 [[package]]
 name = "oxc_index"
@@ -589,9 +594,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_parser"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9aca515acc4d2a7dd9e8a7da90784172f6e5b19158b94412b7a23fc7ad82d582"
+checksum = "487f41bdacb3ef9afd8c5b0cb5beceec3ac4ecd0c348804aa1907606d370c731"
 dependencies = [
  "bitflags",
  "cow-utils",
@@ -605,7 +610,6 @@ dependencies = [
  "oxc_ecmascript",
  "oxc_regular_expression",
  "oxc_span",
- "oxc_str",
  "oxc_syntax",
  "rustc-hash",
  "seq-macro",
@@ -613,16 +617,15 @@ dependencies = [
 
 [[package]]
 name = "oxc_regular_expression"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "473e111606281ece5ba662ca2f9313fc3d7edcd1b9ed6b0363898cefb6336d1f"
+checksum = "d495c085efbde1d65636497f9d3e3e58151db614a97e313e2e7a837d81865419"
 dependencies = [
  "bitflags",
  "oxc_allocator",
  "oxc_ast_macros",
  "oxc_diagnostics",
  "oxc_span",
- "oxc_str",
  "phf",
  "rustc-hash",
  "unicode-id-start",
@@ -630,9 +633,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_span"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a68fab3fd1589d78e7a7dd21702858dc50ec6a15282e653f4ffaa1b8cfa5689f"
+checksum = "3edcf2bc8bc73cd8d252650737ef48a482484a91709b7f7a5c5ce49305f247e8"
 dependencies = [
  "compact_str",
  "oxc-miette",
@@ -644,21 +647,21 @@ dependencies = [
 
 [[package]]
 name = "oxc_str"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f1abbac33ebda94f2e8d2300c17f7729aa786935bc1f73a20dfc9c4ad1ba36b"
+checksum = "a0c60f1570f04257d5678a16391f6d18dc805325e7f876b8e176a3a36fe897be"
 dependencies = [
  "compact_str",
- "hashbrown 0.17.1",
+ "hashbrown 0.16.1",
  "oxc_allocator",
  "oxc_estree",
 ]
 
 [[package]]
 name = "oxc_syntax"
-version = "0.131.0"
+version = "0.121.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e525737bcde35ed941c7b1023d28a706799d04ee75623fe26daab88e757459"
+checksum = "5a10c19c89298c0b126d12c5f545786405efbad9012d956ebb3190b64b29905a"
 dependencies = [
  "bitflags",
  "cow-utils",
@@ -669,7 +672,6 @@ dependencies = [
  "oxc_estree",
  "oxc_index",
  "oxc_span",
- "oxc_str",
  "phf",
  "unicode-id-start",
 ]

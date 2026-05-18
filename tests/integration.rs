@@ -266,8 +266,7 @@ fn non_js_file_skips_js_rules() {
 fn oversized_input_exits_input_error() {
     let content = "x".repeat(10_000_000);
     let json = format!(
-        r#"{{"tool_name":"Write","tool_input":{{"file_path":"/src/app.ts","content":"{}"}}}}"#,
-        content
+        r#"{{"tool_name":"Write","tool_input":{{"file_path":"/src/app.ts","content":"{content}"}}}}"#
     );
     let output = run_guardrails(json.as_bytes());
     assert_eq!(

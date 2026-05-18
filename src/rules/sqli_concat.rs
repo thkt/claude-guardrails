@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn detects_template_literal_with_sql_keyword_and_interpolation() {
         let v = check_js("db.execute(`SELECT * FROM users WHERE id = ${userId}`);");
-        assert_eq!(v.len(), 1, "expected one violation, got: {:?}", v);
+        assert_eq!(v.len(), 1, "expected one violation, got: {v:?}");
         assert_eq!(v[0].severity, Severity::High);
         assert_eq!(v[0].rule, rule_id::SQLI_CONCAT);
     }
@@ -158,7 +158,7 @@ mod tests {
     fn detects_string_concat_with_sql_keyword() {
         let v =
             check_js(r#"connection.query("SELECT * FROM users WHERE name = '" + input + "'");"#);
-        assert_eq!(v.len(), 1, "expected one violation, got: {:?}", v);
+        assert_eq!(v.len(), 1, "expected one violation, got: {v:?}");
         assert_eq!(v[0].severity, Severity::High);
     }
 
@@ -166,37 +166,37 @@ mod tests {
     #[test]
     fn allows_prepared_statement_with_question_mark() {
         let v = check_js(r#"db.execute("SELECT * FROM users WHERE id = ?", [userId]);"#);
-        assert!(v.is_empty(), "prepared statement must not flag: {:?}", v);
+        assert!(v.is_empty(), "prepared statement must not flag: {v:?}");
     }
 
     // T-004: prepared statement with `$1` numbered placeholder → allowed
     #[test]
     fn allows_prepared_statement_with_numbered_placeholder() {
         let v = check_js(r#"db.query("SELECT * FROM users WHERE id = $1", [userId]);"#);
-        assert!(v.is_empty(), "numbered placeholder must not flag: {:?}", v);
+        assert!(v.is_empty(), "numbered placeholder must not flag: {v:?}");
     }
 
     // T-005: static TemplateLiteral (no interpolation) → allowed
     #[test]
     fn allows_static_template_literal() {
         let v = check_js("db.execute(`SELECT * FROM users`);");
-        assert!(v.is_empty(), "static template must not flag: {:?}", v);
+        assert!(v.is_empty(), "static template must not flag: {v:?}");
     }
 
     // T-006: ORM where clause (no raw SQL string) → allowed
     #[test]
     fn allows_orm_where_clause() {
         let v = check_js("prisma.user.findMany({ where: { id: userId } });");
-        assert!(v.is_empty(), "ORM where must not flag: {:?}", v);
+        assert!(v.is_empty(), "ORM where must not flag: {v:?}");
     }
 
     // T-007: console.* (log/info/warn/error/debug) with dynamic SQL → allowed
     #[test]
     fn allows_console_member_calls_with_dynamic_sql() {
         for method in ["log", "info", "warn", "error", "debug"] {
-            let code = format!("console.{}(`SELECT failed for id=${{id}}`);", method);
+            let code = format!("console.{method}(`SELECT failed for id=${{id}}`);");
             let v = check_js(&code);
-            assert!(v.is_empty(), "console.{} must not flag: {:?}", method, v);
+            assert!(v.is_empty(), "console.{method} must not flag: {v:?}");
         }
     }
 
@@ -207,7 +207,7 @@ mod tests {
             "db.execute(`SELECT * FROM users WHERE id = ${userId}`);",
             "/docs/README.md",
         );
-        assert!(v.is_empty(), "non-js file must not flag: {:?}", v);
+        assert!(v.is_empty(), "non-js file must not flag: {v:?}");
     }
 
     // T-009: violation carries correct line number
@@ -237,8 +237,7 @@ mod tests {
         let v = check_js("const sql = `SELECT * FROM t WHERE id = ${id}`;");
         assert!(
             v.is_empty(),
-            "template assigned to variable without call sink must not flag: {:?}",
-            v
+            "template assigned to variable without call sink must not flag: {v:?}"
         );
     }
 
@@ -246,12 +245,7 @@ mod tests {
     #[test]
     fn detects_dynamic_template_in_concat_chain() {
         let v = check_js("db.query(`SELECT * FROM users WHERE id = ${id}` + suffix);");
-        assert_eq!(
-            v.len(),
-            1,
-            "dynamic template in `+` chain must flag: {:?}",
-            v
-        );
+        assert_eq!(v.len(), 1, "dynamic template in `+` chain must flag: {v:?}");
         assert_eq!(v[0].severity, Severity::High);
     }
 

@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn detects_get_element_by_id() {
-        let content = r#"const el = document.getElementById('root');"#;
+        let content = r"const el = document.getElementById('root');";
         let violations = check(content, "/src/components/App.tsx");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("getElementById"));
@@ -100,40 +100,40 @@ mod tests {
 
     #[test]
     fn detects_query_selector() {
-        let content = r#"const el = document.querySelector('.container');"#;
+        let content = r"const el = document.querySelector('.container');";
         let violations = check(content, "/src/components/App.tsx");
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn detects_create_element() {
-        let content = r#"const div = document.createElement('div');"#;
+        let content = r"const div = document.createElement('div');";
         let violations = check(content, "/src/components/App.tsx");
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn allows_in_non_react_files() {
-        let content = r#"const el = document.getElementById('root');"#;
+        let content = r"const el = document.getElementById('root');";
         assert!(check(content, "/src/utils/dom.ts").is_empty());
         assert!(check(content, "/src/lib/helper.js").is_empty());
     }
 
     #[test]
     fn allows_useref_pattern() {
-        let content = r#"
+        let content = r"
             const ref = useRef<HTMLDivElement>(null);
             return <div ref={ref}>Hello</div>;
-        "#;
+        ";
         assert!(check(content, "/src/components/App.tsx").is_empty());
     }
 
     #[test]
     fn ignores_comments() {
-        let content = r#"
+        let content = r"
             // Don't use document.getElementById in React
             const ref = useRef(null);
-        "#;
+        ";
         assert!(check(content, "/src/components/App.tsx").is_empty());
     }
 }

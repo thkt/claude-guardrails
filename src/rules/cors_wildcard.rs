@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn detects_cors_options_with_wildcard_origin() {
         let v = check_js("app.use(cors({ origin: '*' }));");
-        assert_eq!(v.len(), 1, "expected one violation, got: {:?}", v);
+        assert_eq!(v.len(), 1, "expected one violation, got: {v:?}");
         assert_eq!(v[0].severity, Severity::Medium);
         assert_eq!(v[0].rule, rule_id::CORS_WILDCARD);
     }
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn detects_set_header_acao_wildcard() {
         let v = check_js("res.setHeader('Access-Control-Allow-Origin', '*');");
-        assert_eq!(v.len(), 1, "expected one violation, got: {:?}", v);
+        assert_eq!(v.len(), 1, "expected one violation, got: {v:?}");
         assert_eq!(v[0].severity, Severity::Medium);
     }
 
@@ -181,42 +181,42 @@ mod tests {
     #[test]
     fn allows_cors_with_specific_origin() {
         let v = check_js("app.use(cors({ origin: 'https://example.com' }));");
-        assert!(v.is_empty(), "specific origin must not flag: {:?}", v);
+        assert!(v.is_empty(), "specific origin must not flag: {v:?}");
     }
 
     // T-005: cors with array origin → allowed (allowlist)
     #[test]
     fn allows_cors_with_array_origin() {
         let v = check_js("app.use(cors({ origin: ['https://a.com', 'https://b.com'] }));");
-        assert!(v.is_empty(), "array origin must not flag: {:?}", v);
+        assert!(v.is_empty(), "array origin must not flag: {v:?}");
     }
 
     // T-006: cors with function origin → allowed (dynamic decision)
     #[test]
     fn allows_cors_with_function_origin() {
         let v = check_js("app.use(cors({ origin: (origin, cb) => cb(null, true) }));");
-        assert!(v.is_empty(), "function origin must not flag: {:?}", v);
+        assert!(v.is_empty(), "function origin must not flag: {v:?}");
     }
 
     // T-007: setHeader with different header name → allowed
     #[test]
     fn allows_set_header_for_different_header() {
         let v = check_js("res.setHeader('Content-Type', '*');");
-        assert!(v.is_empty(), "non-ACAO header must not flag: {:?}", v);
+        assert!(v.is_empty(), "non-ACAO header must not flag: {v:?}");
     }
 
     // T-008: non-JS files out of scope
     #[test]
     fn ignores_non_js_files() {
         let v = check("app.use(cors({ origin: '*' }));", "/docs/README.md");
-        assert!(v.is_empty(), "non-js file must not flag: {:?}", v);
+        assert!(v.is_empty(), "non-js file must not flag: {v:?}");
     }
 
     // T-009: dynamic origin expression → skipped (static analysis cannot resolve)
     #[test]
     fn skips_dynamic_origin_expression() {
         let v = check_js("app.use(cors({ origin: getAllowedOrigin() }));");
-        assert!(v.is_empty(), "dynamic origin must skip: {:?}", v);
+        assert!(v.is_empty(), "dynamic origin must skip: {v:?}");
     }
 
     // T-010: empty file / fail-open on parse error
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn detects_cors_with_no_arguments() {
         let v = check_js("app.use(cors());");
-        assert_eq!(v.len(), 1, "cors() no-arg must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "cors() no-arg must flag: {v:?}");
         assert_eq!(v[0].severity, Severity::Medium);
     }
 
@@ -258,14 +258,14 @@ mod tests {
     #[test]
     fn detects_cors_options_without_origin_property() {
         let v = check_js("app.use(cors({ credentials: true }));");
-        assert_eq!(v.len(), 1, "cors options w/o origin must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "cors options w/o origin must flag: {v:?}");
     }
 
     // T-016: res.set('Access-Control-Allow-Origin', '*') → blocked (Express alias)
     #[test]
     fn detects_express_set_acao_wildcard() {
         let v = check_js("res.set('Access-Control-Allow-Origin', '*');");
-        assert_eq!(v.len(), 1, "res.set must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "res.set must flag: {v:?}");
     }
 
     #[test]
@@ -274,13 +274,13 @@ mod tests {
             "app.use(cors({ origin: '*' }));",
             "/src/components/Header.tsx",
         );
-        assert!(v.is_empty(), "UI component file must skip: {:?}", v);
+        assert!(v.is_empty(), "UI component file must skip: {v:?}");
     }
 
     #[test]
     fn skips_util_file() {
         let v = check("app.use(cors({ origin: '*' }));", "/src/utils/helper.ts");
-        assert!(v.is_empty(), "util file must skip: {:?}", v);
+        assert!(v.is_empty(), "util file must skip: {v:?}");
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod tests {
             "res.setHeader('Access-Control-Allow-Origin', '*');",
             "/src/pages/api/users.ts",
         );
-        assert_eq!(v.len(), 1, "pages/api must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "pages/api must flag: {v:?}");
     }
 
     #[test]
@@ -298,7 +298,7 @@ mod tests {
             "res.setHeader('Access-Control-Allow-Origin', '*');",
             "/middleware.ts",
         );
-        assert_eq!(v.len(), 1, "middleware.ts must flag: {:?}", v);
+        assert_eq!(v.len(), 1, "middleware.ts must flag: {v:?}");
     }
 
     // T-017: NFR-001 perf < 10ms/file

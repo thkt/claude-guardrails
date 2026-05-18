@@ -21,6 +21,9 @@ pub fn with_parsed_program<R>(
     Some(f(&ret.program, &line_offsets))
 }
 
+// MAX_INPUT_SIZE caps stdin and on-disk reads at 10 MB (see main.rs), so
+// line numbers stay well under u32::MAX. `as u32` cannot truncate within
+// that bound.
 #[allow(clippy::cast_possible_truncation)]
 pub fn span_to_line(offsets: &[usize], span: Span) -> u32 {
     scanner::offset_to_line(offsets, span.start as usize) as u32

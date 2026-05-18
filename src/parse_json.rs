@@ -14,10 +14,7 @@ pub fn parse_linter_json<T: DeserializeOwned>(stdout: &str, stderr: &str, tool: 
 
     if json_str.is_empty() {
         if !stdout.is_empty() || !stderr.is_empty() {
-            eprintln!(
-                "guardrails: {}: no JSON in output (may have config issues)",
-                tool
-            );
+            eprintln!("guardrails: {tool}: no JSON in output (may have config issues)");
         }
         if !stderr.is_empty() {
             eprintln!(
@@ -32,7 +29,7 @@ pub fn parse_linter_json<T: DeserializeOwned>(stdout: &str, stderr: &str, tool: 
     match serde_json::from_str::<T>(json_str) {
         Ok(parsed) => Some(parsed),
         Err(e) => {
-            eprintln!("guardrails: {}: JSON parse error: {}", tool, e);
+            eprintln!("guardrails: {tool}: JSON parse error: {e}");
             None
         }
     }

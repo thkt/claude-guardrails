@@ -210,7 +210,7 @@ envelope schema と exit code は次のテストで pin されている。
 * `src/hook_exit.rs` — `HookExitCode` 実装と sysexits.h 由来 doc コメント
 * `src/main.rs` — `parse_stdin` / `run_hook` / `run_prefetch` / `fail` / `emit_*` 関数群
 * `README.md` の Exit Codes / JSON Output Mode セクション
-* dotclaude ADR-0065 "scout JSON output schema and sysexits exit code policy" (inspiration): `~/.claude/docs/decisions/0065-scout-json-output-schema-and-sysexits-exit-code-policy.md`
-* dotclaude ADR-0066 "CLI exit code policy grouped by error topology" (inspiration): `~/.claude/docs/decisions/0066-cli-exit-code-policy-grouped-by-error-topology.md` — guardrails は Group 3 (Hook tool) に分類される
+* dotclaude ADR-0065 "scout JSON output schema and sysexits exit code policy" (inspiration; lives in a private dotclaude store, not navigable from this repo)
+* dotclaude ADR-0066 "CLI exit code policy grouped by error topology" (inspiration; private dotclaude store) — guardrails is a hook tool consuming stdin JSON and emitting violations on stderr; its exit code map follows the hook-tool grouping defined there.
 * Audit: `docs/audit/2026-05-14-undocumented-decisions.md` Cluster B
 * Standards: sysexits.h (`man 3 sysexits`)

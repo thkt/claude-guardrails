@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn detects_full_lodash_import() {
-        let content = r#"import _ from 'lodash';"#;
+        let content = r"import _ from 'lodash';";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("lodash"));
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn detects_full_moment_import() {
-        let content = r#"import moment from 'moment';"#;
+        let content = r"import moment from 'moment';";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("moment"));
@@ -117,41 +117,41 @@ mod tests {
 
     #[test]
     fn detects_full_mui_icons_import() {
-        let content = r#"import * as Icons from '@mui/icons-material';"#;
+        let content = r"import * as Icons from '@mui/icons-material';";
         let violations = check(content);
         assert_eq!(violations.len(), 1);
     }
 
     #[test]
     fn allows_specific_lodash_import() {
-        let content = r#"import { map, filter } from 'lodash-es';"#;
+        let content = r"import { map, filter } from 'lodash-es';";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_specific_mui_icon_import() {
-        let content = r#"import { Home, Settings } from '@mui/icons-material';"#;
+        let content = r"import { Home, Settings } from '@mui/icons-material';";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_date_fns_specific_import() {
-        let content = r#"import { format, parseISO } from 'date-fns';"#;
+        let content = r"import { format, parseISO } from 'date-fns';";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn allows_dayjs() {
-        let content = r#"import dayjs from 'dayjs';"#;
+        let content = r"import dayjs from 'dayjs';";
         assert!(check(content).is_empty());
     }
 
     #[test]
     fn ignores_comments() {
-        let content = r#"
+        let content = r"
             // import _ from 'lodash' - don't do this
             import { map } from 'lodash-es';
-        "#;
+        ";
         assert!(check(content).is_empty());
     }
 }
