@@ -1044,20 +1044,25 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
             self.in_security_named_fn = true;
         }
         let prev_target = self.in_direct_ssr_target;
-        // `export const getServerSideProps = async () => ...` form: the arrow is
-        // SSR-serialized only when bound at program scope (function_depth == 0).
+        // Program-scope arrow / function expression bindings that ADR-0012 names
+        // as SSR targets:
+        // - `export const getServerSideProps = async () => ...` (Pages Router)
+        // - any binding inside a top-level `'use server'` file (Server Action
+        //   module; the file-as-whole is server-bundled, so every program-scope
+        //   export is reachable as a Server Action target).
         if self.function_depth == 0
-            && matches!(
-                &decl.id,
-                BindingPattern::BindingIdentifier(id)
-                    if id.name == "getServerSideProps"
-            )
             && matches!(
                 &decl.init,
                 Some(Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_))
             )
         {
-            self.in_direct_ssr_target = true;
+            let is_gssp_binding = matches!(
+                &decl.id,
+                BindingPattern::BindingIdentifier(id) if id.name == "getServerSideProps"
+            );
+            if is_gssp_binding || self.has_top_level_use_server {
+                self.in_direct_ssr_target = true;
+            }
         }
         walk::walk_variable_declarator(self, decl);
         self.in_direct_ssr_target = prev_target;
@@ -3019,6 +3024,58 @@ mod tests {
             .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
             .collect();
         assert_eq!(bleeds.len(), 1, "deeply nested secret must flag: {v:?}");
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_arrow_use_server_action() {
+        let code = "'use server';\nexport const fetchUserSecrets = async (id) => { return { id, apiKey: process.env.STRIPE_SECRET_KEY }; };";
+        let v = check(code, "/src/app/actions.ts");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(
+            bleeds.len(),
+            1,
+            "arrow-form 'use server' action with secret env value must flag: {v:?}"
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_fires_on_concise_arrow_use_server_action() {
+        let code =
+            "'use server';\nexport const loadConfig = async () => ({ apiKey: process.env.STRIPE_SECRET_KEY });";
+        let v = check(code, "/src/app/actions.ts");
+        let bleeds: Vec<_> = v
+            .iter()
+            .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
+            .collect();
+        assert_eq!(
+            bleeds.len(),
+            1,
+            "concise-body arrow 'use server' action must flag: {v:?}"
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_safe_arrow_use_server_action() {
+        let code =
+            "'use server';\nexport const loadUser = async (id) => { return { id, name: 'alice' }; };";
+        let v = check(code, "/src/app/actions.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "arrow-form 'use server' action with safe properties is silent: {v:?}"
+        );
+    }
+
+    #[test]
+    fn ssr_secret_bleed_silent_on_helper_arrow_inside_use_server_arrow() {
+        let code = "'use server';\nexport const loadUser = async () => {\n  const inner = () => ({ password: 'p' });\n  return { name: 'alice' };\n};";
+        let v = check(code, "/src/app/actions.ts");
+        assert!(
+            v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+            "inner helper arrow return is not serialized to client: {v:?}"
+        );
     }
 
     fn assert_postmessage_fires(code: &str) {
