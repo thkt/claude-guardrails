@@ -2,8 +2,8 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionExpression, AssignmentExpression,
-    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, CallExpression,
-    ComputedMemberExpression, Expression, FormalParameters, Function, FunctionBody,
+    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, BlockStatement,
+    CallExpression, ComputedMemberExpression, Expression, FormalParameters, Function, FunctionBody,
     LogicalExpression, LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind,
     Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
@@ -747,16 +747,15 @@ impl SecurityVisitor<'_> {
     }
 
     fn check_onmessage_origin_missing(&mut self, expr: &AssignmentExpression<'_>) {
-        let AssignmentTarget::StaticMemberExpression(sme) = &expr.left else {
-            return;
+        let receiver_ok = match &expr.left {
+            AssignmentTarget::StaticMemberExpression(sme) => {
+                sme.property.name == "onmessage"
+                    && (ast::is_ident(&sme.object, "window") || ast::is_ident(&sme.object, "self"))
+            }
+            AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "onmessage",
+            _ => false,
         };
-        if sme.property.name != "onmessage" {
-            return;
-        }
-        if !matches!(
-            &sme.object,
-            Expression::Identifier(id) if matches!(id.name.as_str(), "window" | "self")
-        ) {
+        if !receiver_ok {
             return;
         }
         let Some((params, body)) = handler_signature_from_expression(&expr.right) else {
@@ -1061,10 +1060,9 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     }
 }
 
-/// postMessage handler が origin 検査経路を持つか判定する。
-/// - `BindingIdentifier(event)` → body 内で `event.origin` 系を参照しているか
-/// - `ObjectPattern({ origin, ... })` → 引数段階で origin を取り出している
-/// - その他 (ArrayPattern, RestElement 等) → 経路なし扱いで fire
+/// Identifier param は body 内で `event.origin` を参照しているか。
+/// ObjectPattern は param 段階で `origin` を取り出していれば検査経路ありとみなす。
+/// その他 (ArrayPattern, rest 等) は経路なし扱いで保守的に fire。
 fn handler_validates_origin(pat: &BindingPattern, body: &FunctionBody<'_>) -> bool {
     if let BindingPattern::BindingIdentifier(ident) = pat {
         return has_origin_reference(body, ident.name.as_str());
@@ -1154,6 +1152,17 @@ impl OriginReferenceFinder<'_> {
 }
 
 impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
+    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
+        if self.stop() {
+            return;
+        }
+        let prev_shadowed = self.shadowed;
+        walk::walk_block_statement(self, it);
+        if !self.found {
+            self.shadowed = prev_shadowed;
+        }
+    }
+
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
         if self.stop() {
             return;
@@ -3205,8 +3214,8 @@ mod tests {
         );
     }
 
-    // Issue letter for #137: handler signatures with no origin-check path
-    // (array destructure, rest pattern, etc.) fire conservatively.
+    // Handler signatures with no origin-check path (array destructure, rest
+    // pattern, etc.) fire conservatively: no recognized validation path.
     #[test]
     fn postmessage_origin_missing_fires_on_param_array_pattern() {
         assert_postmessage_fires(
@@ -3252,20 +3261,42 @@ mod tests {
         );
     }
 
-    // `globalThis.onmessage` is excluded by Issue letter (same scope as
-    // `globalThis.addEventListener`). Silent keeps the boundary consistent.
+    // Receiver allowlist is `window` / `self` / bare global only; `globalThis`
+    // is intentionally excluded so the boundary matches `addEventListener`.
     #[test]
     fn postmessage_origin_missing_silent_on_globalthis_onmessage() {
         assert_postmessage_silent("globalThis.onmessage = (event) => { handle(event.data); };");
     }
 
-    // Interim shadowing detection (Issue #137 modification 3). Inner `event`
-    // binding hides the handler param; the inner `event.origin` must not count.
-    // Full scope-aware walk is deferred to a follow-up issue.
+    // Interim shadowing detection: inner `event` binding hides the handler
+    // param, so the inner `event.origin` must not satisfy the origin check.
+    // Full scope-aware walk is deferred to a follow-up.
     #[test]
     fn postmessage_origin_missing_fires_on_shadowed_event_binding() {
         assert_postmessage_fires(
             "window.addEventListener('message', (event) => { const event = { origin: 'attacker' }; console.log(event.origin); });",
+        );
+    }
+
+    // Shadowing inside a nested block must not invalidate the outer origin
+    // check. Lexically scoped restoration on block exit prevents the
+    // false-positive that the flat shadow flag caused.
+    #[test]
+    fn postmessage_origin_missing_silent_on_shadowed_event_in_inner_block() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', (event) => { if (debug) { const event = { origin: 'local' }; console.log(event.origin); } if (event.origin !== 'https://x') return; handle(event.data); });",
+        );
+    }
+
+    #[test]
+    fn postmessage_origin_missing_fires_on_bare_onmessage_without_origin() {
+        assert_postmessage_fires("onmessage = (event) => { handle(event.data); };");
+    }
+
+    #[test]
+    fn postmessage_origin_missing_silent_on_bare_onmessage_with_origin_check() {
+        assert_postmessage_silent(
+            "onmessage = (event) => { if (event.origin !== 'https://x') return; handle(event.data); };",
         );
     }
 }
