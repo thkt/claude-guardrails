@@ -30,47 +30,114 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::LazyLock;
 
+/// rule_id catalog. 新規 rule_id を追加するときは:
+///
+/// - (a) ここに定数追加 + 単一 module から発火 → `REGISTERED_RULE_IDS` にも追加
+/// - (b) `ast_security` 内 / oxlint 委譲 / 別 path 発火 → `UNREGISTERED_RULE_IDS` に追加
+///   (各 entry に 1 行 comment 必須)
+///
+/// 整合性は `tests::rule_id_catalog_entries_match_allowlists` で gate される。
 pub(crate) mod rule_id {
-    pub const SENSITIVE_FILE: &str = "sensitive-file";
-    pub const ARCHITECTURE: &str = "architecture";
-    pub const NAMING_CONVENTION: &str = "naming-convention";
-    pub const TRANSACTION_BOUNDARY: &str = "transaction-boundary";
-    pub const SECURITY: &str = "security";
-    pub const CRYPTO_WEAK: &str = "crypto-weak";
-    pub const GENERATED_FILE: &str = "generated-file";
-    pub const TEST_LOCATION: &str = "test-location";
-    pub const DOM_ACCESS: &str = "dom-access";
-    pub const SYNC_IO: &str = "sync-io";
-    pub const BUNDLE_SIZE: &str = "bundle-size";
-    pub const TEST_ASSERTION: &str = "test-assertion";
-    pub const FLAKY_TEST: &str = "flaky-test";
-    pub const SENSITIVE_LOGGING: &str = "sensitive-logging";
-    pub const EVAL: &str = "eval";
-    pub const HARDCODED_SECRET: &str = "hardcoded-secret";
-    pub const HTTP_RESOURCE: &str = "http-resource";
-    pub const RAW_HTML: &str = "raw-html";
-    pub const OPEN_REDIRECT: &str = "open-redirect";
-    pub const ERR_STACK_EXPOSURE: &str = "err-stack-exposure";
-    pub const CHILD_PROCESS_INJECTION: &str = "child-process-injection";
-    pub const NO_USE_EFFECT: &str = "no-use-effect";
-    pub const NON_LITERAL_FS_PATH: &str = "non-literal-fs-path";
-    pub const BIDI_CHARACTERS: &str = "bidi-characters";
-    pub const UNSAFE_REGEX: &str = "unsafe-regex";
-    pub const NON_LITERAL_REQUIRE: &str = "non-literal-require";
-    pub const ENV_VAR_FALLBACK: &str = "env-var-fallback";
-    pub const DANGEROUS_INNER_HTML: &str = "dangerous-inner-html";
-    pub const MATH_RANDOM_INSECURE: &str = "math-random-insecure";
-    pub const COT_LEAKAGE_MARKER: &str = "cot-leakage-marker";
-    pub const PROTOTYPE_POLLUTION: &str = "prototype-pollution";
-    pub const SQLI_CONCAT: &str = "sqli-concat";
-    pub const CORS_WILDCARD: &str = "cors-wildcard";
-    pub const UNSAFE_HTML_INJECTION: &str = "unsafe-html-injection";
-    pub const SERVICE_WORKER_SCOPE_ROOT: &str = "service-worker-scope-root";
-    pub const JWT_CLIENT_DECODE: &str = "jwt-client-decode";
-    pub const CLIENT_ENV_PUBLIC_LEAK: &str = "client-env-public-leak";
-    pub const SSR_SECRET_BLEED: &str = "ssr-secret-bleed";
-    pub const POSTMESSAGE_ORIGIN_MISSING: &str = "postmessage-origin-missing";
+    /// 各 rule_id を `pub const` と `RULE_ID_CATALOG` (test 専用) に同時定義する macro。
+    macro_rules! define_rule_ids {
+        ( $( $name:ident = $value:literal ),* $(,)? ) => {
+            $( pub const $name: &str = $value; )*
+            #[cfg(test)]
+            pub(crate) const RULE_ID_CATALOG: &[&str] = &[ $( $name ),* ];
+        };
+    }
+
+    define_rule_ids! {
+        SENSITIVE_FILE = "sensitive-file",
+        ARCHITECTURE = "architecture",
+        NAMING_CONVENTION = "naming-convention",
+        TRANSACTION_BOUNDARY = "transaction-boundary",
+        SECURITY = "security",
+        CRYPTO_WEAK = "crypto-weak",
+        GENERATED_FILE = "generated-file",
+        TEST_LOCATION = "test-location",
+        DOM_ACCESS = "dom-access",
+        SYNC_IO = "sync-io",
+        BUNDLE_SIZE = "bundle-size",
+        TEST_ASSERTION = "test-assertion",
+        FLAKY_TEST = "flaky-test",
+        SENSITIVE_LOGGING = "sensitive-logging",
+        EVAL = "eval",
+        HARDCODED_SECRET = "hardcoded-secret",
+        HTTP_RESOURCE = "http-resource",
+        RAW_HTML = "raw-html",
+        OPEN_REDIRECT = "open-redirect",
+        ERR_STACK_EXPOSURE = "err-stack-exposure",
+        CHILD_PROCESS_INJECTION = "child-process-injection",
+        NO_USE_EFFECT = "no-use-effect",
+        NON_LITERAL_FS_PATH = "non-literal-fs-path",
+        BIDI_CHARACTERS = "bidi-characters",
+        UNSAFE_REGEX = "unsafe-regex",
+        NON_LITERAL_REQUIRE = "non-literal-require",
+        ENV_VAR_FALLBACK = "env-var-fallback",
+        DANGEROUS_INNER_HTML = "dangerous-inner-html",
+        MATH_RANDOM_INSECURE = "math-random-insecure",
+        COT_LEAKAGE_MARKER = "cot-leakage-marker",
+        PROTOTYPE_POLLUTION = "prototype-pollution",
+        SQLI_CONCAT = "sqli-concat",
+        CORS_WILDCARD = "cors-wildcard",
+        UNSAFE_HTML_INJECTION = "unsafe-html-injection",
+        SERVICE_WORKER_SCOPE_ROOT = "service-worker-scope-root",
+        JWT_CLIENT_DECODE = "jwt-client-decode",
+        CLIENT_ENV_PUBLIC_LEAK = "client-env-public-leak",
+        SSR_SECRET_BLEED = "ssr-secret-bleed",
+        POSTMESSAGE_ORIGIN_MISSING = "postmessage-origin-missing",
+    }
 }
+
+/// `security` module だけ 2 rule_id (SECURITY / DANGEROUS_INNER_HTML) emit する。
+#[cfg(test)]
+const REGISTERED_RULE_IDS: &[&str] = &[
+    rule_id::SENSITIVE_FILE,
+    rule_id::ARCHITECTURE,
+    rule_id::NAMING_CONVENTION,
+    rule_id::TRANSACTION_BOUNDARY,
+    rule_id::SECURITY,
+    rule_id::DANGEROUS_INNER_HTML,
+    rule_id::CRYPTO_WEAK,
+    rule_id::GENERATED_FILE,
+    rule_id::TEST_LOCATION,
+    rule_id::DOM_ACCESS,
+    rule_id::SYNC_IO,
+    rule_id::BUNDLE_SIZE,
+    rule_id::TEST_ASSERTION,
+    rule_id::FLAKY_TEST,
+    rule_id::SENSITIVE_LOGGING,
+    rule_id::HARDCODED_SECRET,
+    rule_id::HTTP_RESOURCE,
+    rule_id::RAW_HTML,
+    rule_id::COT_LEAKAGE_MARKER,
+    rule_id::SERVICE_WORKER_SCOPE_ROOT,
+    rule_id::JWT_CLIENT_DECODE,
+];
+
+/// `register_rules!` 経由で load されない rule_id の allowlist。emit 元を 1 行で明示する。
+#[cfg(test)]
+const UNREGISTERED_RULE_IDS: &[&str] = &[
+    rule_id::BIDI_CHARACTERS,            // ast_security::check_bidi
+    rule_id::CHILD_PROCESS_INJECTION,    // ast_security::check_child_process
+    rule_id::CLIENT_ENV_PUBLIC_LEAK,     // ast_security::check_client_env_public_leak
+    rule_id::ENV_VAR_FALLBACK,           // ast_security::check_env_var_fallback
+    rule_id::ERR_STACK_EXPOSURE,         // ast_security::check_err_stack
+    rule_id::MATH_RANDOM_INSECURE,       // ast_security::check_math_random_*
+    rule_id::NON_LITERAL_FS_PATH,        // ast_security::check_fs_path
+    rule_id::NON_LITERAL_REQUIRE,        // ast_security::check_non_literal_require
+    rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security::check_{postmessage,onmessage}_origin_missing
+    rule_id::PROTOTYPE_POLLUTION, // ast_security::check_{prototype_pollution,merge_pollution_sinks}
+    rule_id::SSR_SECRET_BLEED,    // ast_security::check_ssr_secret_*
+    rule_id::UNSAFE_HTML_INJECTION, // ast_security::check_{html_assignment,document_write}
+    rule_id::UNSAFE_REGEX,        // ast_security::check_unsafe_regex
+    rule_id::CORS_WILDCARD,       // main.rs から cors_wildcard::check_program を直接呼ぶ
+    rule_id::EVAL,                // ADR-0009 oxlint 委譲、Rust 側は eval::check_program
+    rule_id::NO_USE_EFFECT,       // main.rs から no_use_effect::check_program を直接呼ぶ
+    rule_id::OPEN_REDIRECT,       // main.rs から open_redirect::check_program を直接呼ぶ
+    rule_id::SQLI_CONCAT,         // main.rs から sqli_concat::check_program を直接呼ぶ
+];
 
 pub static RE_JS_FILE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
@@ -434,5 +501,43 @@ mod tests {
         config.rules.crypto_weak = false;
         let rules = load_rules(&config);
         assert_eq!(rules.len(), all_count - 2);
+    }
+
+    // --- rule_id catalog ---
+
+    #[test]
+    fn rule_id_catalog_entries_match_allowlists() {
+        use std::collections::HashSet;
+        let declared: HashSet<&str> = rule_id::RULE_ID_CATALOG.iter().copied().collect();
+        let registered: HashSet<&str> = REGISTERED_RULE_IDS.iter().copied().collect();
+        let unregistered: HashSet<&str> = UNREGISTERED_RULE_IDS.iter().copied().collect();
+
+        let covered: HashSet<&str> = registered.union(&unregistered).copied().collect();
+        let orphaned: Vec<&&str> = declared.difference(&covered).collect();
+        assert!(
+            orphaned.is_empty(),
+            "rule_id 定数が REGISTERED_RULE_IDS にも UNREGISTERED_RULE_IDS にも含まれていない: {:?}",
+            orphaned
+        );
+
+        let extra: Vec<&&str> = covered.difference(&declared).collect();
+        assert!(
+            extra.is_empty(),
+            "REGISTERED/UNREGISTERED に rule_id::RULE_ID_CATALOG にない entry: {:?}",
+            extra
+        );
+    }
+
+    #[test]
+    fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
+        use std::collections::HashSet;
+        let registered: HashSet<&str> = REGISTERED_RULE_IDS.iter().copied().collect();
+        let unregistered: HashSet<&str> = UNREGISTERED_RULE_IDS.iter().copied().collect();
+        let overlap: Vec<&&str> = registered.intersection(&unregistered).collect();
+        assert!(
+            overlap.is_empty(),
+            "rule_id が REGISTERED と UNREGISTERED の両方に登録されている: {:?}",
+            overlap
+        );
     }
 }
