@@ -8,19 +8,19 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`src/rules/mod.rs:75-103` は file_pattern 用の `LazyLock<Regex>` を 7 個提供する。
+`src/rules/mod.rs` は file_pattern 用の `LazyLock<Regex>` を 7 個提供する。
 
 | Pattern                       | 正規表現                                           | 用途                                          |
 | ----------------------------- | -------------------------------------------------- | --------------------------------------------- |
 | `RE_JS_FILE`                  | `\.(tsx?\|jsx?)$`                                  | JS/TS 全般                                    |
-| `RE_TEST_FILE`                | `\.(test\|spec)\.(tsx?\|jsx?)$`                    | テストファイル                                |
+| `RE_TEST_FILE`                | `\.(test\|spec)\.[jt]sx?$`                         | テストファイル                                |
 | `RE_ALL_FILES`                | `.`                                                | 全 path                                       |
 | `RE_REACT_FILE`               | `\.(tsx\|jsx)$`                                    | React/JSX                                     |
 | `RE_API_FILE`                 | `(^\|/)(app\|pages)/api/`                          | Next.js API endpoint                          |
-| `RE_API_OR_MIDDLEWARE_FILE`   | API + `middleware\.(tsx?\|jsx?)`                   | API + Next.js middleware                      |
-| `RE_API_OR_ROUTE_FILE`        | API + `app/**/route\.(tsx?\|jsx?)`                 | API + App Router route handler                |
+| `RE_API_OR_MIDDLEWARE_FILE`   | API + `middleware\.[jt]sx?`                        | API + Next.js middleware                      |
+| `RE_API_OR_ROUTE_FILE`        | API + `app/**/route\.[jt]sx?`                      | API + App Router route handler                |
 
-これに依存する rule が 7+ ある (`corsWildcard`, `transaction`, `child-process-injection`, `err-stack-exposure`, `non-literal-fs-path`, `non-literal-require`, 等)。`API_PREFIX_PAT = r"(^|/)(app|pages)/api/"` (`src/rules/mod.rs:87`) で Next.js convention に hardcode 結合している。
+これに依存する rule が 7+ ある (`corsWildcard`, `transaction`, `child-process-injection`, `err-stack-exposure`, `non-literal-fs-path`, `non-literal-require`, 等)。`API_PREFIX_PAT = r"(^|/)(app|pages)/api/"` で Next.js convention に hardcode 結合している。
 
 未文書化の load-bearing decision が 3 つある。
 
@@ -54,11 +54,12 @@ decision-makers: thkt
 
 本 ADR は次の境界を固定する。
 
-- `src/rules/mod.rs:75-103` の 7 `LazyLock<Regex>` pattern を server-side rule の shared pool とする
+- `src/rules/mod.rs` の 7 `LazyLock<Regex>` pattern (`RE_JS_FILE` / `RE_TEST_FILE` / `RE_ALL_FILES` / `RE_REACT_FILE` / `RE_API_FILE` / `RE_API_OR_MIDDLEWARE_FILE` / `RE_API_OR_ROUTE_FILE`) を server-side rule の shared pool とする
 - `API_PREFIX_PAT = r"(^|/)(app|pages)/api/"` は Next.js Pages Router + App Router API endpoint の convention に hardcode する。Express / NestJS / Hono の routes/ や controller pattern は **意図的に対象外**
 - `middleware.{ts,js}` (Next.js Edge / Node middleware) は API と同じ server-side scope に含める
 - App Router `app/**/route.ts` は `RE_API_OR_ROUTE_FILE` で API 扱いとする一方、SSR target rule (ADR-0012) では除外する。この二重扱いは意図的 (route handler は Response object 直接返却で client serialization なし)
-- 新規 server-side rule が必要とする file_pattern は **既存 7 pattern からの選択を優先**。新規 inline regex の追加は本 ADR の改訂を伴う
+- 新規 server-side rule が必要とする `file_pattern` (rule applicability 判定) は **既存 7 pattern からの選択を優先**。新規 inline `file_pattern` regex の追加は本 ADR の改訂を伴う
+- 本規約の対象は `Rule::file_pattern` (rule の発火 gate) **のみ**。rule 内部の content/path-matching 用 regex (例: `src/rules/generated_file.rs` の `\.generated\.[a-zA-Z]+$`、`src/rules/sensitive_file.rs` の `\.pem$`、`src/rules/http_resource.rs` の `RE_HTTP_URL`、`src/rules/transaction.rs` の `RE_WRITE_OPS`、`src/rules/raw_html.rs` の `RE_HTML_CONCAT` 等) は **本 ADR の scope 外**。これらの inline regex は rule のドメイン語彙そのもので、shared pool に集約する意味がない
 - 7 pattern は OUTCOME `Behavior` の「フロントエンドプロジェクト (UI / hook / util / CSS / SSR/SSG の server-side コードを含む)」のうち server-side 側を担う
 - Framework abstraction layer (Option B) は YAGNI、現状 caller 実需なし
 
@@ -74,7 +75,7 @@ decision-makers: thkt
 
 ### Confirmation
 
-`src/rules/mod.rs:384-410` の `re_api_file_rejects_near_miss_paths` test 等で各 pattern の境界 (positive / near-miss / negative) を assert する。
+`src/rules/mod.rs` の `re_api_file_rejects_near_miss_paths` test 等で各 pattern の境界 (positive / near-miss / negative) を assert する。
 
 新規 rule 追加 PR の review checklist:
 - 新 rule の file_pattern は 7 shared pool の lookup か?
@@ -119,9 +120,9 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/routes/users.t
 
 ### References
 
-- `src/rules/mod.rs:75-103` (shared pattern pool)
-- `src/rules/mod.rs:87` (`API_PREFIX_PAT`)
-- `src/rules/mod.rs:384-410` (pattern boundary tests)
+- `src/rules/mod.rs` shared pattern pool (`RE_JS_FILE` 〜 `RE_API_OR_ROUTE_FILE` の 7 const)
+- `src/rules/mod.rs` `API_PREFIX_PAT`
+- `src/rules/mod.rs` `re_api_file_rejects_near_miss_paths` 等 pattern boundary tests
 - `README.md` (per-rule scope 記述)
 - `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster X)
 - OUTCOME `.claude/OUTCOME.md` Non-goals 節 (独立 Node.js バックエンド除外)
@@ -132,6 +133,7 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/routes/users.t
 - Next.js が `app/api` / `pages/api` convention を変更
 - shared pool 内で 7 → 10+ に膨張、abstraction 必要性発生
 - ADR-0012 (SSR target scope) の framework 拡張に伴う本 ADR 改訂
+- 同一 `file_pattern` (gate) を必要とする新規 rule が見つかった場合、shared pool への abstraction を議論
 
 ### Related ADRs
 

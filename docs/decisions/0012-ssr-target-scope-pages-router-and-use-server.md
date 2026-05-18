@@ -10,7 +10,7 @@ decision-makers: thkt
 
 `ssr-secret-bleed` と `client-env-public-leak` の 2 rule は「サーバ側で構築した値がクライアントに serialize されるかどうか」を判定軸にする。判定には「現在の関数 / モジュールが SSR target か」を解決する必要がある。
 
-`src/ast_security.rs:364-384` の `is_ssr_target_function` および `src/ast_security.rs:284-322` の `check_program` は次の 3 trigger のみ SSR target として扱う。
+`src/ast_security.rs` の `is_ssr_target_function` および `check_program` は次の 3 trigger のみ SSR target として扱う。
 
 | Trigger                                       | 検出条件                                                                                     |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -27,7 +27,7 @@ decision-makers: thkt
 | Remix `loader` / `action`               | 現状 OUTCOME `Behavior` の対象範囲 (Next.js 中心) を超える                                                   |
 | SvelteKit `+page.server.ts` `load`      | 同上                                                                                                       |
 
-negative test (`src/ast_security.rs:2889-2898`) で `getStaticProps` 除外を assert する。
+negative test (`getStaticProps_is_not_in_scope_for_this_rule` in `src/ast_security.rs`) で `getStaticProps` 除外を assert する。
 
 Issue: 上記 trigger 限定および除外の判断は code と test のみに存在し、「なぜ App Router を含めないのか / Remix loader を含めないのか」の policy が記録されていない。新規 framework support 追加 PR で「Remix loader も SSR target に含めるべきでは」という review が周回する coordinate cost が見込まれる。
 
@@ -53,8 +53,8 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 
 本 ADR は次の境界を固定する。
 
-- `src/ast_security.rs:364-384` の `is_ssr_target_function` は上記 3 trigger に限定する
-- `getStaticProps` は SSG なので serialize 経路が異なり、本 ADR 対象外 (`src/ast_security.rs:2889-2898` で negative test 維持)
+- `src/ast_security.rs` の `is_ssr_target_function` は上記 3 trigger に限定する
+- `getStaticProps` は SSG なので serialize 経路が異なり、本 ADR 対象外 (`getStaticProps_is_not_in_scope_for_this_rule` test で negative 維持)
 - App Router `app/**/route.ts` の `GET` / `POST` 等 handler は Response object 直接返却で client serialization 経路を持たないため対象外
 - Remix `loader` / `action`、SvelteKit `+page.server.ts` `load` 等の他 framework は OUTCOME の Next.js 中心運用方針により現状対象外。framework support 追加時は本 ADR を改訂
 - 未 export の `getServerSideProps` も flag する (false positive 容認、false negative 抑制を優先)
@@ -71,7 +71,7 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 
 ### Confirmation
 
-`src/ast_security.rs:2889-2898` の `getStaticProps_is_not_in_scope_for_this_rule` test が現状の Pages Router 限定方針を assert する。framework coverage 拡張時は本 test を更新 + ADR 改訂をセットで実施する。
+`src/ast_security.rs` の `getStaticProps_is_not_in_scope_for_this_rule` test が現状の Pages Router 限定方針を assert する。framework coverage 拡張時は本 test を更新 + ADR 改訂をセットで実施する。
 
 `cargo test ssr_target` で SSR target 判定の test suite (3 trigger ごとの positive + negative) を実行可能。
 
@@ -104,10 +104,10 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 
 ### References
 
-- `src/ast_security.rs:284-322` (`check_program`)
-- `src/ast_security.rs:364-384` (`is_ssr_target_function`)
-- `src/ast_security.rs:1022-1037` (const-arrow form gate)
-- `src/ast_security.rs:2889-2898` (negative test for `getStaticProps`)
+- `src/ast_security.rs` `check_program`
+- `src/ast_security.rs` `is_ssr_target_function`
+- `src/ast_security.rs` `visit_variable_declarator` の const-arrow form gate (`function_depth == 0` + `getServerSideProps` binding 判定)
+- `src/ast_security.rs` `getStaticProps_is_not_in_scope_for_this_rule` test (negative for `getStaticProps`)
 - `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster O)
 - OUTCOME `.claude/OUTCOME.md` Behavior / Non-goals 節
 

@@ -8,14 +8,14 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`client-env-public-leak` rule (`src/ast_security.rs:537-559`) は `'use client'` 文脈で `process.env.X` の参照を検出し、X が「client bundle に embed されて良い public env」でない限り flag する。
+`client-env-public-leak` rule (`check_client_env_public_leak` in `src/ast_security.rs`) は `'use client'` 文脈で `process.env.X` の参照を検出し、X が「client bundle に embed されて良い public env」でない限り flag する。
 
 判定は二重免除機構で構成される。
 
-| 機構                                        | 場所                                  | 対象                                                     |
-| ------------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
-| `NEXT_PUBLIC_` prefix の `starts_with` 判定 | `src/ast_security.rs:547-549`         | Next.js 公式の client-exposed env naming convention      |
-| `CLIENT_ENV_ALLOW_LIST` 完全一致            | `src/ast_security.rs:31-34, 548`      | 長さ 1: `NODE_ENV` のみ (compile-time embed される定数)  |
+| 機構                                        | 場所                                                   | 対象                                                     |
+| ------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| `NEXT_PUBLIC_` prefix の `starts_with` 判定 | `NEXT_PUBLIC_PREFIX` const + `check_client_env_public_leak` の prefix check | Next.js 公式の client-exposed env naming convention      |
+| `CLIENT_ENV_ALLOW_LIST` 完全一致            | `CLIENT_ENV_ALLOW_LIST` const                          | 長さ 1: `NODE_ENV` のみ (compile-time embed される定数)  |
 
 ここで明示されていない 2 つの policy が code に潜在している。
 
@@ -103,9 +103,9 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/components/Com
 
 ### References
 
-- `src/ast_security.rs:31-34` (`CLIENT_ENV_ALLOW_LIST`)
-- `src/ast_security.rs:537-559` (`check_client_env_public_leak`)
-- `src/ast_security.rs:1159-1174` (`process_env_access_name_from_sme` exact shape)
+- `src/ast_security.rs` `CLIENT_ENV_ALLOW_LIST`
+- `src/ast_security.rs` `check_client_env_public_leak`
+- `src/ast_security.rs` `process_env_access_name_from_sme` (StaticMemberExpression exact shape)
 - `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster P)
 - OUTCOME `.claude/OUTCOME.md` Behavior 節
 
