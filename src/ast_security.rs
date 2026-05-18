@@ -319,6 +319,8 @@ fn has_use_client_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
         .any(|d| d.directive.as_str() == USE_CLIENT_DIRECTIVE)
 }
 
+// MAX_INPUT_SIZE (10 MB cap in main.rs) keeps `i` within u32::MAX, so the
+// `i as u32` casts below cannot truncate.
 #[allow(clippy::cast_possible_truncation)]
 pub fn check_bidi(content: &str, file_path: &str, line_offsets: &[usize]) -> Option<Violation> {
     for (i, ch) in content.char_indices() {
@@ -1442,6 +1444,10 @@ fn skip_char_class(bytes: &[u8], start: usize) -> Option<usize> {
     None
 }
 
+// Group-depth bookkeeping uses a fixed 16-slot stack. Patterns nested
+// deeper than 16 groups silently skip the inner-quantifier check (false
+// negative); real-world ReDoS patterns rarely exceed that depth, and
+// growing to a `Vec` only matters once a concrete pattern shows up.
 fn has_nested_quantifiers(pattern: &str) -> bool {
     let bytes = pattern.as_bytes();
     let mut group_has_quantifier = [false; 16];

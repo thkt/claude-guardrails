@@ -113,12 +113,17 @@ impl<'a> StringScanner<'a> {
             }
             match byte {
                 b'{' => {
+                    // SAFETY: outer `if !self.template_interp_depth.is_empty()`
+                    // guards entry; the stack stays non-empty until the matching
+                    // `}` pops it.
                     *self
                         .template_interp_depth
                         .last_mut()
                         .expect("in interpolation branch") += 1
                 }
                 b'}' => {
+                    // SAFETY: same invariant as the `{` arm — interpolation
+                    // depth stack is non-empty within this branch.
                     let depth = self
                         .template_interp_depth
                         .last_mut()
