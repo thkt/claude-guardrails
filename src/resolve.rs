@@ -1,7 +1,7 @@
 use crate::parse_json::parse_linter_json;
 use crate::tempfile_util::write_temp;
 use serde::de::DeserializeOwned;
-use std::env;
+use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
@@ -97,19 +97,31 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
     })
 }
 
-pub fn try_resolve_bin(name: &str, file_path: &str) -> Option<PathBuf> {
-    Path::new(file_path)
+/// Resolves a local `node_modules/.bin/<name>` near `file_path`.
+///
+/// When `project_root` is `Some`, the resolved bin must canonicalize inside
+/// that root or it is rejected. Canonicalize the bin, not `file_path`, because
+/// Write creates files that do not exist yet.
+///
+/// First-match-wins on the ancestor walk: a rejected closest bin falls through
+/// to the caller's fallback (e.g. `ensure_oxlint`) rather than continuing the
+/// walk. No PATH fallback — a globally installed `oxlint` could sit outside
+/// any project root. `None` disables the boundary and is reserved for tests
+/// over tempdirs.
+pub fn try_resolve_bin(
+    name: &str,
+    file_path: &str,
+    project_root: Option<&Path>,
+) -> Option<PathBuf> {
+    let canonical = Path::new(file_path)
         .ancestors()
         .skip(1) // skip the file itself, start from parent dir
         .map(|d| d.join("node_modules/.bin").join(name))
-        .find(|c| c.exists())
-        .or_else(|| {
-            env::var("PATH").ok().and_then(|path_var| {
-                env::split_paths(&path_var)
-                    .map(|dir| dir.join(name))
-                    .find(|candidate| candidate.exists())
-            })
-        })
+        .find_map(|c| fs::canonicalize(&c).ok())?;
+
+    project_root
+        .is_none_or(|root| canonical.starts_with(root))
+        .then_some(canonical)
 }
 
 pub fn run_linter_check<T: DeserializeOwned>(
@@ -181,8 +193,8 @@ mod tests {
         fs::write(&bin_path, "").unwrap();
 
         let file_path = tmp.path().join("src/app.ts");
-        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap());
-        assert_eq!(result, Some(bin_path));
+        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
+        assert_eq!(result, Some(fs::canonicalize(&bin_path).unwrap()));
     }
 
     #[test]
@@ -197,8 +209,8 @@ mod tests {
         fs::create_dir_all(&deep_dir).unwrap();
         let file_path = deep_dir.join("Button.tsx");
 
-        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap());
-        assert_eq!(result, Some(bin_path));
+        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
+        assert_eq!(result, Some(fs::canonicalize(&bin_path).unwrap()));
     }
 
     #[test]
@@ -206,7 +218,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let file_path = tmp.path().join("test.ts");
 
-        let result = try_resolve_bin("nonexistent_tool_xyz", file_path.to_str().unwrap());
+        let result = try_resolve_bin("nonexistent_tool_xyz", file_path.to_str().unwrap(), None);
         assert_eq!(result, None);
     }
 
@@ -223,7 +235,78 @@ mod tests {
         fs::write(nested_bin.join("oxlint"), "nested").unwrap();
 
         let file_path = tmp.path().join("packages/app/src/index.ts");
-        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap());
-        assert_eq!(result, Some(nested_bin.join("oxlint")));
+        let result = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
+        assert_eq!(
+            result,
+            Some(fs::canonicalize(nested_bin.join("oxlint")).unwrap())
+        );
+    }
+
+    // A planted `node_modules/.bin/<name>` outside the canonical project root
+    // must not be executed even when the hook runs on a file inside that tree
+    // (attacker-controlled scratch area, sibling repo, /tmp scaffold).
+    #[test]
+    fn rejects_bin_outside_project_root() {
+        let project_tmp = TempDir::new().unwrap();
+        let project_root = fs::canonicalize(project_tmp.path()).unwrap();
+
+        let attack_tmp = TempDir::new().unwrap();
+        let attack_bin_dir = attack_tmp.path().join("node_modules/.bin");
+        fs::create_dir_all(&attack_bin_dir).unwrap();
+        fs::write(attack_bin_dir.join("oxlint"), "#!/bin/sh\nexit 0\n").unwrap();
+
+        let file_path = attack_tmp.path().join("src/app.ts");
+        let result = try_resolve_bin(
+            "oxlint",
+            file_path.to_str().unwrap(),
+            Some(project_root.as_path()),
+        );
+        assert_eq!(
+            result, None,
+            "binary outside project_root must be rejected; got {result:?}"
+        );
+    }
+
+    // A sibling tempdir holding a planted oxlint must not leak in when
+    // file_path lives inside project_root proper — the ancestor walk never
+    // reaches the sibling tree.
+    #[test]
+    fn sibling_tree_bin_not_selected_when_file_inside_root() {
+        let project_tmp = TempDir::new().unwrap();
+        let project_root = fs::canonicalize(project_tmp.path()).unwrap();
+
+        let sibling_tmp = TempDir::new().unwrap();
+        let sibling_bin_dir = sibling_tmp.path().join("node_modules/.bin");
+        fs::create_dir_all(&sibling_bin_dir).unwrap();
+        fs::write(sibling_bin_dir.join("oxlint"), "").unwrap();
+
+        let file_path = project_root.join("src/app.ts");
+        let result = try_resolve_bin(
+            "oxlint",
+            file_path.to_str().unwrap(),
+            Some(project_root.as_path()),
+        );
+        assert_eq!(result, None);
+    }
+
+    // Legitimate `<project_root>/node_modules/.bin/` resolution still works
+    // once the boundary check is in place.
+    #[test]
+    fn accepts_bin_inside_project_root() {
+        let project_tmp = TempDir::new().unwrap();
+        let project_root = fs::canonicalize(project_tmp.path()).unwrap();
+
+        let bin_dir = project_root.join("node_modules/.bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let bin_path = bin_dir.join("oxlint");
+        fs::write(&bin_path, "").unwrap();
+
+        let file_path = project_root.join("src/app.ts");
+        let result = try_resolve_bin(
+            "oxlint",
+            file_path.to_str().unwrap(),
+            Some(project_root.as_path()),
+        );
+        assert_eq!(result, Some(fs::canonicalize(&bin_path).unwrap()));
     }
 }

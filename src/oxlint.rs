@@ -44,8 +44,8 @@ struct OxlintSpan {
     line: u32,
 }
 
-pub fn resolve(file_path: &str) -> Option<PathBuf> {
-    try_resolve_bin("oxlint", file_path).or_else(|| {
+pub fn resolve(file_path: &str, project_root: Option<&Path>) -> Option<PathBuf> {
+    try_resolve_bin("oxlint", file_path, project_root).or_else(|| {
         ensure_oxlint()
             .inspect_err(|e| eprintln!("guardrails: oxlint unavailable: {e}"))
             .ok()
