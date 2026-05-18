@@ -237,6 +237,8 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// Maps external linter severity strings to `Severity`. Caps at `High`;
+    /// `Critical` is reserved for in-house high-certainty patterns.
     pub fn from_linter_str(s: &str) -> Self {
         match s {
             "error" => Severity::High,

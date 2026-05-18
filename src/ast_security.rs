@@ -349,6 +349,7 @@ struct SecurityVisitor<'s> {
     in_direct_ssr_target: bool,
     function_depth: u32,
     in_security_named_fn: bool,
+    // File-level only; re-declarations in nested modules/components are out of scope.
     has_use_client: bool,
 }
 
@@ -507,6 +508,8 @@ impl SecurityVisitor<'_> {
         }
     }
 
+    // Flags only `process.env.X || "literal"`. Identifier-bound fallbacks are
+    // intentionally skipped so the violation message cannot double as a bypass hint.
     fn check_env_var_fallback(&mut self, expr: &LogicalExpression) {
         if !matches!(
             expr.operator,
