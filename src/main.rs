@@ -509,9 +509,13 @@ fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit
 
 // Fail-closed: reject oversized input rather than silently truncating.
 fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
+    parse_stdin_from(&mut io::stdin().lock(), json_mode)
+}
+
+fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput, i32> {
     let input_error_exit = i32::from(HookExitCode::InputError.code());
     let mut input_str = String::new();
-    io::stdin()
+    reader
         .take(MAX_INPUT_SIZE + 1)
         .read_to_string(&mut input_str)
         .map_err(|e| {
@@ -579,6 +583,14 @@ fn config_hint_action(git_root: &Path, config: &Config) -> HintAction {
     }
 }
 
+fn try_create_tools_json(path: &Path) -> io::Result<()> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(DEFAULT_TOOLS_JSON.as_bytes()))
+}
+
 fn show_config_hint(config: &Config) {
     let Some(ref git_root) = config.git_root else {
         return;
@@ -586,12 +598,7 @@ fn show_config_hint(config: &Config) {
     match config_hint_action(git_root, config) {
         HintAction::Skip => {}
         HintAction::CreateAndHint(path) => {
-            if let Err(e) = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .and_then(|mut f| f.write_all(DEFAULT_TOOLS_JSON.as_bytes()))
-            {
+            if let Err(e) = try_create_tools_json(&path) {
                 eprintln!("guardrails: failed to create {}: {}", path.display(), e);
             }
             eprintln!("{}", color::yellow(CONFIG_HINT_MESSAGE));
@@ -1431,6 +1438,59 @@ mod tests {
 
         let config = Config::default();
         assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);
+    }
+
+    #[test]
+    fn try_create_tools_json_writes_default_payload() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tools.json");
+        try_create_tools_json(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), DEFAULT_TOOLS_JSON);
+    }
+
+    #[test]
+    fn try_create_tools_json_errors_when_file_exists() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tools.json");
+        fs::write(&path, "existing").unwrap();
+        let err = try_create_tools_json(&path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "existing");
+    }
+
+    #[test]
+    fn parse_stdin_from_accepts_valid_write_payload() {
+        let json =
+            r#"{"tool_name":"Write","tool_input":{"file_path":"/x.ts","content":"const x=1;"}}"#;
+        let mut cursor = io::Cursor::new(json.as_bytes());
+        match parse_stdin_from(&mut cursor, false) {
+            Ok(parsed) => {
+                assert_eq!(parsed.tool_name, "Write");
+                assert_eq!(parsed.tool_input.file_path.as_deref(), Some("/x.ts"));
+                assert_eq!(parsed.tool_input.content.as_deref(), Some("const x=1;"));
+            }
+            Err(exit) => panic!("expected Ok, got Err({exit})"),
+        }
+    }
+
+    #[test]
+    fn parse_stdin_from_rejects_invalid_json() {
+        let mut cursor = io::Cursor::new(&b"not json"[..]);
+        match parse_stdin_from(&mut cursor, false) {
+            Err(exit) => assert_eq!(exit, i32::from(HookExitCode::InputError.code())),
+            Ok(_) => panic!("expected Err for invalid JSON"),
+        }
+    }
+
+    #[test]
+    fn parse_stdin_from_rejects_oversized_input() {
+        let size = usize::try_from(MAX_INPUT_SIZE + 1).unwrap();
+        let payload = vec![b'a'; size];
+        let mut cursor = io::Cursor::new(payload);
+        match parse_stdin_from(&mut cursor, false) {
+            Err(exit) => assert_eq!(exit, i32::from(HookExitCode::InputError.code())),
+            Ok(_) => panic!("expected Err for oversized input"),
+        }
     }
 
     #[test]
