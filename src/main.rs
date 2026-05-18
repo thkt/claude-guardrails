@@ -375,6 +375,17 @@ fn lint_with_ast(
     file_path: &str,
     config: &Config,
 ) -> (Vec<Violation>, Option<String>) {
+    // Single touch point for AST rule registration. Adding a new rule below
+    // also extends this guard, so callers cannot silently skip the parse.
+    if !config.rules.ast_security
+        && !config.rules.no_use_effect
+        && !config.rules.open_redirect
+        && !config.rules.eval
+        && !config.rules.sqli_concat
+        && !config.rules.cors_wildcard
+    {
+        return (Vec::new(), None);
+    }
     let result = ast::with_parsed_program(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
         if config.rules.ast_security {
@@ -461,13 +472,7 @@ fn collect_violations(
         violations.extend(rule.check(content, file_path, &lines));
     }
 
-    let has_ast_rules = config.rules.ast_security
-        || config.rules.no_use_effect
-        || config.rules.open_redirect
-        || config.rules.eval
-        || config.rules.sqli_concat
-        || config.rules.cors_wildcard;
-    if is_js && has_ast_rules {
+    if is_js {
         let (vs, note) = lint_with_ast(content, file_path, config);
         violations.extend(vs);
         if let Some(n) = note {
