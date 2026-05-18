@@ -343,12 +343,13 @@ fn lint_with_external_tools(
     content: &str,
     file_path: &str,
     config: &Config,
+    project_root: Option<&Path>,
 ) -> (Vec<Violation>, Option<String>) {
     if !config.rules.oxlint {
         return (Vec::new(), None);
     }
 
-    let Some(bin) = oxlint::resolve(file_path) else {
+    let Some(bin) = oxlint::resolve(file_path, project_root) else {
         if env::var_os("GUARDRAILS_VERBOSE").is_some() {
             eprintln!("guardrails: warning: oxlint not available for {file_path}");
         }
@@ -449,13 +450,14 @@ fn collect_violations(
     file_path: &str,
     content: &str,
     config: &Config,
+    project_root: Option<&Path>,
 ) -> (Vec<Violation>, Vec<String>) {
     let mut violations = Vec::new();
     let mut notes = Vec::new();
     let is_js = RE_JS_FILE.is_match(file_path);
 
     if is_js {
-        let (vs, note) = lint_with_external_tools(content, file_path, config);
+        let (vs, note) = lint_with_external_tools(content, file_path, config, project_root);
         violations.extend(vs);
         if let Some(n) = note {
             notes.push(n);
@@ -722,7 +724,8 @@ fn run_hook(json_mode: bool) -> i32 {
         return 0;
     }
 
-    let (violations, mut notes) = collect_violations(&file_path, &content, &config);
+    let (violations, mut notes) =
+        collect_violations(&file_path, &content, &config, project_root.as_deref());
     if let Some(reason) = degraded {
         let note = reason.note();
         eprintln!("guardrails: degraded: {note}");
@@ -1299,7 +1302,8 @@ mod tests {
     #[test]
     fn collect_violations_detects_eval() {
         let config = Config::default();
-        let (violations, _notes) = collect_violations("/src/app.ts", "eval(userInput);", &config);
+        let (violations, _notes) =
+            collect_violations("/src/app.ts", "eval(userInput);", &config, None);
         assert!(violations.iter().any(|v| v.rule == "eval"));
     }
 
@@ -1307,7 +1311,7 @@ mod tests {
     fn collect_violations_clean_code() {
         let config = Config::default();
         let (violations, _notes) =
-            collect_violations("/src/app.ts", "export function main() {}\n", &config);
+            collect_violations("/src/app.ts", "export function main() {}\n", &config, None);
         assert!(
             violations.is_empty(),
             "unexpected violations: {violations:?}"
@@ -1318,22 +1322,28 @@ mod tests {
     fn collect_violations_disabled_rule_skipped() {
         let mut config = Config::default();
         config.rules.eval = false;
-        let (violations, _notes) = collect_violations("/src/app.ts", "eval(userInput);", &config);
+        let (violations, _notes) =
+            collect_violations("/src/app.ts", "eval(userInput);", &config, None);
         assert!(!violations.iter().any(|v| v.rule == "eval"));
     }
 
     #[test]
     fn collect_violations_non_js_skips_js_rules() {
         let config = Config::default();
-        let (violations, _notes) = collect_violations("/README.md", "eval(userInput);", &config);
+        let (violations, _notes) =
+            collect_violations("/README.md", "eval(userInput);", &config, None);
         assert!(!violations.iter().any(|v| v.rule == "eval"));
     }
 
     #[test]
     fn collect_violations_ast_security_detects_injection() {
         let config = Config::default();
-        let (violations, _notes) =
-            collect_violations("/src/app/api/users/route.ts", "exec(userInput);", &config);
+        let (violations, _notes) = collect_violations(
+            "/src/app/api/users/route.ts",
+            "exec(userInput);",
+            &config,
+            None,
+        );
         assert!(violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));
@@ -1343,8 +1353,12 @@ mod tests {
     fn collect_violations_ast_security_disabled() {
         let mut config = Config::default();
         config.rules.ast_security = false;
-        let (violations, _notes) =
-            collect_violations("/src/app/api/users/route.ts", "exec(userInput);", &config);
+        let (violations, _notes) = collect_violations(
+            "/src/app/api/users/route.ts",
+            "exec(userInput);",
+            &config,
+            None,
+        );
         assert!(!violations
             .iter()
             .any(|v| v.rule == "child-process-injection"));
@@ -1357,6 +1371,7 @@ mod tests {
             "/src/App.tsx",
             "useEffect(() => { fetchData(); }, []);",
             &config,
+            None,
         );
         assert!(violations.iter().any(|v| v.rule == "no-use-effect"));
     }
@@ -1369,6 +1384,7 @@ mod tests {
             "/src/App.tsx",
             "useEffect(() => { fetchData(); }, []);",
             &config,
+            None,
         );
         assert!(!violations.iter().any(|v| v.rule == "no-use-effect"));
     }
