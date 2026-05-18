@@ -36,9 +36,9 @@ use std::sync::LazyLock;
 /// - (b) `ast_security` 内 / oxlint 委譲 / 別 path 発火 → `UNREGISTERED_RULE_IDS` に追加
 ///   (各 entry に 1 行 comment 必須)
 ///
-/// 整合性は `tests::rule_id_catalog_is_fully_covered` で gate される。
+/// 整合性は `tests::rule_id_catalog_entries_match_allowlists` で gate される。
 pub(crate) mod rule_id {
-    /// 39 rule_id を const と `RULE_ID_CATALOG` (test 専用) の両方に同時定義する macro。
+    /// 各 rule_id を `pub const` と `RULE_ID_CATALOG` (test 専用) に同時定義する macro。
     macro_rules! define_rule_ids {
         ( $( $name:ident = $value:literal ),* $(,)? ) => {
             $( pub const $name: &str = $value; )*
@@ -90,7 +90,6 @@ pub(crate) mod rule_id {
     }
 }
 
-/// `register_rules!` で load される module から emit される rule_id。
 /// `security` module だけ 2 rule_id (SECURITY / DANGEROUS_INNER_HTML) emit する。
 #[cfg(test)]
 const REGISTERED_RULE_IDS: &[&str] = &[
@@ -117,28 +116,27 @@ const REGISTERED_RULE_IDS: &[&str] = &[
     rule_id::JWT_CLIENT_DECODE,
 ];
 
-/// `register_rules!` で load されないが、別 path で発火する rule_id の allowlist。
-/// 新規追加時は emit 元 (ast_security / 個別 module / oxlint 委譲) を必ず注釈する。
+/// `register_rules!` 経由で load されない rule_id の allowlist。emit 元を 1 行で明示する。
 #[cfg(test)]
 const UNREGISTERED_RULE_IDS: &[&str] = &[
-    rule_id::BIDI_CHARACTERS,            // ast_security: check_bidi
-    rule_id::CHILD_PROCESS_INJECTION,    // ast_security
-    rule_id::CLIENT_ENV_PUBLIC_LEAK,     // ast_security
-    rule_id::ENV_VAR_FALLBACK,           // ast_security
-    rule_id::ERR_STACK_EXPOSURE,         // ast_security
-    rule_id::MATH_RANDOM_INSECURE,       // ast_security
-    rule_id::NON_LITERAL_FS_PATH,        // ast_security
-    rule_id::NON_LITERAL_REQUIRE,        // ast_security
-    rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security
-    rule_id::PROTOTYPE_POLLUTION,        // ast_security
-    rule_id::SSR_SECRET_BLEED,           // ast_security
-    rule_id::UNSAFE_HTML_INJECTION,      // ast_security
-    rule_id::UNSAFE_REGEX,               // ast_security
-    rule_id::CORS_WILDCARD,              // src/rules/cors_wildcard, ast_security から経由
-    rule_id::EVAL,                       // ADR-0009 oxlint 委譲、Rust 側でも src/rules/eval が定義
-    rule_id::NO_USE_EFFECT,              // src/rules/no_use_effect (register_rules! 外、別 path)
-    rule_id::OPEN_REDIRECT,              // src/rules/open_redirect (register_rules! 外、別 path)
-    rule_id::SQLI_CONCAT,                // src/rules/sqli_concat (register_rules! 外、別 path)
+    rule_id::BIDI_CHARACTERS,            // ast_security::check_bidi
+    rule_id::CHILD_PROCESS_INJECTION,    // ast_security::check_child_process
+    rule_id::CLIENT_ENV_PUBLIC_LEAK,     // ast_security::check_client_env_public_leak
+    rule_id::ENV_VAR_FALLBACK,           // ast_security::check_env_var_fallback
+    rule_id::ERR_STACK_EXPOSURE,         // ast_security::check_err_stack
+    rule_id::MATH_RANDOM_INSECURE,       // ast_security::check_math_random_*
+    rule_id::NON_LITERAL_FS_PATH,        // ast_security::check_fs_path
+    rule_id::NON_LITERAL_REQUIRE,        // ast_security::check_non_literal_require
+    rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security::check_{postmessage,onmessage}_origin_missing
+    rule_id::PROTOTYPE_POLLUTION, // ast_security::check_{prototype_pollution,merge_pollution_sinks}
+    rule_id::SSR_SECRET_BLEED,    // ast_security::check_ssr_secret_*
+    rule_id::UNSAFE_HTML_INJECTION, // ast_security::check_{html_assignment,document_write}
+    rule_id::UNSAFE_REGEX,        // ast_security::check_unsafe_regex
+    rule_id::CORS_WILDCARD,       // main.rs から cors_wildcard::check_program を直接呼ぶ
+    rule_id::EVAL,                // ADR-0009 oxlint 委譲、Rust 側は eval::check_program
+    rule_id::NO_USE_EFFECT,       // main.rs から no_use_effect::check_program を直接呼ぶ
+    rule_id::OPEN_REDIRECT,       // main.rs から open_redirect::check_program を直接呼ぶ
+    rule_id::SQLI_CONCAT,         // main.rs から sqli_concat::check_program を直接呼ぶ
 ];
 
 pub static RE_JS_FILE: LazyLock<Regex> =
@@ -508,7 +506,7 @@ mod tests {
     // --- rule_id catalog ---
 
     #[test]
-    fn rule_id_catalog_is_fully_covered() {
+    fn rule_id_catalog_entries_match_allowlists() {
         use std::collections::HashSet;
         let declared: HashSet<&str> = rule_id::RULE_ID_CATALOG.iter().copied().collect();
         let registered: HashSet<&str> = REGISTERED_RULE_IDS.iter().copied().collect();
