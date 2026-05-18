@@ -270,8 +270,14 @@ jobs:
           mkdir -p "$STAGE/$TOOL/bin"
           find /tmp/artifacts -name '*.tar.gz' ! -path '*windows*' -exec cp {} "$STAGE/$TOOL/bin/" \;
 
+          # SHA-256 manifest so downstream consumers can verify tarball
+          # integrity against a tampered binaries branch.
+          (cd "$STAGE/$TOOL/bin" && sha256sum ./*.tar.gz > checksums.txt)
+
           echo "--- Staged content ---"
           find "$STAGE" -type f | sort
+          echo "--- checksums.txt ---"
+          cat "$STAGE/$TOOL/bin/checksums.txt"
 
       - name: Force-push binaries branch
         env:
