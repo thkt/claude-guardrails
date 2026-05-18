@@ -27,15 +27,15 @@ pub fn rule() -> Rule {
                 return Vec::new();
             }
 
-            let (write_count, first_write_line) = lines
-                .iter()
-                .filter(|(_, line)| RE_WRITE_OPS.is_match(line))
-                .fold((0usize, None::<u32>), |(count, first), (n, _)| {
-                    (count + 1, first.or(Some(*n)))
-                });
+            let mut writes = lines.iter().filter(|(_, line)| RE_WRITE_OPS.is_match(line));
+            let Some((first, _)) = writes.next() else {
+                return Vec::new();
+            };
+            let write_count = 1 + writes.count();
             if write_count < 2 {
                 return Vec::new();
             }
+            let first_write_line = Some(*first);
 
             if find_match_in_lines(lines, &RE_TX_BOUNDARY).is_some() {
                 return Vec::new();

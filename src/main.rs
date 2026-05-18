@@ -209,13 +209,8 @@ fn join_new_strings(edits: &[EditItem]) -> String {
     edits
         .iter()
         .filter_map(|e| e.new_string.as_deref())
-        .fold(String::new(), |mut acc, s| {
-            if !acc.is_empty() {
-                acc.push('\n');
-            }
-            acc.push_str(s);
-            acc
-        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn apply_edit(
@@ -377,8 +372,10 @@ fn lint_with_ast(
     file_path: &str,
     config: &Config,
 ) -> (Vec<Violation>, Option<String>) {
-    // Single touch point for AST rule registration. Adding a new rule below
-    // also extends this guard, so callers cannot silently skip the parse.
+    // Skip the parse when every AST-driven rule is disabled. The flag list
+    // here must stay in lockstep with the per-rule dispatch arms below; a
+    // missing rule on either side reintroduces the drift that motivated
+    // removing the outer `has_ast_rules` guard.
     if !config.rules.ast_security
         && !config.rules.no_use_effect
         && !config.rules.open_redirect
@@ -854,6 +851,34 @@ mod tests {
         };
         let (_, content, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "line1\nline2");
+    }
+
+    #[test]
+    fn multi_edit_join_preserves_separator_before_empty_string() {
+        // Regression: the fold-based join silently dropped the leading
+        // separator when the first edit's new_string was empty, shifting
+        // line offsets in downstream snippet analysis.
+        let input = ToolInput {
+            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_input: ToolInputData {
+                file_path: Some("/nonexistent/path.ts".to_owned()),
+                edits: Some(vec![
+                    EditItem {
+                        old_string: Some("foo".to_owned()),
+                        new_string: Some(String::new()),
+                        ..EditItem::default()
+                    },
+                    EditItem {
+                        old_string: Some("bar".to_owned()),
+                        new_string: Some("kept".to_owned()),
+                        ..EditItem::default()
+                    },
+                ]),
+                ..ToolInputData::default()
+            },
+        };
+        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        assert_eq!(content, "\nkept");
     }
 
     #[test]
