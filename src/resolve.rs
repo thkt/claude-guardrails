@@ -99,36 +99,29 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
 
 /// Resolves a local `node_modules/.bin/<name>` near `file_path`.
 ///
-/// When `project_root` is `Some`, the resolved binary is canonicalized and
-/// rejected unless it lives inside that root. This blocks attacker-controlled
-/// trees (sibling repos, scratch dirs) from supplying their own `oxlint`.
-/// Canonicalization happens on the resolved bin rather than `file_path` so the
-/// Write-tool's new-file case (file path does not exist yet) still resolves;
-/// symlink redirects from the bin (e.g. pnpm's `.bin/` → `.pnpm/store`) are
-/// still followed and stay safe as long as the canonical target remains inside
-/// the root.
+/// When `project_root` is `Some`, the resolved bin must canonicalize inside
+/// that root or it is rejected. Canonicalize the bin, not `file_path`, because
+/// Write creates files that do not exist yet.
 ///
-/// Resolution is first-match-wins on the ancestor walk; a rejected closest bin
-/// falls through to the caller's fallback (e.g. `ensure_oxlint`) rather than
-/// continuing the walk. PATH lookup is intentionally absent so a globally
-/// installed `oxlint` cannot bypass the boundary either. `None` disables the
-/// boundary and is reserved for tests over tempdirs.
+/// First-match-wins on the ancestor walk: a rejected closest bin falls through
+/// to the caller's fallback (e.g. `ensure_oxlint`) rather than continuing the
+/// walk. No PATH fallback — a globally installed `oxlint` could sit outside
+/// any project root. `None` disables the boundary and is reserved for tests
+/// over tempdirs.
 pub fn try_resolve_bin(
     name: &str,
     file_path: &str,
     project_root: Option<&Path>,
 ) -> Option<PathBuf> {
-    let candidate = Path::new(file_path)
+    let canonical = Path::new(file_path)
         .ancestors()
         .skip(1) // skip the file itself, start from parent dir
         .map(|d| d.join("node_modules/.bin").join(name))
-        .find(|c| c.exists())?;
+        .find_map(|c| fs::canonicalize(&c).ok())?;
 
-    let canonical = fs::canonicalize(&candidate).ok()?;
-    match project_root {
-        Some(root) => canonical.starts_with(root).then_some(canonical),
-        None => Some(canonical),
-    }
+    project_root
+        .is_none_or(|root| canonical.starts_with(root))
+        .then_some(canonical)
 }
 
 pub fn run_linter_check<T: DeserializeOwned>(
@@ -249,10 +242,9 @@ mod tests {
         );
     }
 
-    // Regression for Issue #150: a `node_modules/.bin/<name>` sitting in a tree
-    // outside the canonical project root must not be executed, even when the
-    // hook is invoked on a file inside that tree (attacker-controlled scratch
-    // area, sibling repo, /tmp scaffold).
+    // A planted `node_modules/.bin/<name>` outside the canonical project root
+    // must not be executed even when the hook runs on a file inside that tree
+    // (attacker-controlled scratch area, sibling repo, /tmp scaffold).
     #[test]
     fn rejects_bin_outside_project_root() {
         let project_tmp = TempDir::new().unwrap();
@@ -275,15 +267,14 @@ mod tests {
         );
     }
 
-    // Regression for Issue #150: a sibling tempdir containing a planted oxlint
-    // must not leak in when the file_path lives inside project_root proper.
+    // A sibling tempdir holding a planted oxlint must not leak in when
+    // file_path lives inside project_root proper — the ancestor walk never
+    // reaches the sibling tree.
     #[test]
     fn sibling_tree_bin_not_selected_when_file_inside_root() {
         let project_tmp = TempDir::new().unwrap();
         let project_root = fs::canonicalize(project_tmp.path()).unwrap();
 
-        // sibling tempdir holds the planted binary, but file_path is inside
-        // project_root, so ancestor walk never reaches the sibling tree.
         let sibling_tmp = TempDir::new().unwrap();
         let sibling_bin_dir = sibling_tmp.path().join("node_modules/.bin");
         fs::create_dir_all(&sibling_bin_dir).unwrap();
@@ -298,8 +289,8 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // Regression for Issue #150: legitimate `<project_root>/node_modules/.bin/`
-    // resolution still works once the boundary check is in place.
+    // Legitimate `<project_root>/node_modules/.bin/` resolution still works
+    // once the boundary check is in place.
     #[test]
     fn accepts_bin_inside_project_root() {
         let project_tmp = TempDir::new().unwrap();
