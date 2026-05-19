@@ -135,7 +135,7 @@ guardrails enables these oxlint rules via `--deny` (off by default in oxlint, im
 | `eslint/no-console`                | AI leaves debug `console.log`                |
 | `eslint/no-new-func`               | AI uses `new Function(...)` for dynamic code |
 
-> **Note:** `new Function(...)` is flagged twice — by `eslint/no-new-func` (oxlint, surfaced as High because the rule is on the `--deny` list) and by the custom `eval` rule (High). The duplication is intentional: oxlint catches the syntactic pattern, the custom rule adds a guardrails-specific fix message. stderr shows the oxlint diagnostic first, then the custom rule output.
+> **Note:** `new Function(...)` triggers both oxlint's `eslint/no-new-func` (High via `--deny`) and the custom `eval` rule (High), so the agent reads the guardrails-specific fix message even after oxlint already fired. stderr shows oxlint first.
 
 Customize via `oxlint.deny` / `oxlint.allow` in config (see below).
 

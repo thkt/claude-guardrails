@@ -137,7 +137,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `eslint/no-console`                | AIがデバッグ用 `console.log` を残す             |
 | `eslint/no-new-func`               | AIが `new Function(...)` で動的にコード生成する |
 
-> **注:** `new Function(...)` は `eslint/no-new-func`（oxlint。`--deny` リスト経由で High として浮上）とカスタム `eval` ルール（High）の両方で検出されます。重複は意図的: oxlint は構文パターンを、カスタムルールは guardrails 固有の fix メッセージを返します。stderr には oxlint の出力 → カスタムルールの出力の順で並びます。
+> **注:** `new Function(...)` は oxlint の `eslint/no-new-func`（`--deny` 経由で High）とカスタム `eval` ルール（High）の両方で検出されます。これにより oxlint の diagnostic の後にも guardrails 固有の fix メッセージがエージェントに届きます。stderr の順は oxlint が先。
 
 `oxlint.deny` / `oxlint.allow` でカスタマイズ可能です（設定セクション参照）。
 
@@ -162,7 +162,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `sqliConcat`            | High     | テンプレートリテラル/文字列結合で組み立てた SQL を検出                          | データベースを使用しないプロジェクト                      |
 | `httpResource`          | Medium   | HTTP（非 HTTPS）リソース URL                                                    | 開発専用の設定                                            |
 | `corsWildcard`          | Medium   | CORS ワイルドカード origin (`cors({ origin: '*' })`、`Access-Control-Allow-Origin: *`) | Web 以外のプロジェクト、社内 API 専用              |
-| `transaction`           | Medium   | トランザクションラッパーなしの複数書き込み。スコープは `usecases/` / `use-cases/` / `application/` / `services/` / `domain/` / `handlers/` / `app/` / `server/` ディレクトリと `app/**/route.{ts,js}` セグメント | データベースを使用しないプロジェクト                      |
+| `transaction`           | Medium   | トランザクションラッパーなしの複数書き込み。スコープは `usecases/`、`use-cases/`、`application/`、`services/`、`domain/`、`handlers/`、`app/`、`server/` ディレクトリと `app/**/route.{ts,js}` セグメント | データベースを使用しないプロジェクト                      |
 | `domAccess`             | Medium   | React（.tsx/.jsx）での直接 DOM 操作                                             | React 以外のプロジェクト、またはバニラ JS/TS              |
 | `syncIo`                | Medium   | readFileSync、writeFileSync（イベントループをブロック）                         | CLI ツール、ビルドスクリプト、同期のみのコンテキスト      |
 | `bundleSize`            | Medium   | lodash/moment のフルインポート                                                  | バックエンド/Node.js（バンドルサイズの懸念なし）          |
@@ -202,8 +202,8 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `math-random-insecure`    | Mixed  | トークン/ID/シークレット用途の `Math.random()`。用法が確定する場合（`toString(36)` イディオム / 暗号 API 引数）は High、命名ヒューリスティック（security 系の変数名・関数名、`toString` 他基数）止まりは Medium。詳細は [ADR-0003](docs/decisions/0003-math-random-severity-policy.md) |
 | `unsafe-html-injection`   | Mixed  | `innerHTML`（High）/ `outerHTML`（Medium）/ `document.write[ln]`（High）への非リテラル代入。詳細は [ADR-0008](docs/decisions/0008-unsafe-html-injection-rule-id-separation.md) |
 | `client-env-public-leak`  | High   | `'use client'` モジュール内での `process.env.X` 参照（`NEXT_PUBLIC_*` および allow-list は除外）。Next.js によりブラウザにバンドルされる                                              |
-| `ssr-secret-bleed`        | High   | SSR の戻り値経由でサーバー専用シークレットがブラウザに漏洩するのを防ぐ。`getServerSideProps` や `'use server'` Server Action が返す secret 名 (`apiKey`、`token`…) や `process.env.*` を flag。これらは Next.js がクライアントペイロードへシリアライズする |
-| `postmessage-origin-missing` | High | `window.addEventListener('message', handler)` のインラインハンドラが `event.origin` を読まない場合。origin チェックなしでは任意の sender からのクロスオリジン postMessage を受け入れてしまう。外部ハンドラ参照やパラメータ側 destructure は 1-file static analysis の範囲外 |
+| `ssr-secret-bleed`        | High   | `getServerSideProps` や `'use server'` Server Action が返す secret 名 (`apiKey`、`token`…) や `process.env.*` を flag。これらは Next.js がクライアントペイロードへシリアライズする |
+| `postmessage-origin-missing` | High   | `window.addEventListener('message', handler)` のインラインハンドラが `event.origin` を読まない場合。origin チェックなしでは任意の sender からのクロスオリジン postMessage を受け入れてしまう。外部ハンドラ参照やパラメータ側 destructure は 1-file static analysis の範囲外 |
 
 ## サブコマンド
 
