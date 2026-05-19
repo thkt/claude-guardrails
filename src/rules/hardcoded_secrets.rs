@@ -63,46 +63,43 @@ static SECRET_PATTERNS: [SecretPattern; 4] = [
     },
 ];
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_ALL_FILES.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for &(line_num, line) in lines {
-                let is_test_line = RE_TEST_PREFIX.is_match(line);
-                for sp in &SECRET_PATTERNS {
-                    if sp.apply_test_exclusion && is_test_line {
-                        continue;
-                    }
-                    if sp.pattern.is_match(line) {
-                        violations.push(Violation {
-                            rule: super::rule_id::HARDCODED_SECRET.to_owned(),
-                            severity: Severity::Critical,
-                            fix: sp.message.to_owned(),
-                            file: file_path.to_owned(),
-                            line: Some(line_num),
-                        });
-                        break;
-                    }
+        for &(line_num, line) in lines {
+            let is_test_line = RE_TEST_PREFIX.is_match(line);
+            for sp in &SECRET_PATTERNS {
+                if sp.apply_test_exclusion && is_test_line {
+                    continue;
+                }
+                if sp.pattern.is_match(line) {
+                    violations.push(Violation {
+                        rule: super::rule_id::HARDCODED_SECRET.to_owned(),
+                        severity: Severity::Critical,
+                        fix: sp.message.to_owned(),
+                        file: file_path.to_owned(),
+                        line: Some(line_num),
+                    });
+                    break;
                 }
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match(path) {
+        if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

@@ -13,37 +13,35 @@ static TEST_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
-            if !RE_SRC_DIR.is_match(file_path) {
-                return Vec::new();
-            }
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_ALL_FILES.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+        if !RE_SRC_DIR.is_match(file_path) {
+            return Vec::new();
+        }
 
-            for pattern in TEST_PATTERNS.iter() {
-                if pattern.is_match(file_path) {
-                    return vec![Violation {
-                        rule: super::rule_id::TEST_LOCATION.to_owned(),
-                        severity: Severity::Medium,
-                        fix: "Test files should be in tests/ or __tests__/ directory outside src/"
-                            .to_owned(),
-                        file: file_path.to_owned(),
-                        line: None,
-                    }];
-                }
+        for pattern in TEST_PATTERNS.iter() {
+            if pattern.is_match(file_path) {
+                return vec![Violation {
+                    rule: super::rule_id::TEST_LOCATION.to_owned(),
+                    severity: Severity::Medium,
+                    fix: "Test files should be in tests/ or __tests__/ directory outside src/"
+                        .to_owned(),
+                    file: file_path.to_owned(),
+                    line: None,
+                }];
             }
-            Vec::new()
-        }),
-    }
-}
+        }
+        Vec::new()
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(path: &str) -> Vec<Violation> {
-        rule().check("", path, &[])
+        RULE.check("", path, &[])
     }
 
     #[test]

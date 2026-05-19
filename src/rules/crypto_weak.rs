@@ -53,38 +53,36 @@ static WEAK_CRYPTO: LazyLock<[WeakCrypto; 4]> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for crypto in WEAK_CRYPTO.iter() {
-                if let Some(line_num) = find_match_in_lines(lines, crypto.pattern) {
-                    violations.push(Violation {
-                        rule: super::rule_id::CRYPTO_WEAK.to_owned(),
-                        severity: Severity::High,
-                        fix: format!(
-                            "{} is cryptographically weak. {}",
-                            crypto.algorithm, crypto.suggestion
-                        ),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
+        for crypto in WEAK_CRYPTO.iter() {
+            if let Some(line_num) = find_match_in_lines(lines, crypto.pattern) {
+                violations.push(Violation {
+                    rule: super::rule_id::CRYPTO_WEAK.to_owned(),
+                    severity: Severity::High,
+                    fix: format!(
+                        "{} is cryptographically weak. {}",
+                        crypto.algorithm, crypto.suggestion
+                    ),
+                    file: file_path.to_owned(),
+                    line: Some(line_num),
+                });
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(
+        RULE.check(
             content,
             "/src/utils/hash.ts",
             &super::super::non_comment_lines(content),

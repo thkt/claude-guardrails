@@ -52,42 +52,39 @@ static DOM_ACCESS: LazyLock<[DomAccess; 5]> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_REACT_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_REACT_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for access in DOM_ACCESS.iter() {
-                if let Some(line_num) = find_match_in_lines(lines, access.pattern) {
-                    violations.push(Violation {
-                        rule: super::rule_id::DOM_ACCESS.to_owned(),
-                        severity: Severity::Medium,
-                        fix: format!(
-                            "Avoid {} in React. Use useRef or React state instead.",
-                            access.method
-                        ),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
+        for access in DOM_ACCESS.iter() {
+            if let Some(line_num) = find_match_in_lines(lines, access.pattern) {
+                violations.push(Violation {
+                    rule: super::rule_id::DOM_ACCESS.to_owned(),
+                    severity: Severity::Medium,
+                    fix: format!(
+                        "Avoid {} in React. Use useRef or React state instead.",
+                        access.method
+                    ),
+                    file: file_path.to_owned(),
+                    line: Some(line_num),
+                });
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match(path) {
+        if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

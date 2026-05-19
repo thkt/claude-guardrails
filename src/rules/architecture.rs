@@ -47,38 +47,36 @@ static LAYER_VIOLATIONS: LazyLock<[LayerViolation; 3]> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut result = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut result = Vec::new();
 
-            for v in LAYER_VIOLATIONS.iter() {
-                if !v.from_pattern.is_match(file_path) {
-                    continue;
-                }
-                if let Some(line_num) = find_match_in_lines(lines, v.importing) {
-                    result.push(Violation {
-                        rule: super::rule_id::ARCHITECTURE.to_owned(),
-                        severity: Severity::High,
-                        fix: v.fix.to_owned(),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
+        for v in LAYER_VIOLATIONS.iter() {
+            if !v.from_pattern.is_match(file_path) {
+                continue;
             }
+            if let Some(line_num) = find_match_in_lines(lines, v.importing) {
+                result.push(Violation {
+                    rule: super::rule_id::ARCHITECTURE.to_owned(),
+                    severity: Severity::High,
+                    fix: v.fix.to_owned(),
+                    file: file_path.to_owned(),
+                    line: Some(line_num),
+                });
+            }
+        }
 
-            result
-        }),
-    }
-}
+        result
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

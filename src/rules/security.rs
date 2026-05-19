@@ -77,40 +77,38 @@ static SECURITY_ISSUES: [SecurityIssue; 6] = [
     },
 ];
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_ALL_FILES.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for issue in &SECURITY_ISSUES {
-                if !issue.file_pattern.is_match(file_path) {
-                    continue;
-                }
-                for &(line_num, line) in lines {
-                    if issue.pattern.is_match(line) {
-                        violations.push(Violation {
-                            rule: issue.rule_id.to_owned(),
-                            severity: issue.severity,
-                            fix: issue.fix.to_owned(),
-                            file: file_path.to_owned(),
-                            line: Some(line_num),
-                        });
-                    }
+        for issue in &SECURITY_ISSUES {
+            if !issue.file_pattern.is_match(file_path) {
+                continue;
+            }
+            for &(line_num, line) in lines {
+                if issue.pattern.is_match(line) {
+                    violations.push(Violation {
+                        rule: issue.rule_id.to_owned(),
+                        severity: issue.severity,
+                        fix: issue.fix.to_owned(),
+                        file: file_path.to_owned(),
+                        line: Some(line_num),
+                    });
                 }
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

@@ -160,8 +160,9 @@ enum ContentResolution {
 fn get_file_and_content(
     input: &ToolInput,
     project_root: Option<&Path>,
-) -> Option<(String, String, Option<DegradedReason>)> {
+) -> Option<(String, String, bool, Option<DegradedReason>)> {
     let file_path = input.tool_input.file_path.clone()?;
+    let is_js = RE_JS_FILE.is_match(&file_path);
 
     let (content, degraded) = match input.tool_name.as_str() {
         tool_name::WRITE => (input.tool_input.content.clone()?, None),
@@ -173,6 +174,7 @@ fn get_file_and_content(
                 &new_string,
                 input.tool_input.replace_all,
                 project_root,
+                is_js,
             ) {
                 ContentResolution::Full(c) => (c, None),
                 ContentResolution::Degraded(reason) => (new_string, Some(reason)),
@@ -181,7 +183,7 @@ fn get_file_and_content(
         }
         tool_name::MULTI_EDIT => {
             let edits = input.tool_input.edits.as_ref()?;
-            match resolve_multi_edit_content(&file_path, edits, project_root) {
+            match resolve_multi_edit_content(&file_path, edits, project_root, is_js) {
                 ContentResolution::Full(c) => (c, None),
                 ContentResolution::Degraded(reason) => (join_new_strings(edits), Some(reason)),
                 ContentResolution::NotApplicable => (join_new_strings(edits), None),
@@ -202,7 +204,7 @@ fn get_file_and_content(
         return None;
     }
 
-    Some((file_path, content, degraded))
+    Some((file_path, content, is_js, degraded))
 }
 
 fn join_new_strings(edits: &[EditItem]) -> String {
@@ -253,8 +255,17 @@ fn apply_edit(
 /// resolving outside that root (defense against symlink / `..` path
 /// traversal). Production callers pass canonical cwd; `None` disables the
 /// boundary (used by tests over tempdirs).
-fn read_file_capped(file_path: &str, project_root: Option<&Path>) -> ContentResolution {
-    if !RE_JS_FILE.is_match(file_path) {
+///
+/// `is_js` lets callers that already classified the path (e.g.
+/// `collect_violations`) skip a second `RE_JS_FILE.is_match` on the same
+/// string. Pass `RE_JS_FILE.is_match(file_path)` when classification has
+/// not been done yet.
+fn read_file_capped(
+    file_path: &str,
+    project_root: Option<&Path>,
+    is_js: bool,
+) -> ContentResolution {
+    if !is_js {
         return ContentResolution::NotApplicable;
     }
     let canonical = match fs::canonicalize(file_path) {
@@ -301,11 +312,12 @@ fn resolve_edit_content(
     new_string: &str,
     replace_all: bool,
     project_root: Option<&Path>,
+    is_js: bool,
 ) -> ContentResolution {
     let Some(old) = old_string else {
         return ContentResolution::NotApplicable;
     };
-    let content = match read_file_capped(file_path, project_root) {
+    let content = match read_file_capped(file_path, project_root, is_js) {
         ContentResolution::Full(c) => c,
         other => return other,
     };
@@ -319,8 +331,9 @@ fn resolve_multi_edit_content(
     file_path: &str,
     edits: &[EditItem],
     project_root: Option<&Path>,
+    is_js: bool,
 ) -> ContentResolution {
-    let mut current = match read_file_capped(file_path, project_root) {
+    let mut current = match read_file_capped(file_path, project_root, is_js) {
         ContentResolution::Full(c) => c,
         other => return other,
     };
@@ -451,10 +464,10 @@ fn collect_violations(
     content: &str,
     config: &Config,
     project_root: Option<&Path>,
+    is_js: bool,
 ) -> (Vec<Violation>, Vec<String>) {
     let mut violations = Vec::new();
     let mut notes = Vec::new();
-    let is_js = RE_JS_FILE.is_match(file_path);
 
     if is_js {
         let (vs, note) = lint_with_external_tools(content, file_path, config, project_root);
@@ -726,7 +739,8 @@ where
     let mut notes = Vec::new();
     let project_root = resolve_project_root_or_note(project_root_result, &mut notes);
 
-    let Some((file_path, content, degraded)) = get_file_and_content(input, project_root.as_deref())
+    let Some((file_path, content, is_js, degraded)) =
+        get_file_and_content(input, project_root.as_deref())
     else {
         let is_write_tool = matches!(
             input.tool_name.as_str(),
@@ -756,8 +770,13 @@ where
         return 0;
     }
 
-    let (violations, lint_notes) =
-        collect_violations(&file_path, &content, &config, project_root.as_deref());
+    let (violations, lint_notes) = collect_violations(
+        &file_path,
+        &content,
+        &config,
+        project_root.as_deref(),
+        is_js,
+    );
     notes.extend(lint_notes);
     if let Some(reason) = degraded {
         let note = reason.note();
@@ -854,7 +873,7 @@ mod tests {
     #[test]
     fn write_extracts_content() {
         let input = make_write_input(Some("/src/app.ts"), Some("const x = 1;"));
-        let (path, content, _) = get_file_and_content(&input, None).unwrap();
+        let (path, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(path, "/src/app.ts");
         assert_eq!(content, "const x = 1;");
     }
@@ -862,7 +881,7 @@ mod tests {
     #[test]
     fn edit_extracts_new_string() {
         let input = make_edit_input(Some("/src/app.ts"), Some("const y = 2;"));
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "const y = 2;");
     }
 
@@ -885,7 +904,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "line1\nline2");
     }
 
@@ -913,7 +932,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "\nkept");
     }
 
@@ -1036,7 +1055,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(
             content,
             "import { exec } from 'child_process';\nconst y = 2;\n"
@@ -1054,7 +1073,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -1072,7 +1091,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -1100,7 +1119,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "let a = 10;\nlet b = 20;\n");
     }
 
@@ -1118,7 +1137,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -1126,7 +1145,7 @@ mod tests {
     fn read_file_capped_returns_full_for_valid_js() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = temp_ts_file(&tmp, "ok.ts", "const x = 1;\n");
-        match read_file_capped(path.to_str().unwrap(), None) {
+        match read_file_capped(path.to_str().unwrap(), None, true) {
             ContentResolution::Full(c) => assert_eq!(c, "const x = 1;\n"),
             _ => panic!("expected Full"),
         }
@@ -1137,7 +1156,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = temp_ts_file(&tmp, "readme.md", "hello");
         assert!(matches!(
-            read_file_capped(path.to_str().unwrap(), None),
+            read_file_capped(path.to_str().unwrap(), None, false),
             ContentResolution::NotApplicable
         ));
     }
@@ -1145,7 +1164,7 @@ mod tests {
     #[test]
     fn read_file_capped_degrades_on_file_not_found() {
         assert!(matches!(
-            read_file_capped("/nonexistent/path/that/does/not/exist.ts", None),
+            read_file_capped("/nonexistent/path/that/does/not/exist.ts", None, true),
             ContentResolution::Degraded(DegradedReason::FileNotFound)
         ));
     }
@@ -1156,7 +1175,7 @@ mod tests {
         let path = tmp.path().join("binary.ts");
         fs::write(&path, [0xff, 0xfe, 0xfd, 0xfc]).unwrap();
         assert!(matches!(
-            read_file_capped(path.to_str().unwrap(), None),
+            read_file_capped(path.to_str().unwrap(), None, true),
             ContentResolution::Degraded(DegradedReason::NonUtf8Content)
         ));
     }
@@ -1194,7 +1213,7 @@ mod tests {
         let size = usize::try_from(MAX_INPUT_SIZE + 1).unwrap();
         fs::write(&path, "a".repeat(size)).unwrap();
         assert!(matches!(
-            read_file_capped(path.to_str().unwrap(), None),
+            read_file_capped(path.to_str().unwrap(), None, true),
             ContentResolution::Degraded(DegradedReason::OversizedFile)
         ));
     }
@@ -1205,7 +1224,7 @@ mod tests {
         let path = tmp.path().join("limit.ts");
         let size = usize::try_from(MAX_INPUT_SIZE).unwrap();
         fs::write(&path, "a".repeat(size)).unwrap();
-        match read_file_capped(path.to_str().unwrap(), None) {
+        match read_file_capped(path.to_str().unwrap(), None, true) {
             ContentResolution::Full(c) => {
                 assert_eq!(u64::try_from(c.len()).unwrap(), MAX_INPUT_SIZE);
             }
@@ -1218,7 +1237,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = fs::canonicalize(tmp.path()).unwrap();
         let path = temp_ts_file(&tmp, "ok.ts", "const x = 1;\n");
-        match read_file_capped(path.to_str().unwrap(), Some(&root)) {
+        match read_file_capped(path.to_str().unwrap(), Some(&root), true) {
             ContentResolution::Full(c) => assert_eq!(c, "const x = 1;\n"),
             _ => panic!("expected Full when file is within explicit root"),
         }
@@ -1232,7 +1251,7 @@ mod tests {
         let other_tmp = tempfile::TempDir::new().unwrap();
         let path = temp_ts_file(&other_tmp, "evil.ts", "const x = 1;\n");
         assert!(matches!(
-            read_file_capped(path.to_str().unwrap(), Some(&root)),
+            read_file_capped(path.to_str().unwrap(), Some(&root), true),
             ContentResolution::Degraded(DegradedReason::PathOutsideProject)
         ));
     }
@@ -1250,7 +1269,7 @@ mod tests {
         let link = root_tmp.path().join("evil.ts");
         symlink(&outside, &link).unwrap();
         assert!(matches!(
-            read_file_capped(link.to_str().unwrap(), Some(&root)),
+            read_file_capped(link.to_str().unwrap(), Some(&root), true),
             ContentResolution::Degraded(DegradedReason::PathOutsideProject)
         ));
     }
@@ -1265,6 +1284,7 @@ mod tests {
             "x",
             false,
             None,
+            true,
         );
         assert!(matches!(
             result,
@@ -1276,7 +1296,7 @@ mod tests {
     fn resolve_edit_content_not_applicable_without_old_string() {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = temp_ts_file(&tmp, "file.ts", "const a = 1;");
-        let result = resolve_edit_content(path.to_str().unwrap(), None, "x", false, None);
+        let result = resolve_edit_content(path.to_str().unwrap(), None, "x", false, None, true);
         assert!(matches!(result, ContentResolution::NotApplicable));
     }
 
@@ -1296,7 +1316,7 @@ mod tests {
                 ..EditItem::default()
             },
         ];
-        let result = resolve_multi_edit_content(path.to_str().unwrap(), &edits, None);
+        let result = resolve_multi_edit_content(path.to_str().unwrap(), &edits, None, true);
         match result {
             ContentResolution::Degraded(DegradedReason::MultiEditMidFailure(idx)) => {
                 assert_eq!(idx, 1, "second edit (index 1) should be the failure point");
@@ -1318,7 +1338,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, degraded) = get_file_and_content(&input, None).unwrap();
+        let (_, content, _, degraded) = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(x);");
         assert_eq!(degraded, Some(DegradedReason::OldStringNotFound));
     }
@@ -1336,15 +1356,20 @@ mod tests {
     fn collect_violations_detects_eval() {
         let config = Config::default();
         let (violations, _notes) =
-            collect_violations("/src/app.ts", "eval(userInput);", &config, None);
+            collect_violations("/src/app.ts", "eval(userInput);", &config, None, true);
         assert!(violations.iter().any(|v| v.rule == "eval"));
     }
 
     #[test]
     fn collect_violations_clean_code() {
         let config = Config::default();
-        let (violations, _notes) =
-            collect_violations("/src/app.ts", "export function main() {}\n", &config, None);
+        let (violations, _notes) = collect_violations(
+            "/src/app.ts",
+            "export function main() {}\n",
+            &config,
+            None,
+            true,
+        );
         assert!(
             violations.is_empty(),
             "unexpected violations: {violations:?}"
@@ -1356,7 +1381,7 @@ mod tests {
         let mut config = Config::default();
         config.rules.eval = false;
         let (violations, _notes) =
-            collect_violations("/src/app.ts", "eval(userInput);", &config, None);
+            collect_violations("/src/app.ts", "eval(userInput);", &config, None, true);
         assert!(!violations.iter().any(|v| v.rule == "eval"));
     }
 
@@ -1364,7 +1389,7 @@ mod tests {
     fn collect_violations_non_js_skips_js_rules() {
         let config = Config::default();
         let (violations, _notes) =
-            collect_violations("/README.md", "eval(userInput);", &config, None);
+            collect_violations("/README.md", "eval(userInput);", &config, None, false);
         assert!(!violations.iter().any(|v| v.rule == "eval"));
     }
 
@@ -1376,6 +1401,7 @@ mod tests {
             "exec(userInput);",
             &config,
             None,
+            true,
         );
         assert!(violations
             .iter()
@@ -1391,6 +1417,7 @@ mod tests {
             "exec(userInput);",
             &config,
             None,
+            true,
         );
         assert!(!violations
             .iter()
@@ -1405,6 +1432,7 @@ mod tests {
             "useEffect(() => { fetchData(); }, []);",
             &config,
             None,
+            true,
         );
         assert!(violations.iter().any(|v| v.rule == "no-use-effect"));
     }
@@ -1418,6 +1446,7 @@ mod tests {
             "useEffect(() => { fetchData(); }, []);",
             &config,
             None,
+            true,
         );
         assert!(!violations.iter().any(|v| v.rule == "no-use-effect"));
     }

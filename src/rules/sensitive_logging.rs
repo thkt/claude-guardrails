@@ -1,9 +1,10 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
 use crate::scanner::{
-    build_line_offsets, extract_delimited_content, offset_to_line, StringScanner,
+    build_line_offsets, build_source_masks, extract_delimited_range, offset_to_line,
 };
 use regex::Regex;
 use std::collections::HashSet;
+use std::str;
 use std::sync::LazyLock;
 
 static RE_CONSOLE_CALL: LazyLock<Regex> = LazyLock::new(|| {
@@ -21,117 +22,74 @@ static RE_SENSITIVE_KEYWORD: LazyLock<Regex> = LazyLock::new(|| {
         .expect("RE_SENSITIVE_KEYWORD: invalid regex")
 });
 
-fn is_in_comment(content: &str, pos: usize) -> bool {
-    let bytes = content.as_bytes();
-    let mut scanner = StringScanner::new(bytes, 0);
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
+        let mut reported_lines = HashSet::new();
+        let line_offsets = build_line_offsets(content);
+        let masks = build_source_masks(content);
+        // SAFETY: build_source_masks replaces hidden bytes with ASCII space and
+        // preserves all original byte boundaries, so UTF-8 validity is intact.
+        let code_visible = str::from_utf8(&masks.code_visible)
+            .expect("code_visible preserves UTF-8 by construction");
 
-    while scanner.pos < pos {
-        scanner.advance();
-    }
-
-    scanner.in_block_comment || scanner.in_line_comment
-}
-
-/// Extract code portions (excluding strings and comments) for keyword matching.
-/// Template interpolations (${...}) are included as code.
-fn extract_code_portions(content: &str) -> String {
-    let bytes = content.as_bytes();
-    let mut scanner = StringScanner::new(bytes, 0);
-    let mut code = String::new();
-
-    while scanner.pos < bytes.len() {
-        let byte = scanner.current();
-
-        let in_interpolation = !scanner.template_interp_depth.is_empty()
-            && !scanner.in_single_quote
-            && !scanner.in_double_quote;
-
-        let skip = (scanner.in_single_quote
-            || scanner.in_double_quote
-            || scanner.in_template
-            || scanner.in_block_comment
-            || scanner.in_line_comment)
-            && !in_interpolation;
-
-        scanner.advance();
-
-        if !skip {
-            if let Some(b) = byte {
-                if b.is_ascii() {
-                    code.push(b as char);
-                }
+        let check_match = |caps: regex::Match,
+                           violations: &mut Vec<Violation>,
+                           reported_lines: &mut HashSet<usize>,
+                           msg: &str| {
+            if masks.comment.get(caps.start()).copied().unwrap_or(false) {
+                return;
             }
-        }
-    }
-
-    code
-}
-
-fn contains_sensitive_keyword(content: &str) -> bool {
-    let code = extract_code_portions(content);
-    RE_SENSITIVE_KEYWORD.is_match(&code)
-}
-
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
-            let mut reported_lines = HashSet::new();
-            let line_offsets = build_line_offsets(content);
-
-            let check_match = |caps: regex::Match,
-                               violations: &mut Vec<Violation>,
-                               reported_lines: &mut HashSet<usize>,
-                               msg: &str| {
-                if is_in_comment(content, caps.start()) {
-                    return;
-                }
-                if let Some(args) = extract_delimited_content(content, caps.end(), b'(', b')') {
-                    if contains_sensitive_keyword(args) {
-                        let line_num = offset_to_line(&line_offsets, caps.start());
-                        if reported_lines.insert(line_num) {
-                            violations.push(Violation {
-                                rule: super::rule_id::SENSITIVE_LOGGING.to_owned(),
-                                severity: Severity::High,
-                                fix: msg.to_owned(),
-                                file: file_path.to_owned(),
-                                line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
-                            });
-                        }
-                    }
-                }
+            let Some((args_start, args_end)) =
+                extract_delimited_range(content, caps.end(), b'(', b')')
+            else {
+                return;
             };
-
-            for caps in RE_CONSOLE_CALL.find_iter(content) {
-                check_match(
-                    caps,
-                    &mut violations,
-                    &mut reported_lines,
-                    "Logging sensitive data (password, token, secret). Remove or mask before logging.",
-                );
+            let args_code = &code_visible[args_start..args_end];
+            if RE_SENSITIVE_KEYWORD.is_match(args_code) {
+                let line_num = offset_to_line(&line_offsets, caps.start());
+                if reported_lines.insert(line_num) {
+                    violations.push(Violation {
+                        rule: super::rule_id::SENSITIVE_LOGGING.to_owned(),
+                        severity: Severity::High,
+                        fix: msg.to_owned(),
+                        file: file_path.to_owned(),
+                        line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
+                    });
+                }
             }
+        };
 
-            for caps in RE_LOGGER_CALL.find_iter(content) {
-                check_match(
-                    caps,
-                    &mut violations,
-                    &mut reported_lines,
-                    "Logging sensitive data via logger. Remove or mask before logging.",
-                );
-            }
+        for caps in RE_CONSOLE_CALL.find_iter(content) {
+            check_match(
+                caps,
+                &mut violations,
+                &mut reported_lines,
+                "Logging sensitive data (password, token, secret). Remove or mask before logging.",
+            );
+        }
 
-            violations
-        }),
-    }
-}
+        for caps in RE_LOGGER_CALL.find_iter(content) {
+            check_match(
+                caps,
+                &mut violations,
+                &mut reported_lines,
+                "Logging sensitive data via logger. Remove or mask before logging.",
+            );
+        }
+
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(
+        RULE.check(
             content,
             "/src/auth/login.ts",
             &super::super::non_comment_lines(content),
@@ -233,5 +191,32 @@ mod tests {
     fn ignores_multiline_block_comment() {
         let content = "/*\nconsole.log(password);\n*/";
         assert!(check(content).is_empty());
+    }
+
+    // T-019: NFR-001 perf < 10ms/file. 20 console/logger 呼び出しを含む典型的
+    // hot path で sensitive_logging 自身の per-file 時間が ceiling 内に収まる。
+    #[test]
+    fn nfr001_sensitive_logging_under_10ms() {
+        use std::fmt::Write as _;
+        let mut content = String::new();
+        for i in 0..20 {
+            writeln!(content, "console.log('user', user{i});").unwrap();
+            writeln!(content, "logger.info('event', {{ id: {i} }});").unwrap();
+        }
+        content.push_str("console.log('password', password);\n");
+        content.push_str("logger.error('token', accessToken);\n");
+
+        let start = Instant::now();
+        let iterations = 100;
+        for _ in 0..iterations {
+            let _ = check(&content);
+        }
+        let elapsed = start.elapsed();
+        let per_file_us = elapsed.as_micros() / iterations;
+        eprintln!("NFR-001 sensitive-logging: {per_file_us}us/file ({iterations} iterations)");
+        assert!(
+            per_file_us < 10_000,
+            "sensitive_logging check exceeded 10ms/file: {per_file_us}us"
+        );
     }
 }
