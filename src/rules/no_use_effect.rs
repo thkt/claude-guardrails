@@ -12,10 +12,9 @@ const FIX_MESSAGE: &str = "Avoid useEffect. Consider: \
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+    super::ast_test_check(content, file_path, |program, line_offsets| {
         check_program(program, line_offsets, file_path)
     })
-    .unwrap_or_default()
 }
 
 pub fn check_program(

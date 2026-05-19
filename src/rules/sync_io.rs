@@ -100,7 +100,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        RULE.check(content, path, &super::super::non_comment_lines(content))
+        super::super::check_rule(&RULE, content, path)
     }
 
     #[test]

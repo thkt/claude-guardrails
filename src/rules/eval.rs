@@ -32,11 +32,10 @@ impl Target {
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+    super::ast_test_check(content, file_path, |program, line_offsets| {
         let import_map = ImportMap::build(program);
         check_program(program, line_offsets, file_path, &import_map)
     })
-    .unwrap_or_default()
 }
 
 pub fn check_program(
@@ -134,7 +133,6 @@ impl<'a> Visit<'a> for EvalVisitor<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     fn check_js(code: &str) -> Vec<Violation> {
         check(code, "/src/app.ts")
@@ -313,17 +311,8 @@ mod tests {
             "evaluate(j);\n",
             "callbackFunction(k);\n",
         );
-        let start = Instant::now();
-        let iterations = 100;
-        for _ in 0..iterations {
+        super::super::assert_under_10ms("eval", 100, || {
             let _ = check(content, "/src/app.ts");
-        }
-        let elapsed = start.elapsed();
-        let per_file_us = elapsed.as_micros() / iterations;
-        eprintln!("NFR-001 eval: {per_file_us}us/file ({iterations} iterations)");
-        assert!(
-            per_file_us < 10_000,
-            "AST eval check exceeded 10ms/file: {per_file_us}us"
-        );
+        });
     }
 }

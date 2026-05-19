@@ -79,11 +79,7 @@ mod tests {
     use std::time::Instant;
 
     fn check(content: &str) -> Vec<Violation> {
-        RULE.check(
-            content,
-            "/src/auth/login.ts",
-            &super::super::non_comment_lines(content),
-        )
+        super::super::check_rule(&RULE, content, "/src/auth/login.ts")
     }
 
     #[test]

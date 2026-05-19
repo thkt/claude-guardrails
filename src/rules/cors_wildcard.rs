@@ -17,10 +17,9 @@ const FIX_MESSAGE: &str =
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+    super::ast_test_check(content, file_path, |program, line_offsets| {
         check_program(program, line_offsets, file_path)
     })
-    .unwrap_or_default()
 }
 
 pub fn check_program(
@@ -147,7 +146,6 @@ impl<'a> Visit<'a> for CorsVisitor<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     fn check_js(code: &str) -> Vec<Violation> {
         check(code, "/src/app/api/users/route.ts")
@@ -313,18 +311,9 @@ mod tests {
             "app.use(cors({ origin: (o, cb) => cb(null, true) }));\n",
             "res.setHeader('Content-Type', 'text/html');\n",
         );
-        let start = Instant::now();
-        let iterations = 100;
-        for _ in 0..iterations {
+        super::super::assert_under_10ms("cors-wildcard", 100, || {
             let _ = check(content, "/src/app/api/cors/route.ts");
-        }
-        let elapsed = start.elapsed();
-        let per_file_us = elapsed.as_micros() / iterations;
-        eprintln!("NFR-001 cors-wildcard: {per_file_us}us/file ({iterations} iterations)");
-        assert!(
-            per_file_us < 10_000,
-            "AST cors-wildcard check exceeded 10ms/file: {per_file_us}us"
-        );
+        });
     }
 
     #[test]
