@@ -787,6 +787,43 @@ fn prefetch_json_emits_success_envelope_when_cached() {
     assert_eq!(parsed["notes"], serde_json::json!([]));
 }
 
+// Malformed `.claude/tools.json` silently falls back to default config; the
+// JSON envelope must mark this as degraded so AI consumers notice they are
+// not running the project's rule set.
+#[test]
+fn malformed_tools_json_marks_json_envelope_degraded() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(tmp.path().join(".claude/tools.json"), "{not json}").unwrap();
+
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(
+        parsed["degraded"], true,
+        "expected degraded:true when tools.json is malformed; got: {parsed}"
+    );
+    let notes = parsed["notes"].as_array().expect("notes must be an array");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.as_str().unwrap_or("").contains("invalid config")),
+        "expected a config-error note in envelope; got: {notes:?}"
+    );
+}
+
 #[test]
 fn prefetch_json_io_error_envelope_when_cache_unavailable() {
     let output = Command::new(env!("CARGO_BIN_EXE_guardrails"))
