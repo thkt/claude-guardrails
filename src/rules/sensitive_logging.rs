@@ -1,4 +1,5 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use crate::scanner::{
     build_line_offsets, build_source_masks, extract_delimited_range, offset_to_line,
 };
@@ -8,18 +9,24 @@ use std::str;
 use std::sync::LazyLock;
 
 static RE_CONSOLE_CALL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"console\.(log|warn|error|info|debug)\s*\(")
-        .expect("RE_CONSOLE_CALL: invalid regex")
+    regex_or_die(
+        "RE_CONSOLE_CALL",
+        r"console\.(log|warn|error|info|debug)\s*\(",
+    )
 });
 
 static RE_LOGGER_CALL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(logger|log)\.(log|warn|error|info|debug)\s*\(")
-        .expect("RE_LOGGER_CALL: invalid regex")
+    regex_or_die(
+        "RE_LOGGER_CALL",
+        r"(logger|log)\.(log|warn|error|info|debug)\s*\(",
+    )
 });
 
 static RE_SENSITIVE_KEYWORD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(password|secret|token|apiKey|api_key|credential|auth|private_key|privateKey|accessToken|access_token|refreshToken|refresh_token)\b")
-        .expect("RE_SENSITIVE_KEYWORD: invalid regex")
+    regex_or_die(
+        "RE_SENSITIVE_KEYWORD",
+        r"\b(password|secret|token|apiKey|api_key|credential|auth|private_key|privateKey|accessToken|access_token|refreshToken|refresh_token)\b",
+    )
 });
 
 const MSG_CONSOLE: &str =
@@ -40,7 +47,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
         // build_source_masks replaces hidden bytes with ASCII space and preserves
         // every original byte boundary, so the buffer is still valid UTF-8.
         let code_visible = str::from_utf8(&masks.code_visible)
-            .expect("code_visible preserves UTF-8 by construction");
+            .expect("sensitive_logging: code_visible preserves UTF-8 by construction");
 
         let console_hits = RE_CONSOLE_CALL.find_iter(content).map(|m| (m, MSG_CONSOLE));
         let logger_hits = RE_LOGGER_CALL.find_iter(content).map(|m| (m, MSG_LOGGER));

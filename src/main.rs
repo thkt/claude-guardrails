@@ -8,6 +8,7 @@ mod hook_exit;
 mod import_map;
 mod oxlint;
 mod parse_json;
+mod regex_util;
 mod reporter;
 mod resolve;
 mod rules;
@@ -629,7 +630,8 @@ fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
 }
 
 fn print_json_line<T: Serialize>(value: &T) {
-    let json = serde_json::to_string(value).expect("envelope serialization is infallible");
+    let json = serde_json::to_string(value)
+        .expect("print_json_line: envelope serialization is infallible");
     // Ignore write errors (e.g. BrokenPipe) so the caller's exit code is preserved.
     let _ = writeln!(io::stdout().lock(), "{json}");
 }

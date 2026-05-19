@@ -1,10 +1,13 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_EXCLUDED_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(\.config\.[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)")
-        .expect("RE_EXCLUDED_FILE: invalid regex")
+    regex_or_die(
+        "RE_EXCLUDED_FILE",
+        r"(\.config\.[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)",
+    )
 });
 
 struct SyncIo {
@@ -14,22 +17,22 @@ struct SyncIo {
 }
 
 static RE_READ_FILE_SYNC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"readFileSync\s*\(").expect("RE_READ_FILE_SYNC: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_READ_FILE_SYNC", r"readFileSync\s*\("));
 
 static RE_WRITE_FILE_SYNC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"writeFileSync\s*\(").expect("RE_WRITE_FILE_SYNC: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_WRITE_FILE_SYNC", r"writeFileSync\s*\("));
 
 static RE_EXISTS_SYNC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"existsSync\s*\(").expect("RE_EXISTS_SYNC: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_EXISTS_SYNC", r"existsSync\s*\("));
 
 static RE_MKDIR_SYNC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"mkdirSync\s*\(").expect("RE_MKDIR_SYNC: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_MKDIR_SYNC", r"mkdirSync\s*\("));
 
 static RE_RMDIR_SYNC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"rm(dir)?Sync\s*\(").expect("RE_RMDIR_SYNC: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_RMDIR_SYNC", r"rm(dir)?Sync\s*\("));
 
 static RE_STAT_SYNC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(l)?statSync\s*\(").expect("RE_STAT_SYNC: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_STAT_SYNC", r"(l)?statSync\s*\("));
 
 static SYNC_IO: LazyLock<[SyncIo; 6]> = LazyLock::new(|| {
     [

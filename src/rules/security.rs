@@ -1,27 +1,35 @@
 use super::{rule_id, Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE, RE_REACT_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
-static RE_SET_TIMEOUT_STR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"setTimeout\s*\(\s*['"`]"#).expect("RE_SET_TIMEOUT_STR: invalid regex")
-});
-static RE_SET_INTERVAL_STR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"setInterval\s*\(\s*['"`]"#).expect("RE_SET_INTERVAL_STR: invalid regex")
-});
+static RE_SET_TIMEOUT_STR: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_SET_TIMEOUT_STR", r#"setTimeout\s*\(\s*['"`]"#));
+static RE_SET_INTERVAL_STR: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_SET_INTERVAL_STR", r#"setInterval\s*\(\s*['"`]"#));
 static RE_POST_MESSAGE_STAR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\.postMessage\s*\([^,]+,\s*['"`]\*['"`]\s*\)"#)
-        .expect("RE_POST_MESSAGE_STAR: invalid regex")
+    regex_or_die(
+        "RE_POST_MESSAGE_STAR",
+        r#"\.postMessage\s*\([^,]+,\s*['"`]\*['"`]\s*\)"#,
+    )
 });
 static RE_LOCAL_STORAGE_SENSITIVE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"localStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#)
-        .expect("RE_LOCAL_STORAGE_SENSITIVE: invalid regex")
+    regex_or_die(
+        "RE_LOCAL_STORAGE_SENSITIVE",
+        r#"localStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#,
+    )
 });
 static RE_SESSION_STORAGE_SENSITIVE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"sessionStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#)
-        .expect("RE_SESSION_STORAGE_SENSITIVE: invalid regex")
+    regex_or_die(
+        "RE_SESSION_STORAGE_SENSITIVE",
+        r#"sessionStorage\.(setItem|getItem)\s*\(\s*['"`](token|password|secret|key|auth|credential)"#,
+    )
 });
 static RE_DANGEROUS_INNER_HTML: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"dangerouslySetInnerHTML\s*=\s*\{").expect("RE_DANGEROUS_INNER_HTML: invalid regex")
+    regex_or_die(
+        "RE_DANGEROUS_INNER_HTML",
+        r"dangerouslySetInnerHTML\s*=\s*\{",
+    )
 });
 
 struct SecurityIssue {

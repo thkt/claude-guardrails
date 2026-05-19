@@ -1,4 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -9,23 +10,31 @@ struct WeakCrypto {
 }
 
 static RE_MD5: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(createHash\s*\(\s*['"]md5['"]|MD5\s*\(|\.md5\s*\()"#)
-        .expect("RE_MD5: invalid regex")
+    regex_or_die(
+        "RE_MD5",
+        r#"(createHash\s*\(\s*['"]md5['"]|MD5\s*\(|\.md5\s*\()"#,
+    )
 });
 
 static RE_SHA1: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(createHash\s*\(\s*['"]sha1['"]|SHA1\s*\(|\.sha1\s*\()"#)
-        .expect("RE_SHA1: invalid regex")
+    regex_or_die(
+        "RE_SHA1",
+        r#"(createHash\s*\(\s*['"]sha1['"]|SHA1\s*\(|\.sha1\s*\()"#,
+    )
 });
 
 static RE_DES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(createCipher\s*\(\s*['"]des['"]|DES\s*\(|\.des\s*\()"#)
-        .expect("RE_DES: invalid regex")
+    regex_or_die(
+        "RE_DES",
+        r#"(createCipher\s*\(\s*['"]des['"]|DES\s*\(|\.des\s*\()"#,
+    )
 });
 
 static RE_RC4: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(createCipher\s*\(\s*['"]rc4['"]|RC4\s*\(|\.rc4\s*\()"#)
-        .expect("RE_RC4: invalid regex")
+    regex_or_die(
+        "RE_RC4",
+        r#"(createCipher\s*\(\s*['"]rc4['"]|RC4\s*\(|\.rc4\s*\()"#,
+    )
 });
 
 static WEAK_CRYPTO: LazyLock<[WeakCrypto; 4]> = LazyLock::new(|| {

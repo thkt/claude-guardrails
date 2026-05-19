@@ -1,18 +1,19 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static SENSITIVE_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        Regex::new(r"\.env(\.[a-zA-Z]+)?$").expect("env pattern"),
-        Regex::new(r"credentials\.[a-zA-Z]+$").expect("credentials pattern"),
-        Regex::new(r"_credentials\.[a-zA-Z]+$").expect("_credentials pattern"),
-        Regex::new(r"_key\.[a-zA-Z]+$").expect("_key pattern"),
-        Regex::new(r"_secret\.[a-zA-Z]+$").expect("_secret pattern"),
-        Regex::new(r"\.pem$").expect("pem pattern"),
-        Regex::new(r"\.key$").expect("key pattern"),
-        Regex::new(r"id_rsa").expect("id_rsa pattern"),
-        Regex::new(r"id_ed25519").expect("id_ed25519 pattern"),
+        regex_or_die("sensitive_file:env", r"\.env(\.[a-zA-Z]+)?$"),
+        regex_or_die("sensitive_file:credentials", r"credentials\.[a-zA-Z]+$"),
+        regex_or_die("sensitive_file:_credentials", r"_credentials\.[a-zA-Z]+$"),
+        regex_or_die("sensitive_file:_key", r"_key\.[a-zA-Z]+$"),
+        regex_or_die("sensitive_file:_secret", r"_secret\.[a-zA-Z]+$"),
+        regex_or_die("sensitive_file:pem", r"\.pem$"),
+        regex_or_die("sensitive_file:key", r"\.key$"),
+        regex_or_die("sensitive_file:id_rsa", r"id_rsa"),
+        regex_or_die("sensitive_file:id_ed25519", r"id_ed25519"),
     ]
 });
 

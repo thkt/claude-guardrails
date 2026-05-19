@@ -1,4 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_TEST_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -9,19 +10,19 @@ struct FlakyPattern {
 }
 
 static RE_SET_TIMEOUT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"setTimeout\s*\(").expect("RE_SET_TIMEOUT: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_SET_TIMEOUT", r"setTimeout\s*\("));
 
 static RE_SLEEP: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(sleep|delay|wait)\s*\(\s*\d").expect("RE_SLEEP: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_SLEEP", r"(sleep|delay|wait)\s*\(\s*\d"));
 
 static RE_RANDOM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"Math\.random\s*\(").expect("RE_RANDOM: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_RANDOM", r"Math\.random\s*\("));
 
 static RE_DATE_NOW: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"Date\.now\s*\(\s*\)").expect("RE_DATE_NOW: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_DATE_NOW", r"Date\.now\s*\(\s*\)"));
 
 static RE_NEW_DATE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"new\s+Date\s*\(\s*\)").expect("RE_NEW_DATE: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_NEW_DATE", r"new\s+Date\s*\(\s*\)"));
 
 static FLAKY_PATTERNS: LazyLock<[FlakyPattern; 5]> = LazyLock::new(|| {
     [

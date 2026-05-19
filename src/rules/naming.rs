@@ -1,4 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -11,32 +12,35 @@ struct NamingIssue {
 }
 
 static RE_LOWERCASE_ARROW: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"const\s+[a-z][a-zA-Z]*\s*=\s*\([^)]*\)\s*=>")
-        .expect("RE_LOWERCASE_ARROW: invalid regex")
+    regex_or_die(
+        "RE_LOWERCASE_ARROW",
+        r"const\s+[a-z][a-zA-Z]*\s*=\s*\([^)]*\)\s*=>",
+    )
 });
-static RE_COMPONENT_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"/components/.*\.tsx$").expect("RE_COMPONENT_FILE: invalid regex")
-});
+static RE_COMPONENT_FILE: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_COMPONENT_FILE", r"/components/.*\.tsx$"));
 static RE_JSX_RETURN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"const\s+[a-z][a-zA-Z]*\s*=\s*\([^)]*\)\s*=>\s*[{(][^}]*<")
-        .expect("RE_JSX_RETURN: invalid regex")
+    regex_or_die(
+        "RE_JSX_RETURN",
+        r"const\s+[a-z][a-zA-Z]*\s*=\s*\([^)]*\)\s*=>\s*[{(][^}]*<",
+    )
 });
 
 static RE_NON_USE_ARROW: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"const\s+[a-tv-z][a-zA-Z]*\s*=.*=>\s*\{").expect("RE_NON_USE_ARROW: invalid regex")
+    regex_or_die(
+        "RE_NON_USE_ARROW",
+        r"const\s+[a-tv-z][a-zA-Z]*\s*=.*=>\s*\{",
+    )
 });
 static RE_HOOKS_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/hooks/.*\.ts$").expect("RE_HOOKS_FILE: invalid regex"));
-static RE_HOOK_USAGE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"use(State|Effect|Callback|Memo)").expect("RE_HOOK_USAGE: invalid regex")
-});
+    LazyLock::new(|| regex_or_die("RE_HOOKS_FILE", r"/hooks/.*\.ts$"));
+static RE_HOOK_USAGE: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_HOOK_USAGE", r"use(State|Effect|Callback|Memo)"));
 
-static RE_LOWERCASE_INTERFACE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"interface\s+[a-z]").expect("RE_LOWERCASE_INTERFACE: invalid regex")
-});
-static RE_LOWERCASE_TYPE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"type\s+[a-z][a-zA-Z]*\s*=").expect("RE_LOWERCASE_TYPE: invalid regex")
-});
+static RE_LOWERCASE_INTERFACE: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_LOWERCASE_INTERFACE", r"interface\s+[a-z]"));
+static RE_LOWERCASE_TYPE: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_LOWERCASE_TYPE", r"type\s+[a-z][a-zA-Z]*\s*="));
 
 static NAMING_ISSUES: LazyLock<[NamingIssue; 4]> = LazyLock::new(|| {
     [

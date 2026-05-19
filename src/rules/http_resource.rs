@@ -1,13 +1,13 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_HTTP_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"["']http://[^"']+["']"#).expect("RE_HTTP_URL: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_HTTP_URL", r#"["']http://[^"']+["']"#));
 
-static RE_LOCAL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"http://(localhost|127\.0\.0\.1)").expect("RE_LOCAL: invalid regex")
-});
+static RE_LOCAL: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_LOCAL", r"http://(localhost|127\.0\.0\.1)"));
 
 pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_JS_FILE.clone(),

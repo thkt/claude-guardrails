@@ -1,37 +1,42 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_KNOWN_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    regex_or_die(
+        "RE_KNOWN_PREFIX",
         r#"["'](sk-[a-zA-Z0-9]{10,}|AKIA[A-Z0-9]{12,}|ghp_[a-zA-Z0-9]{10,}|gho_[a-zA-Z0-9]{10,}|ghs_[a-zA-Z0-9]{10,}|xoxb-[a-zA-Z0-9]{10,}|xoxp-[a-zA-Z0-9]{10,}|glpat-[a-zA-Z0-9]{10,}|sk_live_[a-zA-Z0-9]{10,}|rk_live_[a-zA-Z0-9]{10,}|SG\.[a-zA-Z0-9]{10,})["']"#,
     )
-    .expect("RE_KNOWN_PREFIX: invalid regex")
 });
 
 static RE_BEARER_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"["'](Bearer|Basic)\s+[A-Za-z0-9._+/=-]{20,}["']"#)
-        .expect("RE_BEARER_TOKEN: invalid regex")
+    regex_or_die(
+        "RE_BEARER_TOKEN",
+        r#"["'](Bearer|Basic)\s+[A-Za-z0-9._+/=-]{20,}["']"#,
+    )
 });
 
 static RE_AWS_KEY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    regex_or_die(
+        "RE_AWS_KEY",
         r#"(?i)(aws_access_key_id|aws_secret_access_key)\s*[:=]\s*["'][A-Za-z0-9/+=]{16,}["']"#,
     )
-    .expect("RE_AWS_KEY: invalid regex")
 });
 
 // Value length >= 4 to reduce false positives (SEC-004)
 static RE_PASSWORD_ASSIGN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    regex_or_die(
+        "RE_PASSWORD_ASSIGN",
         r#"(?i)\b(password|passwd|secret|api_?key|apikey|access_?token|private_?key)\s*[:=]\s*["'][^"']{4,200}["']"#,
     )
-    .expect("RE_PASSWORD_ASSIGN: invalid regex")
 });
 
 static RE_TEST_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(test_?|mock_?|fake_?|dummy_?|example_?|placeholder_?)\w*\s*=")
-        .expect("RE_TEST_PREFIX: invalid regex")
+    regex_or_die(
+        "RE_TEST_PREFIX",
+        r"(?i)\b(test_?|mock_?|fake_?|dummy_?|example_?|placeholder_?)\w*\s*=",
+    )
 });
 
 struct SecretPattern {
