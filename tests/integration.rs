@@ -397,30 +397,29 @@ fn hint_shown_when_claude_dir_exists_without_tools_json() {
         "expected config hint in: {stderr}"
     );
     assert!(
-        tmp.path().join(".claude/tools.json").exists(),
-        "expected tools.json to be created"
-    );
-    let content = fs::read_to_string(tmp.path().join(".claude/tools.json")).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-    assert!(
-        parsed.get("guardrails").is_some(),
-        "expected guardrails key in created tools.json: {content}"
+        !tmp.path().join(".claude/tools.json").exists(),
+        "hook must not create tools.json"
     );
 }
 
 #[test]
-fn hint_not_shown_after_tools_json_created() {
+fn hint_shown_repeatedly_when_tools_json_absent() {
     let tmp = tmp_repo_with_claude();
 
-    // First run: creates tools.json
-    run_guardrails_in_dir(&clean_write_json(), tmp.path());
-
-    // Second run: tools.json now has guardrails key → no hint
-    let output = run_guardrails_in_dir(&clean_write_json(), tmp.path());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr1 =
+        String::from_utf8_lossy(&run_guardrails_in_dir(&clean_write_json(), tmp.path()).stderr)
+            .into_owned();
     assert!(
-        !stderr.contains("using defaults"),
-        "unexpected config hint on second run: {stderr}"
+        stderr1.contains("using defaults"),
+        "first run hint missing: {stderr1}"
+    );
+
+    let stderr2 =
+        String::from_utf8_lossy(&run_guardrails_in_dir(&clean_write_json(), tmp.path()).stderr)
+            .into_owned();
+    assert!(
+        stderr2.contains("using defaults"),
+        "hint must keep appearing each run while tools.json is absent: {stderr2}"
     );
 }
 

@@ -22,6 +22,7 @@ This directory contains important decisions about the project's architecture.
 | [0014](0014-ssr-secret-bleed-shape-based-carve-outs.md) | `ssr-secret-bleed` は shape-based 検出を採用し、spread / 変数バインディング / dynamic getter は 1-file 静的解析制約により intentional carve-out として記録する | accepted | 2026-05-17 |
 | [0015](0015-cot-leakage-marker-design.md) | `cot-leakage-marker` rule の marker 選定 / self-exclusion / Windows path normalize の方針 | accepted | 2026-05-17 |
 | [0016](0016-framework-coverage-axis-nextjs-api-middleware.md) | Server-side rule の scope は Next.js `app/api` + `pages/api` + `middleware` に揃え、shared regex pool 経由で統一する | accepted | 2026-05-17 |
+| [0017](0017-hook-must-not-create-tools-json.md) | Hook 起動時に `.claude/tools.json` を自動生成しない (hint stderr 出力のみ) | accepted | 2026-05-19 |
 
 ## About MADR Format
 

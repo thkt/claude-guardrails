@@ -563,9 +563,6 @@ fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput,
     })
 }
 
-const DEFAULT_TOOLS_JSON: &str = r#"{"guardrails": {}}
-"#;
-
 const CONFIG_HINT_MESSAGE: &str =
     "Guardrails: using defaults. Customize via .claude/tools.json \u{2014} see https://github.com/thkt/guardrails#configuration";
 
@@ -573,7 +570,6 @@ const CONFIG_HINT_MESSAGE: &str =
 enum HintAction {
     Skip,
     Hint,
-    CreateAndHint(PathBuf),
 }
 
 fn config_hint_action(git_root: &Path, config: &Config) -> HintAction {
@@ -581,25 +577,11 @@ fn config_hint_action(git_root: &Path, config: &Config) -> HintAction {
         return HintAction::Skip;
     }
     let tools_path = git_root.join(TOOLS_CONFIG_FILE);
-    if tools_path.exists() {
-        return HintAction::Hint;
-    }
-    let Some(claude_dir) = tools_path.parent() else {
-        return HintAction::Skip;
-    };
-    if claude_dir.is_dir() {
-        HintAction::CreateAndHint(tools_path)
+    if tools_path.exists() || tools_path.parent().is_some_and(Path::is_dir) {
+        HintAction::Hint
     } else {
         HintAction::Skip
     }
-}
-
-fn try_create_tools_json(path: &Path) -> io::Result<()> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .and_then(|mut f| f.write_all(DEFAULT_TOOLS_JSON.as_bytes()))
 }
 
 fn show_config_hint(config: &Config) {
@@ -608,12 +590,6 @@ fn show_config_hint(config: &Config) {
     };
     match config_hint_action(git_root, config) {
         HintAction::Skip => {}
-        HintAction::CreateAndHint(path) => {
-            if let Err(e) = try_create_tools_json(&path) {
-                eprintln!("guardrails: failed to create {}: {}", path.display(), e);
-            }
-            eprintln!("{}", color::yellow(CONFIG_HINT_MESSAGE));
-        }
         HintAction::Hint => {
             eprintln!("{}", color::yellow(CONFIG_HINT_MESSAGE));
         }
@@ -1525,11 +1501,10 @@ mod tests {
     }
 
     #[test]
-    fn hint_action_create_when_no_tools_json() {
+    fn hint_action_hint_when_claude_dir_exists_without_tools_json() {
         let tmp = tmp_with_claude();
         let config = Config::default();
-        let expected = HintAction::CreateAndHint(tmp.path().join(TOOLS_CONFIG_FILE));
-        assert_eq!(config_hint_action(tmp.path(), &config), expected);
+        assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);
     }
 
     #[test]
@@ -1541,22 +1516,27 @@ mod tests {
         assert_eq!(config_hint_action(tmp.path(), &config), HintAction::Hint);
     }
 
+    // The hook must not create or write to .claude/tools.json under any code path.
+    // After running show_config_hint with a .claude/ present but tools.json absent,
+    // the file must remain absent.
     #[test]
-    fn try_create_tools_json_writes_default_payload() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("tools.json");
-        try_create_tools_json(&path).unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), DEFAULT_TOOLS_JSON);
-    }
+    fn hint_does_not_write_tools_json_when_absent() {
+        let tmp = tmp_with_claude();
+        let tools_path = tmp.path().join(TOOLS_CONFIG_FILE);
+        assert!(!tools_path.exists(), "tools.json must be absent before");
 
-    #[test]
-    fn try_create_tools_json_errors_when_file_exists() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("tools.json");
-        fs::write(&path, "existing").unwrap();
-        let err = try_create_tools_json(&path).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
-        assert_eq!(fs::read_to_string(&path).unwrap(), "existing");
+        let config = Config {
+            source: ConfigSource::Default,
+            git_root: Some(tmp.path().to_path_buf()),
+            ..Config::default()
+        };
+        show_config_hint(&config);
+
+        assert!(
+            !tools_path.exists(),
+            "hook must not create tools.json, but found {}",
+            tools_path.display()
+        );
     }
 
     #[test]
