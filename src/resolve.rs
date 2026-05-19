@@ -1,15 +1,45 @@
 use crate::parse_json::parse_linter_json;
 use crate::tempfile_util::write_temp;
 use serde::de::DeserializeOwned;
+use std::any::Any;
 use std::fs;
+use std::io;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const LINTER_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug)]
+enum WaitOutcome {
+    Exited(ExitStatus),
+    ProcessError(io::Error),
+    Timeout,
+    WaitThreadPanic,
+}
+
+fn classify_wait(result: Result<io::Result<ExitStatus>, RecvTimeoutError>) -> WaitOutcome {
+    match result {
+        Ok(Ok(status)) => WaitOutcome::Exited(status),
+        Ok(Err(e)) => WaitOutcome::ProcessError(e),
+        Err(RecvTimeoutError::Timeout) => WaitOutcome::Timeout,
+        Err(RecvTimeoutError::Disconnected) => WaitOutcome::WaitThreadPanic,
+    }
+}
+
+fn format_thread_panic(payload: Box<dyn Any + Send>) -> String {
+    let payload = match payload.downcast::<&'static str>() {
+        Ok(s) => return (*s).to_owned(),
+        Err(p) => p,
+    };
+    match payload.downcast::<String>() {
+        Ok(s) => *s,
+        Err(_) => "<non-string panic payload>".into(),
+    }
+}
 
 fn spawn_pipe_reader(
     pipe: impl Read + Send + 'static,
@@ -26,42 +56,55 @@ fn spawn_pipe_reader(
     })
 }
 
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 fn wait_with_timeout(child: Child, tool: &'static str) -> Option<ExitStatus> {
     let child_pid = child.id();
     let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
+    let wait_handle: JoinHandle<()> = thread::spawn(move || {
         let mut child = child;
         let _ = tx.send(child.wait());
     });
 
-    match rx.recv_timeout(LINTER_TIMEOUT) {
-        Ok(Ok(s)) => Some(s),
-        Ok(Err(e)) => {
+    match classify_wait(rx.recv_timeout(LINTER_TIMEOUT)) {
+        WaitOutcome::Exited(s) => Some(s),
+        WaitOutcome::ProcessError(e) => {
             eprintln!("guardrails: {tool}: process error: {e}");
             None
         }
-        Err(_) => {
+        WaitOutcome::Timeout => {
             eprintln!(
                 "guardrails: {}: timed out after {}s, skipping",
                 tool,
                 LINTER_TIMEOUT.as_secs()
             );
-            #[cfg(unix)]
-            {
-                let _ = Command::new("kill")
-                    .args(["-KILL", &child_pid.to_string()])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = Command::new("taskkill")
-                    .args(["/F", "/PID", &child_pid.to_string()])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-            }
+            kill_pid(child_pid);
+            None
+        }
+        WaitOutcome::WaitThreadPanic => {
+            let detail = match wait_handle.join() {
+                Err(payload) => format_thread_panic(payload),
+                Ok(()) => "<no panic payload>".into(),
+            };
+            eprintln!("guardrails: {tool}: wait thread panicked: {detail}");
+            kill_pid(child_pid);
             None
         }
     }
@@ -81,12 +124,18 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
 
     let status = wait_with_timeout(child, tool);
 
-    let stdout = out_t.join().unwrap_or_else(|_| {
-        eprintln!("guardrails: {tool}: stdout reader thread panicked");
+    let stdout = out_t.join().unwrap_or_else(|payload| {
+        eprintln!(
+            "guardrails: {tool}: stdout reader thread panicked: {}",
+            format_thread_panic(payload)
+        );
         Vec::new()
     });
-    let stderr = err_t.join().unwrap_or_else(|_| {
-        eprintln!("guardrails: {tool}: stderr reader thread panicked");
+    let stderr = err_t.join().unwrap_or_else(|payload| {
+        eprintln!(
+            "guardrails: {tool}: stderr reader thread panicked: {}",
+            format_thread_panic(payload)
+        );
         Vec::new()
     });
 
@@ -150,6 +199,71 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn classify_wait_exited_returns_status() {
+        let status = Command::new("true").status().unwrap();
+        match classify_wait(Ok(Ok(status))) {
+            WaitOutcome::Exited(s) => assert!(s.success()),
+            other => panic!("expected Exited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_wait_process_error_returns_error() {
+        let err = io::Error::other("spawn failed");
+        match classify_wait(Ok(Err(err))) {
+            WaitOutcome::ProcessError(e) => assert!(e.to_string().contains("spawn failed")),
+            other => panic!("expected ProcessError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_wait_timeout_distinct_from_disconnected() {
+        assert!(matches!(
+            classify_wait(Err(RecvTimeoutError::Timeout)),
+            WaitOutcome::Timeout
+        ));
+        assert!(matches!(
+            classify_wait(Err(RecvTimeoutError::Disconnected)),
+            WaitOutcome::WaitThreadPanic
+        ));
+    }
+
+    #[test]
+    fn classify_wait_disconnected_observed_when_sender_dropped() {
+        let (tx, rx) = mpsc::channel::<io::Result<ExitStatus>>();
+        drop(tx);
+        assert!(matches!(
+            classify_wait(rx.recv_timeout(Duration::from_millis(10))),
+            WaitOutcome::WaitThreadPanic
+        ));
+    }
+
+    #[test]
+    fn format_thread_panic_extracts_str_payload() {
+        let payload: Box<dyn Any + Send> = Box::new("oops");
+        assert_eq!(format_thread_panic(payload), "oops");
+    }
+
+    #[test]
+    fn format_thread_panic_extracts_string_payload() {
+        let payload: Box<dyn Any + Send> = Box::new(String::from("dynamic message"));
+        assert_eq!(format_thread_panic(payload), "dynamic message");
+    }
+
+    #[test]
+    fn format_thread_panic_falls_back_for_non_string_payload() {
+        let payload: Box<dyn Any + Send> = Box::new(42i32);
+        assert_eq!(format_thread_panic(payload), "<non-string panic payload>");
+    }
+
+    #[test]
+    fn format_thread_panic_extracts_actual_thread_panic_str() {
+        let handle = thread::spawn(|| panic!("thread blew up"));
+        let payload = handle.join().expect_err("thread must panic");
+        assert_eq!(format_thread_panic(payload), "thread blew up");
+    }
 
     #[test]
     fn run_with_timeout_captures_stdout() {
@@ -287,6 +401,37 @@ mod tests {
             Some(project_root.as_path()),
         );
         assert_eq!(result, None);
+    }
+
+    // Measure per-call cost of try_resolve_bin against an ancestor depth that
+    // exceeds typical project layouts (10 levels). Used to verify whether
+    // ancestor-stat work is dominant vs hook startup before adding a cache.
+    // Run with: cargo test --release --bin guardrails resolve::tests::bench -- --ignored --nocapture
+    #[test]
+    #[ignore = "manual perf bench, run with --ignored --nocapture"]
+    fn bench_try_resolve_bin_cost_per_call() {
+        use std::time::Instant;
+
+        let tmp = TempDir::new().unwrap();
+        let mut dir = tmp.path().to_path_buf();
+        for i in 0..10 {
+            dir = dir.join(format!("d{i}"));
+        }
+        fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join("file.ts");
+
+        let iters = 1000u32;
+        let start = Instant::now();
+        for _ in 0..iters {
+            let _ = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
+        }
+        let elapsed = start.elapsed();
+        let per_call_ns = elapsed.as_nanos() / u128::from(iters);
+        eprintln!(
+            "bench: try_resolve_bin (depth 10, all miss) {iters} iters in {elapsed:?}, \
+             per call = {per_call_ns} ns ({} us)",
+            per_call_ns / 1000
+        );
     }
 
     // Legitimate `<project_root>/node_modules/.bin/` resolution still works
