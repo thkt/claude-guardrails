@@ -905,7 +905,12 @@ fn disabled_config_with_json_emits_allow_decision() {
         &[("NO_COLOR", "1")],
         &["--json"],
     );
-    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
@@ -1025,7 +1030,7 @@ fn prefetch_without_json_exits_io_error_with_stderr_diagnostic() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("XDG_CACHE_HOME") || stderr.contains("cache"),
-        "expected cache-related diagnostic in stderr: {stderr}"
+        stderr.contains("no cache directory available"),
+        "expected OxlintError::CacheDirUnavailable Display string in stderr: {stderr}"
     );
 }

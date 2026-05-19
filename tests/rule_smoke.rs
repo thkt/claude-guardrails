@@ -174,7 +174,7 @@ fn crypto_weak_silent_on_sha256() {
     );
 }
 
-// T-011 follow-up: crypto-weak fires on SHA-1 (RE_SHA1)
+// T-081: crypto-weak fires on SHA-1 (extends T-011 MD5 coverage)
 #[test]
 fn crypto_weak_fires_on_sha1() {
     assert_rule_fires(
@@ -184,7 +184,7 @@ fn crypto_weak_fires_on_sha1() {
     );
 }
 
-// T-011 follow-up: crypto-weak fires on DES (RE_DES)
+// T-082: crypto-weak fires on DES (extends T-011 MD5 coverage)
 #[test]
 fn crypto_weak_fires_on_des() {
     assert_rule_fires(
@@ -194,7 +194,7 @@ fn crypto_weak_fires_on_des() {
     );
 }
 
-// T-011 follow-up: crypto-weak fires on RC4 (RE_RC4)
+// T-083: crypto-weak fires on RC4 (extends T-011 MD5 coverage)
 #[test]
 fn crypto_weak_fires_on_rc4() {
     assert_rule_fires(
@@ -244,7 +244,7 @@ fn http_resource_silent_on_https() {
     );
 }
 
-// T-015 follow-up: http-resource silent on http://localhost (RE_LOCAL exception)
+// T-084: http-resource silent on http://localhost (loopback exception; companion to T-015)
 #[test]
 fn http_resource_silent_on_localhost() {
     assert_rule_silent(
@@ -254,7 +254,7 @@ fn http_resource_silent_on_localhost() {
     );
 }
 
-// T-015 follow-up: http-resource silent on http://127.0.0.1 (RE_LOCAL exception)
+// T-085: http-resource silent on http://127.0.0.1 (loopback exception; companion to T-015)
 #[test]
 fn http_resource_silent_on_loopback_ip() {
     assert_rule_silent(
