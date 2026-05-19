@@ -14,25 +14,46 @@ const OXLINT_VERSION: &str = "1.56.0";
 
 const DOWNLOAD_BASE: &str = "https://github.com/oxc-project/oxc/releases/download";
 
-// SHA-256 of the upstream tarball, per platform triple. Pinned at the version
-// constant above. When bumping OXLINT_VERSION, regenerate all four entries via
-// `shasum -a 256 oxlint-<triple>.tar.gz` against the release artifacts.
-const OXLINT_CHECKSUMS: &[(&str, &str)] = &[
+struct PlatformPin {
+    triple: &'static str,
+    sha256: &'static str,
+}
+
+// Platform pin table. One entry per (OS, ARCH) we support. `sha256` is the
+// SHA-256 of the upstream tarball; regenerate all entries on OXLINT_VERSION
+// bump via `shasum -a 256 oxlint-<triple>.tar.gz` against the release artifacts.
+const PLATFORMS: &[(&str, &str, PlatformPin)] = &[
     (
-        "aarch64-apple-darwin",
-        "7915dc73c905c6489608cc3dc844556342b17f6599b2e7e9a0dd9bf0e7fa6341",
+        "macos",
+        "aarch64",
+        PlatformPin {
+            triple: "aarch64-apple-darwin",
+            sha256: "7915dc73c905c6489608cc3dc844556342b17f6599b2e7e9a0dd9bf0e7fa6341",
+        },
     ),
     (
-        "x86_64-apple-darwin",
-        "9c035c431032c7038b2763474da73a18c476d41320eb455680f5b46f3dc52a9f",
+        "macos",
+        "x86_64",
+        PlatformPin {
+            triple: "x86_64-apple-darwin",
+            sha256: "9c035c431032c7038b2763474da73a18c476d41320eb455680f5b46f3dc52a9f",
+        },
     ),
     (
-        "x86_64-unknown-linux-gnu",
-        "487d00ac3c609c9020abbd879a91c183560dc382e15356be2a1bd6d860ed952f",
+        "linux",
+        "x86_64",
+        PlatformPin {
+            triple: "x86_64-unknown-linux-gnu",
+            sha256: "487d00ac3c609c9020abbd879a91c183560dc382e15356be2a1bd6d860ed952f",
+        },
     ),
     (
-        "aarch64-unknown-linux-gnu",
-        "f0c3f2895204c97d2aedeb62db6913e4ac186ab94c1dd4b9812a35223039d6f5",
+        "linux",
+        "aarch64",
+        PlatformPin {
+            triple: "aarch64-unknown-linux-gnu",
+            sha256: "f0c3f2895204c97d2aedeb62db6913e4ac186ab94c1dd4b9812a35223039d6f5",
+        },
     ),
 ];
 
@@ -103,14 +124,10 @@ impl fmt::Display for OxlintError {
     }
 }
 
-fn detect_platform() -> Option<&'static str> {
-    match (env::consts::OS, env::consts::ARCH) {
-        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
-        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
-        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
-        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
-        _ => None,
-    }
+fn detect_pin() -> Option<&'static PlatformPin> {
+    PLATFORMS.iter().find_map(|(os, arch, pin)| {
+        (*os == env::consts::OS && *arch == env::consts::ARCH).then_some(pin)
+    })
 }
 
 fn download_url(version: &str, platform: &str) -> String {
@@ -145,15 +162,14 @@ where
         return Ok(target);
     }
 
-    let platform = detect_platform().ok_or(OxlintError::UnsupportedPlatform {
+    let pin = detect_pin().ok_or(OxlintError::UnsupportedPlatform {
         os: env::consts::OS,
         arch: env::consts::ARCH,
     })?;
 
-    let expected_sha = expected_checksum(platform)?;
-    let url = download_url(version, platform);
+    let url = download_url(version, pin.triple);
     let bytes = fetch(&url)?;
-    extract_to_cache(&bytes, expected_sha, cache, version, platform)
+    extract_to_cache(&bytes, pin.sha256, cache, version, pin.triple)
 }
 
 const MAX_DOWNLOAD_SIZE: u64 = 50_000_000;
@@ -171,16 +187,6 @@ fn fetch_url(url: &str) -> Result<Vec<u8>, OxlintError> {
         .read_to_end(&mut bytes)
         .map_err(|e| OxlintError::NetworkFailure(e.to_string()))?;
     Ok(bytes)
-}
-
-fn expected_checksum(platform: &str) -> Result<&'static str, OxlintError> {
-    OXLINT_CHECKSUMS
-        .iter()
-        .find_map(|(p, h)| (*p == platform).then_some(*h))
-        .ok_or(OxlintError::UnsupportedPlatform {
-            os: env::consts::OS,
-            arch: env::consts::ARCH,
-        })
 }
 
 fn verify_sha256(bytes: &[u8], expected_hex: &str) -> Result<(), OxlintError> {
@@ -377,9 +383,6 @@ mod tests {
         buf
     }
 
-    // SAFETY: tests pin a specific platform string to bypass detect_platform();
-    // they don't depend on the host triple. Callers patch OXLINT_CHECKSUMS via
-    // a hashing helper that mirrors verify_sha256, not via env mutation.
     fn checksum_of(bytes: &[u8]) -> [u8; 32] {
         let mut h = Sha256::new();
         h.update(bytes);
@@ -388,10 +391,8 @@ mod tests {
 
     // T-014: platform detection on supported OS
     #[test]
-    fn detect_platform_returns_known_triple() {
-        let platform = detect_platform();
-        assert!(platform.is_some(), "expected Some on macOS/Linux");
-        let p = platform.unwrap();
+    fn detect_pin_returns_known_triple() {
+        let pin = detect_pin().expect("expected Some on macOS/Linux");
         assert!(
             [
                 "aarch64-apple-darwin",
@@ -399,8 +400,9 @@ mod tests {
                 "x86_64-unknown-linux-gnu",
                 "aarch64-unknown-linux-gnu"
             ]
-            .contains(&p),
-            "unexpected platform: {p}"
+            .contains(&pin.triple),
+            "unexpected platform: {}",
+            pin.triple
         );
     }
 
@@ -453,18 +455,29 @@ mod tests {
     }
 
     #[test]
-    fn pinned_checksum_table_covers_every_supported_platform() {
-        for plat in [
-            "aarch64-apple-darwin",
-            "x86_64-apple-darwin",
-            "x86_64-unknown-linux-gnu",
-            "aarch64-unknown-linux-gnu",
+    fn pinned_checksum_table_is_well_formed() {
+        for expected in [
+            ("macos", "aarch64"),
+            ("macos", "x86_64"),
+            ("linux", "x86_64"),
+            ("linux", "aarch64"),
         ] {
-            let hex = expected_checksum(plat).unwrap_or_else(|_| panic!("missing pin for {plat}"));
-            assert_eq!(hex.len(), 64, "pin for {plat} must be 32 bytes hex");
             assert!(
-                hex.chars().all(|c| c.is_ascii_hexdigit()),
-                "pin for {plat} must be hex"
+                PLATFORMS.iter().any(|(o, a, _)| (*o, *a) == expected),
+                "missing pin for {expected:?}"
+            );
+        }
+        for (_, _, pin) in PLATFORMS {
+            assert_eq!(
+                pin.sha256.len(),
+                64,
+                "pin for {} must be 32 bytes hex",
+                pin.triple
+            );
+            assert!(
+                pin.sha256.chars().all(|c| c.is_ascii_hexdigit()),
+                "pin for {} must be hex",
+                pin.triple
             );
         }
     }
@@ -506,7 +519,6 @@ mod tests {
     fn extract_rejects_tarball_with_checksum_mismatch() {
         let tmp = TempDir::new().unwrap();
         let tar = make_signed_tar("aarch64-apple-darwin", b"fake oxlint payload");
-        // 32 bytes of 0xaa never match an honestly hashed tarball.
         let bogus_pin = "a".repeat(64);
         let err = extract_to_cache(
             &tar,
@@ -586,7 +598,12 @@ mod tests {
             "aarch64-apple-darwin",
         )
         .unwrap_err();
-        assert!(matches!(err, OxlintError::ExtractFailure(_)));
+        match err {
+            OxlintError::ExtractFailure(msg) => {
+                assert!(msg.contains("absolute path"), "msg: {msg}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 
     #[test]
@@ -646,7 +663,6 @@ mod tests {
     #[test]
     fn extract_rejects_tarball_missing_expected_entry() {
         let tmp = TempDir::new().unwrap();
-        // Sha matches, but the archive contains a different file name.
         let tar = make_tar_gz(&[("oxlint-other-platform", b"oops")]);
         let pin = encode_hex(&checksum_of(&tar));
 
