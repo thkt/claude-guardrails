@@ -670,23 +670,60 @@ fn run_prefetch(json_mode: bool) -> i32 {
     }
 }
 
+fn resolve_project_root_with_notes_from(
+    result: io::Result<PathBuf>,
+    notes: &mut Vec<String>,
+) -> Option<PathBuf> {
+    match result {
+        Ok(p) => Some(p),
+        Err(e) => {
+            let note = format!(
+                "cannot resolve project root ({e}); path-traversal boundary check disabled"
+            );
+            eprintln!("guardrails: warning: {note}");
+            notes.push(note);
+            None
+        }
+    }
+}
+
+fn load_config_with_notes_from(result: Result<Config, String>, notes: &mut Vec<String>) -> Config {
+    match result {
+        Ok(c) => c,
+        Err(e) => {
+            let note = format!(
+                "config error (using defaults: all rules enabled, block_on=[critical,high]): {e}"
+            );
+            eprintln!("guardrails: {note}");
+            notes.push(note);
+            Config::default()
+        }
+    }
+}
+
 fn run_hook(json_mode: bool) -> i32 {
     let input = match parse_stdin(json_mode) {
         Ok(v) => v,
         Err(code) => return code,
     };
+    run_hook_with_input(
+        &input,
+        env::current_dir().and_then(fs::canonicalize),
+        Config::default().with_project_overrides(),
+        json_mode,
+    )
+}
 
-    let project_root = match env::current_dir().and_then(fs::canonicalize) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            eprintln!(
-                "guardrails: warning: cannot resolve project root ({e}); path-traversal boundary check disabled"
-            );
-            None
-        }
-    };
-    let Some((file_path, content, degraded)) =
-        get_file_and_content(&input, project_root.as_deref())
+fn run_hook_with_input(
+    input: &ToolInput,
+    project_root_result: io::Result<PathBuf>,
+    config_result: Result<Config, String>,
+    json_mode: bool,
+) -> i32 {
+    let mut notes: Vec<String> = Vec::new();
+    let project_root = resolve_project_root_with_notes_from(project_root_result, &mut notes);
+
+    let Some((file_path, content, degraded)) = get_file_and_content(input, project_root.as_deref())
     else {
         let is_write_tool = matches!(
             input.tool_name.as_str(),
@@ -703,29 +740,22 @@ fn run_hook(json_mode: bool) -> i32 {
                 input.tool_name
             );
         }
-        emit_json_if_enabled(json_mode, &[], &[], Vec::new());
+        emit_json_if_enabled(json_mode, &[], &[], notes);
         return 0;
     };
 
-    let config = match Config::default().with_project_overrides() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "guardrails: config error (using defaults: all rules enabled, block_on=[critical,high]): {e}"
-            );
-            Config::default()
-        }
-    };
+    let config = load_config_with_notes_from(config_result, &mut notes);
 
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(json_mode, &[], &[], Vec::new());
+        emit_json_if_enabled(json_mode, &[], &[], notes);
         return 0;
     }
 
-    let (violations, mut notes) =
+    let (violations, lint_notes) =
         collect_violations(&file_path, &content, &config, project_root.as_deref());
+    notes.extend(lint_notes);
     if let Some(reason) = degraded {
         let note = reason.note();
         eprintln!("guardrails: degraded: {note}");
@@ -1564,5 +1594,62 @@ mod tests {
         let e = download::OxlintError::CacheDirUnavailable;
         let (code, _) = e.classify();
         assert_eq!(code, ErrorCode::IoError);
+    }
+
+    #[test]
+    fn resolve_project_root_with_notes_from_returns_path_and_skips_notes_on_ok() {
+        let mut notes = Vec::new();
+        let path = PathBuf::from("/some/path");
+        let result = resolve_project_root_with_notes_from(Ok(path.clone()), &mut notes);
+        assert_eq!(result, Some(path));
+        assert!(notes.is_empty(), "no note expected on Ok, got: {notes:?}");
+    }
+
+    #[test]
+    fn resolve_project_root_with_notes_from_pushes_note_on_err() {
+        let mut notes = Vec::new();
+        let err = io::Error::new(io::ErrorKind::NotFound, "no such dir");
+        let result = resolve_project_root_with_notes_from(Err(err), &mut notes);
+        assert!(result.is_none(), "expected None on Err, got: {result:?}");
+        assert_eq!(notes.len(), 1, "expected one note, got: {notes:?}");
+        assert!(
+            notes[0].contains("cannot resolve project root"),
+            "note must describe failure; got: {}",
+            notes[0]
+        );
+        assert!(
+            notes[0].contains("no such dir"),
+            "note must include underlying error; got: {}",
+            notes[0]
+        );
+    }
+
+    #[test]
+    fn load_config_with_notes_from_returns_config_and_skips_notes_on_ok() {
+        let mut notes = Vec::new();
+        let result = load_config_with_notes_from(Ok(Config::default()), &mut notes);
+        assert!(result.enabled);
+        assert!(notes.is_empty(), "no note expected on Ok, got: {notes:?}");
+    }
+
+    #[test]
+    fn load_config_with_notes_from_pushes_note_and_falls_back_to_default_on_err() {
+        let mut notes = Vec::new();
+        let result = load_config_with_notes_from(
+            Err(String::from("invalid config \"x\": expected value")),
+            &mut notes,
+        );
+        assert!(result.enabled, "fallback must be Config::default()");
+        assert_eq!(notes.len(), 1);
+        assert!(
+            notes[0].contains("config error"),
+            "note must describe failure; got: {}",
+            notes[0]
+        );
+        assert!(
+            notes[0].contains("invalid config"),
+            "note must include underlying error; got: {}",
+            notes[0]
+        );
     }
 }
