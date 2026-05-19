@@ -134,4 +134,3 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 * `src/main.rs` (`parse_stdin`, `run_hook`, `install_panic_hook`, `lint_with_external_tools`, `lint_with_ast`)
 * `src/config.rs` (`with_project_overrides`, `find_git_root`)
 * ADR-0005 (JSON envelope と exit code 体系)
-* Audit: `docs/audit/2026-05-14-undocumented-decisions.md` Cluster A

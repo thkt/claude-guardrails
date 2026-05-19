@@ -124,7 +124,6 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/routes/users.t
 - `src/rules/mod.rs` `API_PREFIX_PAT`
 - `src/rules/mod.rs` `re_api_file_rejects_near_miss_paths` 等 pattern boundary tests
 - `README.md` (per-rule scope 記述)
-- `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster X)
 - OUTCOME `.claude/OUTCOME.md` Non-goals 節 (独立 Node.js バックエンド除外)
 
 ### Reassessment Triggers
