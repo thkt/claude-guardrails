@@ -9,43 +9,40 @@ static RE_LOCAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"http://(localhost|127\.0\.0\.1)").expect("RE_LOCAL: invalid regex")
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for &(line_num, line) in lines {
-                for mat in RE_HTTP_URL.find_iter(line) {
-                    let url_match = mat.as_str();
-                    if !RE_LOCAL.is_match(url_match) {
-                        violations.push(Violation {
-                            rule: super::rule_id::HTTP_RESOURCE.to_owned(),
-                            severity: Severity::Medium,
-                            fix: "Use HTTPS for external resources.".to_owned(),
-                            file: file_path.to_owned(),
-                            line: Some(line_num),
-                        });
-                        break;
-                    }
+        for &(line_num, line) in lines {
+            for mat in RE_HTTP_URL.find_iter(line) {
+                let url_match = mat.as_str();
+                if !RE_LOCAL.is_match(url_match) {
+                    violations.push(Violation {
+                        rule: super::rule_id::HTTP_RESOURCE.to_owned(),
+                        severity: Severity::Medium,
+                        fix: "Use HTTPS for external resources.".to_owned(),
+                        file: file_path.to_owned(),
+                        line: Some(line_num),
+                    });
+                    break;
                 }
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match(path) {
+        if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]
@@ -86,9 +83,8 @@ mod tests {
 
     #[test]
     fn detects_http_on_line_with_localhost() {
-        let rule = rule();
         let content = r#"const urls = ["http://evil.com", "http://localhost:3000"];"#;
-        let result = rule.check(
+        let result = RULE.check(
             content,
             "/src/api.ts",
             &super::super::non_comment_lines(content),

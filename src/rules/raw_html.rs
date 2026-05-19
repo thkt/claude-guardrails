@@ -31,54 +31,51 @@ fn make_violation(file_path: &str, line_num: u32) -> Violation {
     }
 }
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
-            let mut html_tag_line: Option<u32> = None;
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
+        let mut html_tag_line: Option<u32> = None;
 
-            for &(line_num, line) in lines {
-                if RE_HTML_CONCAT.is_match(line) {
-                    violations.push(make_violation(file_path, line_num));
-                    continue;
-                }
-
-                if RE_HTML_TEMPLATE.is_match(line) {
-                    violations.push(make_violation(file_path, line_num));
-                    continue;
-                }
-
-                if RE_HTML_JOIN.is_match(line) {
-                    html_tag_line = Some(line_num);
-                }
-                if let Some(tag_line) = html_tag_line {
-                    if RE_JOIN_CALL.is_match(line)
-                        && line_num.saturating_sub(tag_line) <= JOIN_PROXIMITY_LINES
-                    {
-                        violations.push(make_violation(file_path, line_num));
-                        html_tag_line = None;
-                    } else if line_num.saturating_sub(tag_line) > JOIN_PROXIMITY_LINES {
-                        html_tag_line = None;
-                    }
-                }
+        for &(line_num, line) in lines {
+            if RE_HTML_CONCAT.is_match(line) {
+                violations.push(make_violation(file_path, line_num));
+                continue;
             }
 
-            violations
-        }),
-    }
-}
+            if RE_HTML_TEMPLATE.is_match(line) {
+                violations.push(make_violation(file_path, line_num));
+                continue;
+            }
+
+            if RE_HTML_JOIN.is_match(line) {
+                html_tag_line = Some(line_num);
+            }
+            if let Some(tag_line) = html_tag_line {
+                if RE_JOIN_CALL.is_match(line)
+                    && line_num.saturating_sub(tag_line) <= JOIN_PROXIMITY_LINES
+                {
+                    violations.push(make_violation(file_path, line_num));
+                    html_tag_line = None;
+                } else if line_num.saturating_sub(tag_line) > JOIN_PROXIMITY_LINES {
+                    html_tag_line = None;
+                }
+            }
+        }
+
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match(path) {
+        if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

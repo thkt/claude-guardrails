@@ -66,43 +66,41 @@ static SYNC_IO: LazyLock<[SyncIo; 6]> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            // Allow sync I/O in config files and CLI scripts
-            if RE_EXCLUDED_FILE.is_match(file_path) {
-                return Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        // Allow sync I/O in config files and CLI scripts
+        if RE_EXCLUDED_FILE.is_match(file_path) {
+            return Vec::new();
+        }
+
+        let mut violations = Vec::new();
+
+        for io in SYNC_IO.iter() {
+            if let Some(line_num) = find_match_in_lines(lines, io.pattern) {
+                violations.push(Violation {
+                    rule: super::rule_id::SYNC_IO.to_owned(),
+                    severity: Severity::Medium,
+                    fix: format!(
+                        "{} blocks the event loop. Use {} instead.",
+                        io.method, io.async_alternative
+                    ),
+                    file: file_path.to_owned(),
+                    line: Some(line_num),
+                });
             }
+        }
 
-            let mut violations = Vec::new();
-
-            for io in SYNC_IO.iter() {
-                if let Some(line_num) = find_match_in_lines(lines, io.pattern) {
-                    violations.push(Violation {
-                        rule: super::rule_id::SYNC_IO.to_owned(),
-                        severity: Severity::Medium,
-                        fix: format!(
-                            "{} blocks the event loop. Use {} instead.",
-                            io.method, io.async_alternative
-                        ),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
-            }
-
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

@@ -13,32 +13,31 @@ static GENERATED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
-            for pattern in GENERATED_PATTERNS.iter() {
-                if pattern.is_match(file_path) {
-                    return vec![Violation {
-                        rule: super::rule_id::GENERATED_FILE.to_owned(),
-                        severity: Severity::High,
-                        fix: "Do not edit generated files directly. Modify the source and regenerate.".to_owned(),
-                        file: file_path.to_owned(),
-                        line: None,
-                    }];
-                }
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_ALL_FILES.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+        for pattern in GENERATED_PATTERNS.iter() {
+            if pattern.is_match(file_path) {
+                return vec![Violation {
+                    rule: super::rule_id::GENERATED_FILE.to_owned(),
+                    severity: Severity::High,
+                    fix: "Do not edit generated files directly. Modify the source and regenerate."
+                        .to_owned(),
+                    file: file_path.to_owned(),
+                    line: None,
+                }];
             }
-            Vec::new()
-        }),
-    }
-}
+        }
+        Vec::new()
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(path: &str) -> Vec<Violation> {
-        rule().check("", path, &[])
+        RULE.check("", path, &[])
     }
 
     #[test]

@@ -274,11 +274,11 @@ impl Rule {
 
 macro_rules! register_rules {
     ($config:expr, $rules:expr, $( $field:ident => $module:ident ),* $(,)?) => {
-        $(if $config.rules.$field { $rules.push($module::rule()); })*
+        $(if $config.rules.$field { $rules.push(&*$module::RULE); })*
     };
 }
 
-pub fn load_rules(config: &Config) -> Vec<Rule> {
+pub fn load_rules(config: &Config) -> Vec<&'static Rule> {
     let mut rules = Vec::new();
     register_rules!(config, rules,
         sensitive_file    => sensitive_file,

@@ -53,35 +53,33 @@ static FLAKY_PATTERNS: LazyLock<[FlakyPattern; 5]> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_TEST_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_TEST_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for pattern in FLAKY_PATTERNS.iter() {
-                if let Some(line_num) = find_match_in_lines(lines, pattern.pattern) {
-                    violations.push(Violation {
-                        rule: super::rule_id::FLAKY_TEST.to_owned(),
-                        severity: Severity::Low,
-                        fix: format!("{} can cause flaky tests. {}", pattern.name, pattern.reason),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
+        for pattern in FLAKY_PATTERNS.iter() {
+            if let Some(line_num) = find_match_in_lines(lines, pattern.pattern) {
+                violations.push(Violation {
+                    rule: super::rule_id::FLAKY_TEST.to_owned(),
+                    severity: Severity::Low,
+                    fix: format!("{} can cause flaky tests. {}", pattern.name, pattern.reason),
+                    file: file_path.to_owned(),
+                    line: Some(line_num),
+                });
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(
+        RULE.check(
             content,
             "/src/utils.test.ts",
             &super::super::non_comment_lines(content),
@@ -130,8 +128,7 @@ mod tests {
 
     #[test]
     fn ignores_non_test_files() {
-        let r = rule();
-        assert!(!r.file_pattern.is_match("/src/utils.ts"));
+        assert!(!RULE.file_pattern.is_match("/src/utils.ts"));
     }
 
     #[test]

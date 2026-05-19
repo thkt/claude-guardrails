@@ -19,47 +19,45 @@ static RE_TX_BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
     .expect("RE_TX_BOUNDARY: invalid regex")
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            if !RE_TARGET_DIR.is_match(file_path) && !RE_API_OR_ROUTE_FILE.is_match(file_path) {
-                return Vec::new();
-            }
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        if !RE_TARGET_DIR.is_match(file_path) && !RE_API_OR_ROUTE_FILE.is_match(file_path) {
+            return Vec::new();
+        }
 
-            let mut writes = lines.iter().filter(|(_, line)| RE_WRITE_OPS.is_match(line));
-            let Some((first, _)) = writes.next() else {
-                return Vec::new();
-            };
-            let write_count = 1 + writes.count();
-            if write_count < 2 {
-                return Vec::new();
-            }
-            let first_write_line = Some(*first);
+        let mut writes = lines.iter().filter(|(_, line)| RE_WRITE_OPS.is_match(line));
+        let Some((first, _)) = writes.next() else {
+            return Vec::new();
+        };
+        let write_count = 1 + writes.count();
+        if write_count < 2 {
+            return Vec::new();
+        }
+        let first_write_line = Some(*first);
 
-            if find_match_in_lines(lines, &RE_TX_BOUNDARY).is_some() {
-                return Vec::new();
-            }
+        if find_match_in_lines(lines, &RE_TX_BOUNDARY).is_some() {
+            return Vec::new();
+        }
 
-            vec![Violation {
-                rule: super::rule_id::TRANSACTION_BOUNDARY.to_owned(),
-                severity: Severity::Medium,
-                fix: format!(
-                    "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {write_count} write ops detected"
-                ),
-                file: file_path.to_owned(),
-                line: first_write_line,
-            }]
-        }),
-    }
-}
+        vec![Violation {
+            rule: super::rule_id::TRANSACTION_BOUNDARY.to_owned(),
+            severity: Severity::Medium,
+            fix: format!(
+                "Add transaction boundary (UnitOfWork, @Transactional, or explicit tx) - {write_count} write ops detected"
+            ),
+            file: file_path.to_owned(),
+            line: first_write_line,
+        }]
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        rule().check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     #[test]

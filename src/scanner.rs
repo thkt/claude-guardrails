@@ -192,7 +192,12 @@ impl<'a> StringScanner<'a> {
     }
 }
 
-pub fn extract_delimited_content(content: &str, start: usize, open: u8, close: u8) -> Option<&str> {
+pub fn extract_delimited_range(
+    content: &str,
+    start: usize,
+    open: u8,
+    close: u8,
+) -> Option<(usize, usize)> {
     let bytes = content.as_bytes();
     let mut scanner = StringScanner::new(bytes, start);
     let mut depth = 1;
@@ -212,10 +217,14 @@ pub fn extract_delimited_content(content: &str, start: usize, open: u8, close: u
     }
 
     if depth == 0 {
-        Some(&content[start..scanner.pos - 1])
+        Some((start, scanner.pos - 1))
     } else {
         None
     }
+}
+
+pub fn extract_delimited_content(content: &str, start: usize, open: u8, close: u8) -> Option<&str> {
+    extract_delimited_range(content, start, open, close).map(|(s, e)| &content[s..e])
 }
 
 /// Pre-compute line offsets for O(log n) line number lookup.
@@ -228,6 +237,54 @@ pub fn build_line_offsets(content: &str) -> Vec<usize> {
         .collect()
 }
 
+/// Per-byte classification of source. Built in a single pass so callers can
+/// replace per-position rescans (O(n) each) with O(1) lookups.
+///
+/// - `comment[i]` is true when byte `i` is inside a `//` or `/* */` comment.
+/// - `code_visible[i]` keeps the original byte when `i` is code, otherwise
+///   ASCII space (`0x20`). Template interpolation (`${...}`) content stays
+///   code. Multi-byte string/comment content is preserved at byte level by
+///   replacing each byte individually; UTF-8 validity is maintained because
+///   ASCII space is a single-byte ASCII codepoint.
+pub struct SourceMasks {
+    pub comment: Vec<bool>,
+    pub code_visible: Vec<u8>,
+}
+
+pub fn build_source_masks(content: &str) -> SourceMasks {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut comment = vec![false; len];
+    let mut code_visible = bytes.to_vec();
+    let mut scanner = StringScanner::new(bytes, 0);
+
+    while scanner.pos < len {
+        let start = scanner.pos;
+        let in_interp = !scanner.template_interp_depth.is_empty()
+            && !scanner.in_single_quote
+            && !scanner.in_double_quote;
+        let in_comment_now = scanner.in_block_comment || scanner.in_line_comment;
+        let in_string_now =
+            scanner.in_single_quote || scanner.in_double_quote || scanner.in_template;
+        let hide = (in_string_now || in_comment_now) && !in_interp;
+
+        scanner.advance();
+        let end = scanner.pos.min(len);
+
+        for i in start..end {
+            comment[i] = in_comment_now;
+            if hide {
+                code_visible[i] = b' ';
+            }
+        }
+    }
+
+    SourceMasks {
+        comment,
+        code_visible,
+    }
+}
+
 /// Offsets on newline characters belong to the line ending at that position.
 pub fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
     match offsets.binary_search(&offset) {
@@ -238,6 +295,7 @@ pub fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str;
 
     #[test]
     fn scanner_handles_simple_string() {
@@ -353,5 +411,45 @@ mod tests {
         let content = r#"{ "}" + x }"#;
         let result = extract_delimited_content(content, 1, b'{', b'}');
         assert_eq!(result, Some(r#" "}" + x "#));
+    }
+
+    #[test]
+    fn source_masks_flag_line_comment_bytes() {
+        let masks = build_source_masks("code\n// hidden\nmore");
+        // bytes: 0..4 = "code", 4 = '\n', 5..7 = "//", 7..14 = " hidden",
+        // 14 = '\n' (still inside line comment until consumed), 15..19 = "more".
+        assert!(!masks.comment[0]);
+        assert!(!masks.comment[4]);
+        assert!(masks.comment[7], "byte inside // comment must be flagged");
+        assert!(!masks.comment[15], "first byte after the newline is code");
+    }
+
+    #[test]
+    fn source_masks_hide_string_content() {
+        let masks = build_source_masks("let x = 'secret';");
+        let visible = str::from_utf8(&masks.code_visible).expect("valid utf8");
+        // Quote delimiters remain code (the scanner flips state on the byte
+        // following the quote), only the body and the closing quote — which
+        // is observed while still inside the string — are blanked.
+        assert_eq!(visible, "let x = '       ;");
+    }
+
+    #[test]
+    fn source_masks_preserve_template_interpolation_as_code() {
+        let masks = build_source_masks("`${name}`");
+        let visible = str::from_utf8(&masks.code_visible).expect("valid utf8");
+        // backticks and template literal frame are hidden; ${name} body is code.
+        assert!(visible.contains("name"));
+    }
+
+    #[test]
+    fn source_masks_flag_block_comment_bytes() {
+        let masks = build_source_masks("a /* hidden */ b");
+        assert!(masks.comment[5], "block comment body must be flagged");
+        assert!(!masks.comment[0]);
+        assert!(
+            !masks.comment[15],
+            "byte after block comment returns to code"
+        );
     }
 }

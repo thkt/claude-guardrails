@@ -13,54 +13,49 @@ static RE_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
         .expect("RE_ASSERTION: invalid regex")
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_TEST_FILE.clone(),
-        checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
-            let line_offsets = build_line_offsets(content);
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_TEST_FILE.clone(),
+    checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
+        let line_offsets = build_line_offsets(content);
 
-            for caps in RE_TEST_START.captures_iter(content) {
-                let test_name = caps.get(2).map_or("unknown", |m| m.as_str());
-                let match_end = caps.get(0).map_or(0, |m| m.end());
+        for caps in RE_TEST_START.captures_iter(content) {
+            let test_name = caps.get(2).map_or("unknown", |m| m.as_str());
+            let match_end = caps.get(0).map_or(0, |m| m.end());
 
-                let test_body =
-                    extract_delimited_content(content, match_end, b'{', b'}').unwrap_or("");
+            let test_body = extract_delimited_content(content, match_end, b'{', b'}').unwrap_or("");
 
-                if RE_ASSERTION.is_match(test_body) {
-                    continue;
-                }
-
-                let trimmed = test_body.trim();
-                if trimmed.is_empty() || trimmed.starts_with("//") {
-                    continue;
-                }
-
-                let test_start = caps.get(0).map_or(0, |m| m.start());
-                let line_num = offset_to_line(&line_offsets, test_start);
-
-                violations.push(Violation {
-                    rule: super::rule_id::TEST_ASSERTION.to_owned(),
-                    severity: Severity::Medium,
-                    fix: format!(
-                        "Test '{test_name}' has no assertions. Add expect() or assert calls."
-                    ),
-                    file: file_path.to_owned(),
-                    line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
-                });
+            if RE_ASSERTION.is_match(test_body) {
+                continue;
             }
 
-            violations
-        }),
-    }
-}
+            let trimmed = test_body.trim();
+            if trimmed.is_empty() || trimmed.starts_with("//") {
+                continue;
+            }
+
+            let test_start = caps.get(0).map_or(0, |m| m.start());
+            let line_num = offset_to_line(&line_offsets, test_start);
+
+            violations.push(Violation {
+                rule: super::rule_id::TEST_ASSERTION.to_owned(),
+                severity: Severity::Medium,
+                fix: format!("Test '{test_name}' has no assertions. Add expect() or assert calls."),
+                file: file_path.to_owned(),
+                line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
+            });
+        }
+
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(
+        RULE.check(
             content,
             "/src/utils.test.ts",
             &super::super::non_comment_lines(content),

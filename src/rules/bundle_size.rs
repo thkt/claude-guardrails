@@ -61,38 +61,36 @@ static LARGE_IMPORTS: LazyLock<[LargeImport; 5]> = LazyLock::new(|| {
     ]
 });
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_JS_FILE.clone(),
-        checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
-            let mut violations = Vec::new();
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_JS_FILE.clone(),
+    checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
+        let mut violations = Vec::new();
 
-            for import in LARGE_IMPORTS.iter() {
-                if let Some(line_num) = find_match_in_lines(lines, import.pattern) {
-                    violations.push(Violation {
-                        rule: super::rule_id::BUNDLE_SIZE.to_owned(),
-                        severity: Severity::Medium,
-                        fix: format!(
-                            "Full {} import increases bundle size. {}",
-                            import.package, import.suggestion
-                        ),
-                        file: file_path.to_owned(),
-                        line: Some(line_num),
-                    });
-                }
+        for import in LARGE_IMPORTS.iter() {
+            if let Some(line_num) = find_match_in_lines(lines, import.pattern) {
+                violations.push(Violation {
+                    rule: super::rule_id::BUNDLE_SIZE.to_owned(),
+                    severity: Severity::Medium,
+                    fix: format!(
+                        "Full {} import increases bundle size. {}",
+                        import.package, import.suggestion
+                    ),
+                    file: file_path.to_owned(),
+                    line: Some(line_num),
+                });
             }
+        }
 
-            violations
-        }),
-    }
-}
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        rule().check(
+        RULE.check(
             content,
             "/src/utils/helper.ts",
             &super::super::non_comment_lines(content),

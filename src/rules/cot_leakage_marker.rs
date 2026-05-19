@@ -1,4 +1,5 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
+use std::sync::LazyLock;
 
 const MARKERS: &[&str] = &[
     "to=functions.",
@@ -7,51 +8,48 @@ const MARKERS: &[&str] = &[
     "<thinking>",
 ];
 
-pub fn rule() -> Rule {
-    Rule {
-        file_pattern: RE_ALL_FILES.clone(),
-        checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
-            // Self-exclusion: this file legitimately contains every marker as literal
-            // for detection and tests. Without skipping, any future edit to this rule
-            // would be blocked by itself. `replace('\\', "/")` normalizes Windows
-            // backslash separators so the suffix match works cross-platform.
-            if file_path
-                .replace('\\', "/")
-                .ends_with("src/rules/cot_leakage_marker.rs")
-            {
-                return Vec::new();
-            }
-            let mut violations = Vec::new();
-            for (idx, line) in content.lines().enumerate() {
-                for marker in MARKERS {
-                    if line.contains(marker) {
-                        violations.push(Violation {
-                            rule: super::rule_id::COT_LEAKAGE_MARKER.to_owned(),
-                            severity: Severity::High,
-                            fix: format!(
-                                "AI CoT leakage marker '{marker}' detected. Remove before writing."
-                            ),
-                            file: file_path.to_owned(),
-                            line: Some(u32::try_from(idx + 1).unwrap_or(u32::MAX)),
-                        });
-                    }
+pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+    file_pattern: RE_ALL_FILES.clone(),
+    checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+        // Self-exclusion: this file legitimately contains every marker as literal
+        // for detection and tests. Without skipping, any future edit to this rule
+        // would be blocked by itself. `replace('\\', "/")` normalizes Windows
+        // backslash separators so the suffix match works cross-platform.
+        if file_path
+            .replace('\\', "/")
+            .ends_with("src/rules/cot_leakage_marker.rs")
+        {
+            return Vec::new();
+        }
+        let mut violations = Vec::new();
+        for (idx, line) in content.lines().enumerate() {
+            for marker in MARKERS {
+                if line.contains(marker) {
+                    violations.push(Violation {
+                        rule: super::rule_id::COT_LEAKAGE_MARKER.to_owned(),
+                        severity: Severity::High,
+                        fix: format!(
+                            "AI CoT leakage marker '{marker}' detected. Remove before writing."
+                        ),
+                        file: file_path.to_owned(),
+                        line: Some(u32::try_from(idx + 1).unwrap_or(u32::MAX)),
+                    });
                 }
             }
-            violations
-        }),
-    }
-}
+        }
+        violations
+    }),
+});
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
-        let r = rule();
-        if !r.file_pattern.is_match(path) {
+        if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        r.check(content, path, &super::super::non_comment_lines(content))
+        RULE.check(content, path, &super::super::non_comment_lines(content))
     }
 
     // T-001: detects GPT harmony function call marker
