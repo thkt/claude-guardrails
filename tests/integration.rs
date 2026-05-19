@@ -569,6 +569,10 @@ fn json_mode_warning_only_keeps_allow_decision() {
             .all(|v| v["severity"] != "critical" && v["severity"] != "high"),
         "expected only non-blocking severities in: {parsed}"
     );
+    assert!(
+        violations.iter().any(|v| v["rule"] == "dom-access"),
+        "expected dom-access rule to fire for document.getElementById in .tsx: {parsed}"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -852,4 +856,176 @@ fn prefetch_json_io_error_envelope_when_cache_unavailable() {
         "next_step must mention XDG_CACHE_HOME; got: {parsed}"
     );
     assert_eq!(parsed["error"]["retryable"], false);
+}
+
+// F-008 gap 1: enabled:false at top level skips all rule evaluation.
+#[test]
+fn disabled_config_skips_rule_evaluation() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(".claude/tools.json"),
+        r#"{"guardrails": {"enabled": false}}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "enabled:false must skip eval rule; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// F-008 gap 2: enabled:false + --json emits an allow decision with zero violations.
+#[test]
+fn disabled_config_with_json_emits_allow_decision() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(".claude/tools.json"),
+        r#"{"guardrails": {"enabled": false}}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["data"]["violations"]
+            .as_array()
+            .expect("violations array")
+            .is_empty(),
+        "enabled:false must yield zero violations: {parsed}"
+    );
+}
+
+// F-008 gap 3: a blocking violation (eval, High) and an advisory violation
+// (dom-access, Medium) emitted together must produce exit 2, not 1.
+#[test]
+fn blocking_violation_takes_precedence_over_advisory() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/App.tsx",
+            "content": "const el = document.getElementById('foo');\neval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_json(&json.to_string());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected 2 (blocking) when blocking + advisory coexist; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("BLOCKED"),
+        "expected BLOCKED in stderr: {stderr}"
+    );
+}
+
+// F-008 gap 4: a malformed `.claude/tools.json` must fall back to default
+// config so violation detection keeps running (binary-level, non-JSON path).
+// The existing `malformed_tools_json_marks_json_envelope_degraded` covers the
+// --json envelope side; this covers the stderr / exit-code side.
+#[test]
+fn malformed_config_falls_back_to_defaults_and_keeps_detecting() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(tmp.path().join(".claude/tools.json"), "{not json}").unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "malformed config must fall back to defaults and still block eval; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("BLOCKED") || stderr.contains("eval"),
+        "expected eval violation despite config error: {stderr}"
+    );
+}
+
+// F-034: OldStringNotFound-specific note must surface in the JSON envelope
+// (distinguishable from other DegradedReason variants by its prefix).
+#[test]
+fn old_string_not_found_envelope_carries_specific_note() {
+    let tmp = tmp_repo();
+    let path = tmp.path().join("file.ts");
+    fs::write(&path, "const a = 1;\n").unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": path.to_str().unwrap(),
+            "old_string": "pattern that does not match anywhere",
+            "new_string": "const safe = 2;"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(r#""degraded":true"#),
+        "expected degraded:true: {stdout}"
+    );
+    assert!(
+        stdout.contains("Edit pattern not found in target file"),
+        "expected OldStringNotFound-specific note prefix; got: {stdout}"
+    );
+}
+
+// F-034: `prefetch` without `--json` must still surface the cache-unavailable
+// failure on stderr and exit with EX_IOERR (74). The existing
+// `prefetch_json_io_error_envelope_when_cache_unavailable` covers the --json
+// envelope path; this covers the human-readable stderr path.
+#[test]
+fn prefetch_without_json_exits_io_error_with_stderr_diagnostic() {
+    let output = Command::new(env!("CARGO_BIN_EXE_guardrails"))
+        .arg("prefetch")
+        .env_remove("HOME")
+        .env_remove("XDG_CACHE_HOME")
+        .output()
+        .expect("failed to spawn guardrails");
+    assert_eq!(
+        output.status.code(),
+        Some(74),
+        "expected EX_IOERR; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("XDG_CACHE_HOME") || stderr.contains("cache"),
+        "expected cache-related diagnostic in stderr: {stderr}"
+    );
 }
