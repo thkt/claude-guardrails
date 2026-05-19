@@ -1,15 +1,15 @@
 use serde::de::DeserializeOwned;
 
 /// Linters may prefix JSON with non-JSON lines (version info, config warnings)
-/// and emit either single-line or pretty-printed (multi-line) JSON. Tries full
-/// stdout first, then locates the first line that starts with `{` and lets
-/// `serde_json`'s streaming parser consume one balanced JSON value from there.
+/// and emit either single-line or pretty-printed JSON. Tries the full stdout
+/// first, then falls back to the first line beginning with `{`. Trailing bytes
+/// after the JSON value are ignored.
 pub fn parse_linter_json<T: DeserializeOwned>(stdout: &str, stderr: &str, tool: &str) -> Option<T> {
     if let Ok(parsed) = serde_json::from_str::<T>(stdout) {
         return Some(parsed);
     }
 
-    let Some(start) = first_json_object_offset(stdout) else {
+    let Some(start) = first_open_brace_line_offset(stdout) else {
         if !stdout.is_empty() || !stderr.is_empty() {
             eprintln!("guardrails: {tool}: no JSON in output (may have config issues)");
         }
@@ -38,7 +38,7 @@ pub fn parse_linter_json<T: DeserializeOwned>(stdout: &str, stderr: &str, tool: 
 }
 
 /// Returns the byte offset of the first line whose non-whitespace content begins with `{`.
-fn first_json_object_offset(s: &str) -> Option<usize> {
+fn first_open_brace_line_offset(s: &str) -> Option<usize> {
     let mut offset = 0;
     for line in s.split_inclusive('\n') {
         let leading = line.len() - line.trim_start().len();
