@@ -1,15 +1,15 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
-static RE_SRC_DIR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/src/").expect("RE_SRC_DIR: invalid regex"));
+static RE_SRC_DIR: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_SRC_DIR", r"/src/"));
 
 static TEST_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("test/spec pattern"),
-        Regex::new(r"/__tests__/").expect("__tests__ dir pattern"),
-        Regex::new(r"/tests?/").expect("test dir pattern"),
+        regex_or_die("test_location:test_spec", r"\.(test|spec)\.[jt]sx?$"),
+        regex_or_die("test_location:__tests__dir", r"/__tests__/"),
+        regex_or_die("test_location:test_dir", r"/tests?/"),
     ]
 });
 

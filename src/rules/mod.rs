@@ -25,6 +25,7 @@ mod test_location;
 mod transaction;
 
 use crate::config::Config;
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -140,30 +141,33 @@ const UNREGISTERED_RULE_IDS: &[&str] = &[
 ];
 
 pub static RE_JS_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.(tsx?|jsx?)$").expect("RE_JS_FILE: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_JS_FILE", r"\.(tsx?|jsx?)$"));
 
 pub static RE_TEST_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.(test|spec)\.[jt]sx?$").expect("RE_TEST_FILE: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_TEST_FILE", r"\.(test|spec)\.[jt]sx?$"));
 
-pub static RE_ALL_FILES: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r".").expect("RE_ALL_FILES: invalid regex"));
+pub static RE_ALL_FILES: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_ALL_FILES", r"."));
 
 pub static RE_REACT_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.(tsx|jsx)$").expect("RE_REACT_FILE: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_REACT_FILE", r"\.(tsx|jsx)$"));
 
 pub const API_PREFIX_PAT: &str = r"(^|/)(app|pages)/api/";
 
 pub static RE_API_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(API_PREFIX_PAT).expect("RE_API_FILE: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_API_FILE", API_PREFIX_PAT));
 
 pub static RE_API_OR_MIDDLEWARE_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!("{API_PREFIX_PAT}|(^|/)middleware\\.[jt]sx?$"))
-        .expect("RE_API_OR_MIDDLEWARE_FILE: invalid regex")
+    regex_or_die(
+        "RE_API_OR_MIDDLEWARE_FILE",
+        &format!("{API_PREFIX_PAT}|(^|/)middleware\\.[jt]sx?$"),
+    )
 });
 
 pub static RE_API_OR_ROUTE_FILE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!("{API_PREFIX_PAT}|(^|/)app/(.*/)?route\\.[jt]sx?$"))
-        .expect("RE_API_OR_ROUTE_FILE: invalid regex")
+    regex_or_die(
+        "RE_API_OR_ROUTE_FILE",
+        &format!("{API_PREFIX_PAT}|(^|/)app/(.*/)?route\\.[jt]sx?$"),
+    )
 });
 
 /// Matches `* ` (with space) or bare `*` to avoid `x * y` false positives.

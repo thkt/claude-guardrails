@@ -116,10 +116,9 @@ impl<'a> StringScanner<'a> {
                     // SAFETY: outer `if !self.template_interp_depth.is_empty()`
                     // guards entry; the stack stays non-empty until the matching
                     // `}` pops it.
-                    *self
-                        .template_interp_depth
-                        .last_mut()
-                        .expect("in interpolation branch") += 1;
+                    *self.template_interp_depth.last_mut().expect(
+                        "scanner: template_interp_depth non-empty in interpolation branch",
+                    ) += 1;
                 }
                 b'}' => {
                     // SAFETY: same invariant as the `{` arm — interpolation
@@ -127,7 +126,7 @@ impl<'a> StringScanner<'a> {
                     let depth = self
                         .template_interp_depth
                         .last_mut()
-                        .expect("in interpolation branch");
+                        .expect("scanner: template_interp_depth non-empty in interpolation branch");
                     *depth -= 1;
                     if *depth == 0 {
                         self.template_interp_depth.pop();

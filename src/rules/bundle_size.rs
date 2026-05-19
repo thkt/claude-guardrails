@@ -1,4 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -9,26 +10,38 @@ struct LargeImport {
 }
 
 static RE_LODASH_FULL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"import\s+[\w]+\s+from\s+['"]lodash['"]"#).expect("RE_LODASH_FULL: invalid regex")
+    regex_or_die(
+        "RE_LODASH_FULL",
+        r#"import\s+[\w]+\s+from\s+['"]lodash['"]"#,
+    )
 });
 
 static RE_MOMENT_FULL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"import\s+[\w]+\s+from\s+['"]moment['"]"#).expect("RE_MOMENT_FULL: invalid regex")
+    regex_or_die(
+        "RE_MOMENT_FULL",
+        r#"import\s+[\w]+\s+from\s+['"]moment['"]"#,
+    )
 });
 
 static RE_MUI_ICONS_FULL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]@mui/icons-material['"]"#)
-        .expect("RE_MUI_ICONS_FULL: invalid regex")
+    regex_or_die(
+        "RE_MUI_ICONS_FULL",
+        r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]@mui/icons-material['"]"#,
+    )
 });
 
 static RE_DATE_FNS_FULL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]date-fns['"]"#)
-        .expect("RE_DATE_FNS_FULL: invalid regex")
+    regex_or_die(
+        "RE_DATE_FNS_FULL",
+        r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]date-fns['"]"#,
+    )
 });
 
 static RE_RXJS_FULL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]rxjs['"]"#)
-        .expect("RE_RXJS_FULL: invalid regex")
+    regex_or_die(
+        "RE_RXJS_FULL",
+        r#"import\s+\*\s+as\s+[\w]+\s+from\s+['"]rxjs['"]"#,
+    )
 });
 
 static LARGE_IMPORTS: LazyLock<[LargeImport; 5]> = LazyLock::new(|| {

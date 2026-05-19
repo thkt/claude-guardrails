@@ -1,20 +1,27 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_JWT_DECODE_CALL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(jwtDecode|jwt_decode)\s*(?:<[^>]*>)?\s*\(")
-        .expect("RE_JWT_DECODE_CALL: invalid regex")
+    regex_or_die(
+        "RE_JWT_DECODE_CALL",
+        r"\b(jwtDecode|jwt_decode)\s*(?:<[^>]*>)?\s*\(",
+    )
 });
 
 static RE_ATOB_SPLIT_DOT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\batob\s*\(\s*\w+\s*\.\s*split\s*\(\s*['"]\.['"]"#)
-        .expect("RE_ATOB_SPLIT_DOT: invalid regex")
+    regex_or_die(
+        "RE_ATOB_SPLIT_DOT",
+        r#"\batob\s*\(\s*\w+\s*\.\s*split\s*\(\s*['"]\.['"]"#,
+    )
 });
 
 static RE_ATOB_TOKEN_VAR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\batob\s*\(\s*\w*(?i:jwt|token)\w*\s*\)")
-        .expect("RE_ATOB_TOKEN_VAR: invalid regex")
+    regex_or_die(
+        "RE_ATOB_TOKEN_VAR",
+        r"\batob\s*\(\s*\w*(?i:jwt|token)\w*\s*\)",
+    )
 });
 
 pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {

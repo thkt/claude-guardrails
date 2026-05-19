@@ -1,4 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_REACT_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -7,25 +8,24 @@ struct DomAccess {
     method: &'static str,
 }
 
-static RE_GET_BY_ID: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"document\.getElementById\s*\(").expect("RE_GET_BY_ID: invalid regex")
-});
+static RE_GET_BY_ID: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_GET_BY_ID", r"document\.getElementById\s*\("));
 
-static RE_QUERY_SELECTOR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"document\.querySelector(All)?\s*\(").expect("RE_QUERY_SELECTOR: invalid regex")
-});
+static RE_QUERY_SELECTOR: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_QUERY_SELECTOR", r"document\.querySelector(All)?\s*\("));
 
 static RE_GET_ELEMENTS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"document\.getElementsBy(ClassName|TagName|Name)\s*\(")
-        .expect("RE_GET_ELEMENTS: invalid regex")
+    regex_or_die(
+        "RE_GET_ELEMENTS",
+        r"document\.getElementsBy(ClassName|TagName|Name)\s*\(",
+    )
 });
 
-static RE_CREATE_ELEMENT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"document\.createElement\s*\(").expect("RE_CREATE_ELEMENT: invalid regex")
-});
+static RE_CREATE_ELEMENT: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_CREATE_ELEMENT", r"document\.createElement\s*\("));
 
 static RE_APPEND_CHILD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.appendChild\s*\(").expect("RE_APPEND_CHILD: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_APPEND_CHILD", r"\.appendChild\s*\("));
 
 static DOM_ACCESS: LazyLock<[DomAccess; 5]> = LazyLock::new(|| {
     [

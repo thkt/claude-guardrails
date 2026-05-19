@@ -1,15 +1,16 @@
 use super::{Rule, Severity, Violation, RE_ALL_FILES};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static GENERATED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        Regex::new(r"\.generated\.[a-zA-Z]+$").expect("generated pattern"),
-        Regex::new(r"\.g\.(ts|js|dart)$").expect("g pattern"),
-        Regex::new(r"_generated\.[a-zA-Z]+$").expect("_generated pattern"),
-        Regex::new(r"\.auto\.[a-zA-Z]+$").expect("auto pattern"),
-        Regex::new(r"/generated/").expect("generated dir pattern"),
-        Regex::new(r"/__generated__/").expect("__generated__ dir pattern"),
+        regex_or_die("generated_file:generated", r"\.generated\.[a-zA-Z]+$"),
+        regex_or_die("generated_file:g", r"\.g\.(ts|js|dart)$"),
+        regex_or_die("generated_file:_generated", r"_generated\.[a-zA-Z]+$"),
+        regex_or_die("generated_file:auto", r"\.auto\.[a-zA-Z]+$"),
+        regex_or_die("generated_file:generated_dir", r"/generated/"),
+        regex_or_die("generated_file:__generated__dir", r"/__generated__/"),
     ]
 });
 

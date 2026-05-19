@@ -1,22 +1,26 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_HTML_CONCAT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"['"]<[a-zA-Z][^>]*>['"]\s*\+\s*[a-zA-Z_$]"#)
-        .expect("RE_HTML_CONCAT: invalid regex")
+    regex_or_die(
+        "RE_HTML_CONCAT",
+        r#"['"]<[a-zA-Z][^>]*>['"]\s*\+\s*[a-zA-Z_$]"#,
+    )
 });
 
 static RE_HTML_TEMPLATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"`[^`]{0,500}<[a-zA-Z][^>]{0,200}>[^`]{0,500}\$\{[^`]{0,500}`")
-        .expect("RE_HTML_TEMPLATE: invalid regex")
+    regex_or_die(
+        "RE_HTML_TEMPLATE",
+        r"`[^`]{0,500}<[a-zA-Z][^>]{0,200}>[^`]{0,500}\$\{[^`]{0,500}`",
+    )
 });
 
-static RE_HTML_JOIN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"['"]<[a-zA-Z][^>]*>['"]"#).expect("RE_HTML_JOIN: invalid regex")
-});
+static RE_HTML_JOIN: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_HTML_JOIN", r#"['"]<[a-zA-Z][^>]*>['"]"#));
 static RE_JOIN_CALL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\.join\s*\(").expect("RE_JOIN_CALL: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_JOIN_CALL", r"\.join\s*\("));
 
 const JOIN_PROXIMITY_LINES: u32 = 5;
 

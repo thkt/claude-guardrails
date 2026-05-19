@@ -1,22 +1,27 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_API_OR_ROUTE_FILE, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_TARGET_DIR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"/(usecases?|use-cases?|application|services?|domain|handlers?|app|server)/")
-        .expect("RE_TARGET_DIR: invalid regex")
+    regex_or_die(
+        "RE_TARGET_DIR",
+        r"/(usecases?|use-cases?|application|services?|domain|handlers?|app|server)/",
+    )
 });
 
 static RE_WRITE_OPS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\.(save|create|update|delete|insert|persist)\s*\(")
-        .expect("RE_WRITE_OPS: invalid regex")
+    regex_or_die(
+        "RE_WRITE_OPS",
+        r"\.(save|create|update|delete|insert|persist)\s*\(",
+    )
 });
 
 static RE_TX_BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
+    regex_or_die(
+        "RE_TX_BOUNDARY",
         r"(?i)(@Transactional|\btransaction\b|\$transaction|\bunitOfWork\b|\brunInTransaction\b|\bwithTransaction\b|\bbeginTransaction\b|\bQueryRunner\b|\bgetManager\b|knex\.transaction|sequelize\.transaction|db\.transaction)",
     )
-    .expect("RE_TX_BOUNDARY: invalid regex")
 });
 
 pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {

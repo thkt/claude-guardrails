@@ -1,10 +1,13 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_SW_SCOPE_ROOT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"navigator\.serviceWorker\.register\s*\([^;\n]*?\bscope\s*:\s*['"`]/['"`]"#)
-        .expect("RE_SW_SCOPE_ROOT: invalid regex")
+    regex_or_die(
+        "RE_SW_SCOPE_ROOT",
+        r#"navigator\.serviceWorker\.register\s*\([^;\n]*?\bscope\s*:\s*['"`]/['"`]"#,
+    )
 });
 
 pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {

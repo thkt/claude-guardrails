@@ -1,4 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_JS_FILE};
+use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -8,24 +9,25 @@ struct LayerViolation {
     fix: &'static str,
 }
 
-static RE_UTILS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/utils/").expect("RE_UTILS: invalid regex"));
-static RE_SERVICES: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/services/").expect("RE_SERVICES: invalid regex"));
+static RE_UTILS: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_UTILS", r"/utils/"));
+static RE_SERVICES: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_SERVICES", r"/services/"));
 static RE_COMPONENTS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"/components/").expect("RE_COMPONENTS: invalid regex"));
+    LazyLock::new(|| regex_or_die("RE_COMPONENTS", r"/components/"));
 
 static RE_IMPORT_UI: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"from\s+['"].*/(components|hooks|pages|features)/"#)
-        .expect("RE_IMPORT_UI: invalid regex")
+    regex_or_die(
+        "RE_IMPORT_UI",
+        r#"from\s+['"].*/(components|hooks|pages|features)/"#,
+    )
 });
 static RE_IMPORT_UI_NO_FEATURES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"from\s+['"].*/(components|hooks|pages)/"#)
-        .expect("RE_IMPORT_UI_NO_FEATURES: invalid regex")
+    regex_or_die(
+        "RE_IMPORT_UI_NO_FEATURES",
+        r#"from\s+['"].*/(components|hooks|pages)/"#,
+    )
 });
-static RE_IMPORT_PAGES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"from\s+['"].*\/pages/"#).expect("RE_IMPORT_PAGES: invalid regex")
-});
+static RE_IMPORT_PAGES: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_IMPORT_PAGES", r#"from\s+['"].*\/pages/"#));
 
 static LAYER_VIOLATIONS: LazyLock<[LayerViolation; 3]> = LazyLock::new(|| {
     [

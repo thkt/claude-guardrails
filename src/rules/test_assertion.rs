@@ -1,16 +1,21 @@
 use super::{Rule, Severity, Violation, RE_TEST_FILE};
+use crate::regex_util::regex_or_die;
 use crate::scanner::{build_line_offsets, extract_delimited_content, offset_to_line};
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_TEST_START: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(it|test)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{"#)
-        .expect("RE_TEST_START: invalid regex")
+    regex_or_die(
+        "RE_TEST_START",
+        r#"(it|test)\s*\(\s*['"]([^'"]+)['"]\s*,\s*(async\s*)?\(\s*\)\s*=>\s*\{"#,
+    )
 });
 
 static RE_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(expect\s*\(|assert\.|should\.|\.toEqual|\.toBe|\.toHaveBeenCalled|\.rejects\.|\.resolves\.)")
-        .expect("RE_ASSERTION: invalid regex")
+    regex_or_die(
+        "RE_ASSERTION",
+        r"(expect\s*\(|assert\.|should\.|\.toEqual|\.toBe|\.toHaveBeenCalled|\.rejects\.|\.resolves\.)",
+    )
 });
 
 pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
