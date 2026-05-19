@@ -137,7 +137,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `eslint/no-console`                | AIがデバッグ用 `console.log` を残す             |
 | `eslint/no-new-func`               | AIが `new Function(...)` で動的にコード生成する |
 
-> **注:** `new Function(...)` は `eslint/no-new-func`（Medium、非推奨観点）と カスタム `eval` ルール（High、セキュリティ観点）の両方で検出されます。stderr には oxlint の出力 → カスタムルールの出力の順で並びます。
+> **注:** `new Function(...)` は `eslint/no-new-func`（oxlint。`--deny` リスト経由で High として浮上）とカスタム `eval` ルール（High）の両方で検出されます。重複は意図的: oxlint は構文パターンを、カスタムルールは guardrails 固有の fix メッセージを返します。stderr には oxlint の出力 → カスタムルールの出力の順で並びます。
 
 `oxlint.deny` / `oxlint.allow` でカスタマイズ可能です（設定セクション参照）。
 
