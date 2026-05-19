@@ -5,8 +5,8 @@ rules:
       - release.yml:137
       # update-sentinels job requires SENTINELS_TOKEN to be persisted for git push
       - release.yml:205
-      # publish-binaries-to-sentinels job requires SENTINELS_TOKEN to be persisted for git push
-      - release.yml:245
+      # publish-binaries-to-sentinels job requires sentinels App token to be persisted for git push -f
+      - release.yml:255
   cache-poisoning:
     ignore:
       # Swatinem/rust-cache in build job; release workflow runs on tag push only,
