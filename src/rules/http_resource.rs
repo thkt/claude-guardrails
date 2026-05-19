@@ -42,7 +42,7 @@ mod tests {
         if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        RULE.check(content, path, &super::super::non_comment_lines(content))
+        super::super::check_rule(&RULE, content, path)
     }
 
     #[test]
@@ -84,11 +84,7 @@ mod tests {
     #[test]
     fn detects_http_on_line_with_localhost() {
         let content = r#"const urls = ["http://evil.com", "http://localhost:3000"];"#;
-        let result = RULE.check(
-            content,
-            "/src/api.ts",
-            &super::super::non_comment_lines(content),
-        );
+        let result = super::super::check_rule(&RULE, content, "/src/api.ts");
         assert_eq!(result.len(), 1);
     }
 }

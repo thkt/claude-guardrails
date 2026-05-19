@@ -84,7 +84,7 @@ mod tests {
         if !RULE.file_pattern.is_match(path) {
             return Vec::new();
         }
-        RULE.check(content, path, &super::super::non_comment_lines(content))
+        super::super::check_rule(&RULE, content, path)
     }
 
     #[test]

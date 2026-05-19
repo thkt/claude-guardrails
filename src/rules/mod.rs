@@ -306,6 +306,44 @@ pub fn load_rules(config: &Config) -> Vec<&'static Rule> {
 }
 
 #[cfg(test)]
+use crate::ast::with_parsed_program;
+#[cfg(test)]
+use oxc_ast::ast::Program;
+#[cfg(test)]
+use std::time::Instant;
+
+#[cfg(test)]
+pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) -> Vec<Violation> {
+    rule.check(content, file_path, &non_comment_lines(content))
+}
+
+#[cfg(test)]
+pub(in crate::rules) fn ast_test_check<F>(content: &str, file_path: &str, f: F) -> Vec<Violation>
+where
+    F: FnOnce(&Program<'_>, &[usize]) -> Vec<Violation>,
+{
+    with_parsed_program(content, file_path, f).unwrap_or_default()
+}
+
+#[cfg(test)]
+pub(in crate::rules) fn assert_under_10ms<F>(label: &str, iterations: u128, f: F)
+where
+    F: Fn(),
+{
+    let start = Instant::now();
+    for _ in 0..iterations {
+        f();
+    }
+    let elapsed = start.elapsed();
+    let per_file_us = elapsed.as_micros() / iterations;
+    eprintln!("NFR-001 {label}: {per_file_us}us/file ({iterations} iterations)");
+    assert!(
+        per_file_us < 10_000,
+        "AST {label} check exceeded 10ms/file: {per_file_us}us"
+    );
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

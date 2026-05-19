@@ -79,11 +79,7 @@ mod tests {
     use super::*;
 
     fn check(content: &str) -> Vec<Violation> {
-        RULE.check(
-            content,
-            "/src/utils.test.ts",
-            &super::super::non_comment_lines(content),
-        )
+        super::super::check_rule(&RULE, content, "/src/utils.test.ts")
     }
 
     #[test]
