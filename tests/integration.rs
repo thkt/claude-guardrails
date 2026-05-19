@@ -787,14 +787,12 @@ fn prefetch_json_emits_success_envelope_when_cached() {
     assert_eq!(parsed["notes"], serde_json::json!([]));
 }
 
-// RC-001 regression: malformed `.claude/tools.json` silently falls back to
-// default config; the JSON envelope must mark this as degraded so AI consumers
-// notice they are not running the project's rule set.
+// Malformed `.claude/tools.json` silently falls back to default config; the
+// JSON envelope must mark this as degraded so AI consumers notice they are
+// not running the project's rule set.
 #[test]
 fn malformed_tools_json_marks_json_envelope_degraded() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    fs::create_dir(tmp.path().join(".git")).unwrap();
-    fs::create_dir(tmp.path().join(".claude")).unwrap();
+    let tmp = tmp_repo_with_claude();
     fs::write(tmp.path().join(".claude/tools.json"), "{not json}").unwrap();
 
     let json = serde_json::json!({

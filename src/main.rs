@@ -670,7 +670,7 @@ fn run_prefetch(json_mode: bool) -> i32 {
     }
 }
 
-fn resolve_project_root_with_notes_from(
+fn resolve_project_root_or_note(
     result: io::Result<PathBuf>,
     notes: &mut Vec<String>,
 ) -> Option<PathBuf> {
@@ -687,7 +687,7 @@ fn resolve_project_root_with_notes_from(
     }
 }
 
-fn load_config_with_notes_from(result: Result<Config, String>, notes: &mut Vec<String>) -> Config {
+fn load_config_or_note(result: Result<Config, String>, notes: &mut Vec<String>) -> Config {
     match result {
         Ok(c) => c,
         Err(e) => {
@@ -709,19 +709,22 @@ fn run_hook(json_mode: bool) -> i32 {
     run_hook_with_input(
         &input,
         env::current_dir().and_then(fs::canonicalize),
-        Config::default().with_project_overrides(),
+        || Config::default().with_project_overrides(),
         json_mode,
     )
 }
 
-fn run_hook_with_input(
+fn run_hook_with_input<F>(
     input: &ToolInput,
     project_root_result: io::Result<PathBuf>,
-    config_result: Result<Config, String>,
+    load_config: F,
     json_mode: bool,
-) -> i32 {
-    let mut notes: Vec<String> = Vec::new();
-    let project_root = resolve_project_root_with_notes_from(project_root_result, &mut notes);
+) -> i32
+where
+    F: FnOnce() -> Result<Config, String>,
+{
+    let mut notes = Vec::new();
+    let project_root = resolve_project_root_or_note(project_root_result, &mut notes);
 
     let Some((file_path, content, degraded)) = get_file_and_content(input, project_root.as_deref())
     else {
@@ -744,7 +747,7 @@ fn run_hook_with_input(
         return 0;
     };
 
-    let config = load_config_with_notes_from(config_result, &mut notes);
+    let config = load_config_or_note(load_config(), &mut notes);
 
     show_config_hint(&config);
 
@@ -1597,19 +1600,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_project_root_with_notes_from_returns_path_and_skips_notes_on_ok() {
+    fn resolve_project_root_or_note_returns_path_and_skips_notes_on_ok() {
         let mut notes = Vec::new();
         let path = PathBuf::from("/some/path");
-        let result = resolve_project_root_with_notes_from(Ok(path.clone()), &mut notes);
+        let result = resolve_project_root_or_note(Ok(path.clone()), &mut notes);
         assert_eq!(result, Some(path));
         assert!(notes.is_empty(), "no note expected on Ok, got: {notes:?}");
     }
 
     #[test]
-    fn resolve_project_root_with_notes_from_pushes_note_on_err() {
+    fn resolve_project_root_or_note_pushes_note_on_err() {
         let mut notes = Vec::new();
         let err = io::Error::new(io::ErrorKind::NotFound, "no such dir");
-        let result = resolve_project_root_with_notes_from(Err(err), &mut notes);
+        let result = resolve_project_root_or_note(Err(err), &mut notes);
         assert!(result.is_none(), "expected None on Err, got: {result:?}");
         assert_eq!(notes.len(), 1, "expected one note, got: {notes:?}");
         assert!(
@@ -1625,17 +1628,17 @@ mod tests {
     }
 
     #[test]
-    fn load_config_with_notes_from_returns_config_and_skips_notes_on_ok() {
+    fn load_config_or_note_returns_config_and_skips_notes_on_ok() {
         let mut notes = Vec::new();
-        let result = load_config_with_notes_from(Ok(Config::default()), &mut notes);
+        let result = load_config_or_note(Ok(Config::default()), &mut notes);
         assert!(result.enabled);
         assert!(notes.is_empty(), "no note expected on Ok, got: {notes:?}");
     }
 
     #[test]
-    fn load_config_with_notes_from_pushes_note_and_falls_back_to_default_on_err() {
+    fn load_config_or_note_pushes_note_and_falls_back_to_default_on_err() {
         let mut notes = Vec::new();
-        let result = load_config_with_notes_from(
+        let result = load_config_or_note(
             Err(String::from("invalid config \"x\": expected value")),
             &mut notes,
         );
