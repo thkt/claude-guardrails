@@ -2,7 +2,7 @@
 
 # guardrails
 
-Code quality checker for Claude Code's PreToolCall hook. Combines external linters with custom rules to validate code and provide actionable fix suggestions.
+Code quality checker for Claude Code's PreToolUse hook. Combines external linters with custom rules to validate code and provide actionable fix suggestions.
 
 ## Features
 
@@ -135,6 +135,8 @@ guardrails enables these oxlint rules via `--deny` (off by default in oxlint, im
 | `eslint/no-console`                | AI leaves debug `console.log`                |
 | `eslint/no-new-func`               | AI uses `new Function(...)` for dynamic code |
 
+> **Note:** `new Function(...)` triggers both oxlint's `eslint/no-new-func` (High via `--deny`) and the custom `eval` rule (High), so the agent reads the guardrails-specific fix message even after oxlint already fired. stderr shows oxlint first.
+
 Customize via `oxlint.deny` / `oxlint.allow` in config (see below).
 
 ## Custom Rules
@@ -158,7 +160,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `sqliConcat`            | High     | SQL assembled via template interpolation or string concatenation         | Projects without database access                       |
 | `httpResource`          | Medium   | HTTP (non-HTTPS) resource URLs                                           | Development-only configs                               |
 | `corsWildcard`          | Medium   | CORS wildcard origin (`cors({ origin: '*' })`, `Access-Control-Allow-Origin: *`). Scoped to `app/api/`, `pages/api/`, and `middleware.{ts,js}` | Rarely needed (scope already excludes UI/util files) |
-| `transaction`           | Medium   | Multiple writes without transaction wrapper. Scoped to `usecases/`, `services/`, `domain/`, `handlers/`, `app/`, `server/` directories and `app/**/route.{ts,js}` segments | Non-database projects, or layout that does not use these directory names |
+| `transaction`           | Medium   | Multiple writes without transaction wrapper. Scoped to `usecases/`, `use-cases/`, `application/`, `services/`, `domain/`, `handlers/`, `app/`, `server/` directories and `app/**/route.{ts,js}` segments | Non-database projects, or layout that does not use these directory names |
 | `domAccess`             | Medium   | Direct DOM manipulation in React (.tsx/.jsx)                             | Non-React projects, or vanilla JS/TS                   |
 | `syncIo`                | Medium   | readFileSync, writeFileSync (blocks event loop)                          | CLI tools, build scripts, or sync-only contexts        |
 | `bundleSize`            | Medium   | Full lodash/moment imports                                               | Backend/Node.js (no bundle size concerns)              |
@@ -168,7 +170,9 @@ See `src/rules/` for custom rules that complement external linters.
 | `testLocation`          | Medium   | Test files in src/ directory                                             | Co-located test strategy (tests next to source)        |
 | `naming`                | Mixed    | Naming conventions (hooks, components, types)                            | Different naming conventions in team/project           |
 | `noUseEffect`           | Medium   | Flags useEffect in .tsx/.jsx with alternative suggestions                | Projects using useEffect intentionally                 |
-| `astSecurity`           | Mixed    | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection (see below) | Non-Node.js projects                                   |
+| `serviceWorker`         | Medium   | Service Worker registration with root scope (`{ scope: '/' }`). Suggests narrowing to a specific path | Projects intentionally serving the worker site-wide |
+| `jwtClient`             | Medium   | Client-side JWT decode (`jwtDecode`, `jwt_decode`, `atob(token.split('.'))`). Suggests server-side `jwtVerify` | Server-only JWT decode paths (e.g., Node-only files) |
+| `astSecurity`           | Mixed    | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection, client env leak, SSR secret bleed, postMessage origin (see below) | Non-Node.js projects                                   |
 
 ### Security Rules (`security`)
 
@@ -195,6 +199,7 @@ Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the A
 | `prototype-pollution`     | High     | `Object.assign({}, untrusted)`, `_.merge`, `Object.create` with `__proto__`/`constructor`                                                  |
 | `math-random-insecure`    | Mixed    | `Math.random()` in token/ID/secret contexts. High when usage is concrete (`toString(36)` idiom or crypto-API argument); Medium when only inferable from naming heuristics (security-named var/fn, other `toString` radix). See [ADR-0003](docs/decisions/0003-math-random-severity-policy.md). |
 | `unsafe-html-injection`   | Mixed    | Non-literal assignment to `innerHTML` (High) / `outerHTML` (Medium) / `document.write[ln]` (High). See [ADR-0008](docs/decisions/0008-unsafe-html-injection-rule-id-separation.md). |
+| `client-env-public-leak`  | High     | `process.env.X` access inside a `'use client'` module (excluding `NEXT_PUBLIC_*` and the allow-list). Bundled to the browser by Next.js. |
 | `ssr-secret-bleed`        | High     | Prevents server-only secrets from leaking to the browser via SSR returns. Flags secret-named properties (`apiKey`, `token`, …) or `process.env.*` secret values returned from `getServerSideProps` / `'use server'` Server Actions, since Next.js serializes those returns into the client payload. |
 | `postmessage-origin-missing` | High  | `window.addEventListener('message', handler)` whose inline handler never reads `event.origin`. Without an origin check, the page accepts cross-origin postMessages from arbitrary senders. External handler references and param-side destructure are out of scope (1-file static analysis). |
 
@@ -351,6 +356,8 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
       "naming": true,
       "flakyTest": true,
       "noUseEffect": true,
+      "serviceWorker": true,
+      "jwtClient": true,
       "astSecurity": true
     },
     "oxlint": {

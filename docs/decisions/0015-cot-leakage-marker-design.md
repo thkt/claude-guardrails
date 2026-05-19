@@ -146,7 +146,6 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/foo.ts","conte
 
 - `src/rules/cot_leakage_marker.rs` (実装)
 - Issue #135 / PR #136 commit `756eb66` (Windows backslash normalize fix)
-- `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster U)
 
 ### Reassessment Triggers
 

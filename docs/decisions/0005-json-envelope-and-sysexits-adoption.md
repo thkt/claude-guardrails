@@ -212,5 +212,4 @@ envelope schema と exit code は次のテストで pin されている。
 * `README.md` の Exit Codes / JSON Output Mode セクション
 * dotclaude ADR-0065 "scout JSON output schema and sysexits exit code policy" (inspiration; lives in a private dotclaude store, not navigable from this repo)
 * dotclaude ADR-0066 "CLI exit code policy grouped by error topology" (inspiration; private dotclaude store) — guardrails is a hook tool consuming stdin JSON and emitting violations on stderr; its exit code map follows the hook-tool grouping defined there.
-* Audit: `docs/audit/2026-05-14-undocumented-decisions.md` Cluster B
 * Standards: sysexits.h (`man 3 sysexits`)

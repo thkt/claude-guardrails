@@ -141,4 +141,3 @@ legacy 廃止 PR では本 ADR の status を `superseded by ADR-NNNN` に書き
 * `src/config.rs` (`with_overrides_from_root`, `find_git_root`, `merge`, `TOOLS_CONFIG_FILE`, `LEGACY_CONFIG_FILE`)
 * `README.md` の "Configuration" / "Config Resolution" / "Migration" セクション
 * `README.md` の "Companion Tools" (4-tool pipeline)
-* Audit: `docs/audit/2026-05-14-undocumented-decisions.md` Cluster C-migration

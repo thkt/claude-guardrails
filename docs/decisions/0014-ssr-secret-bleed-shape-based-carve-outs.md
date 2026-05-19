@@ -115,7 +115,6 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/pages/index.ts
 - `src/ast_security.rs:561-613` (`check_ssr_secret_bleed_return` / `check_ssr_secret_object`)
 - `src/ast_security.rs:571-575` (doc comment with carve-out list)
 - `src/ast_security.rs:582-584` (spread silent skip)
-- `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster Q)
 - OUTCOME `.claude/OUTCOME.md` Constraints 節 (1-file content 制約)
 
 ### Reassessment Triggers

@@ -106,7 +106,6 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/components/Com
 - `src/ast_security.rs` `CLIENT_ENV_ALLOW_LIST`
 - `src/ast_security.rs` `check_client_env_public_leak`
 - `src/ast_security.rs` `process_env_access_name_from_sme` (StaticMemberExpression exact shape)
-- `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster P)
 - OUTCOME `.claude/OUTCOME.md` Behavior 節
 
 ### Reassessment Triggers

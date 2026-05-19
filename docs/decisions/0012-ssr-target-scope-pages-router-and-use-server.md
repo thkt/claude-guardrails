@@ -108,7 +108,6 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 - `src/ast_security.rs` `is_ssr_target_function`
 - `src/ast_security.rs` `visit_variable_declarator` の const-arrow form gate (`function_depth == 0` + `getServerSideProps` binding 判定)
 - `src/ast_security.rs` `getStaticProps_is_not_in_scope_for_this_rule` test (negative for `getStaticProps`)
-- `docs/audit/2026-05-17-undocumented-decisions.md` (Cluster O)
 - OUTCOME `.claude/OUTCOME.md` Behavior / Non-goals 節
 
 ### Reassessment Triggers

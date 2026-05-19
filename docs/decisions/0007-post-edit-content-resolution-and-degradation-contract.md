@@ -176,4 +176,3 @@ security check は止めない。snippet 単独でも false positive が出る�
 * `tests/integration.rs` (RC-001 / TC-004 / issue #59 シナリオ)
 * ADR-0004 (Fail-mode policy) — `Degraded` は環境失敗軸に該当
 * `README.md` の "Known Limitations" / "JSON Output Mode" (degraded notes 例示)
-* Audit: `docs/audit/2026-05-14-undocumented-decisions.md` Cluster H
