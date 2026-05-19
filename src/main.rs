@@ -256,10 +256,9 @@ fn apply_edit(
 /// traversal). Production callers pass canonical cwd; `None` disables the
 /// boundary (used by tests over tempdirs).
 ///
-/// `is_js` lets callers that already classified the path (e.g.
-/// `collect_violations`) skip a second `RE_JS_FILE.is_match` on the same
-/// string. Pass `RE_JS_FILE.is_match(file_path)` when classification has
-/// not been done yet.
+/// `is_js` is taken as input to avoid re-running `RE_JS_FILE.is_match` on
+/// an already-classified path. Pass `RE_JS_FILE.is_match(file_path)` when
+/// no classification has been done yet.
 fn read_file_capped(
     file_path: &str,
     project_root: Option<&Path>,

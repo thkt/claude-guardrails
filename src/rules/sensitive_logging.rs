@@ -22,61 +22,51 @@ static RE_SENSITIVE_KEYWORD: LazyLock<Regex> = LazyLock::new(|| {
         .expect("RE_SENSITIVE_KEYWORD: invalid regex")
 });
 
+const MSG_CONSOLE: &str =
+    "Logging sensitive data (password, token, secret). Remove or mask before logging.";
+const MSG_LOGGER: &str = "Logging sensitive data via logger. Remove or mask before logging.";
+
 pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_JS_FILE.clone(),
     checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
+        // Skip mask/offset construction when no call site exists.
+        if !RE_CONSOLE_CALL.is_match(content) && !RE_LOGGER_CALL.is_match(content) {
+            return Vec::new();
+        }
         let mut violations = Vec::new();
         let mut reported_lines = HashSet::new();
         let line_offsets = build_line_offsets(content);
         let masks = build_source_masks(content);
-        // SAFETY: build_source_masks replaces hidden bytes with ASCII space and
-        // preserves all original byte boundaries, so UTF-8 validity is intact.
+        // build_source_masks replaces hidden bytes with ASCII space and preserves
+        // every original byte boundary, so the buffer is still valid UTF-8.
         let code_visible = str::from_utf8(&masks.code_visible)
             .expect("code_visible preserves UTF-8 by construction");
 
-        let check_match = |caps: regex::Match,
-                           violations: &mut Vec<Violation>,
-                           reported_lines: &mut HashSet<usize>,
-                           msg: &str| {
+        let console_hits = RE_CONSOLE_CALL.find_iter(content).map(|m| (m, MSG_CONSOLE));
+        let logger_hits = RE_LOGGER_CALL.find_iter(content).map(|m| (m, MSG_LOGGER));
+
+        for (caps, msg) in console_hits.chain(logger_hits) {
             if masks.comment.get(caps.start()).copied().unwrap_or(false) {
-                return;
+                continue;
             }
             let Some((args_start, args_end)) =
                 extract_delimited_range(content, caps.end(), b'(', b')')
             else {
-                return;
+                continue;
             };
-            let args_code = &code_visible[args_start..args_end];
-            if RE_SENSITIVE_KEYWORD.is_match(args_code) {
-                let line_num = offset_to_line(&line_offsets, caps.start());
-                if reported_lines.insert(line_num) {
-                    violations.push(Violation {
-                        rule: super::rule_id::SENSITIVE_LOGGING.to_owned(),
-                        severity: Severity::High,
-                        fix: msg.to_owned(),
-                        file: file_path.to_owned(),
-                        line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
-                    });
-                }
+            if !RE_SENSITIVE_KEYWORD.is_match(&code_visible[args_start..args_end]) {
+                continue;
             }
-        };
-
-        for caps in RE_CONSOLE_CALL.find_iter(content) {
-            check_match(
-                caps,
-                &mut violations,
-                &mut reported_lines,
-                "Logging sensitive data (password, token, secret). Remove or mask before logging.",
-            );
-        }
-
-        for caps in RE_LOGGER_CALL.find_iter(content) {
-            check_match(
-                caps,
-                &mut violations,
-                &mut reported_lines,
-                "Logging sensitive data via logger. Remove or mask before logging.",
-            );
+            let line_num = offset_to_line(&line_offsets, caps.start());
+            if reported_lines.insert(line_num) {
+                violations.push(Violation {
+                    rule: super::rule_id::SENSITIVE_LOGGING.to_owned(),
+                    severity: Severity::High,
+                    fix: msg.to_owned(),
+                    file: file_path.to_owned(),
+                    line: Some(u32::try_from(line_num).unwrap_or(u32::MAX)),
+                });
+            }
         }
 
         violations
