@@ -1,13 +1,12 @@
-use super::{Rule, Severity, Violation, RE_ALL_FILES};
+use super::{Rule, Severity, Violation, RE_ALL_FILES, RE_TEST_FILE};
 use crate::regex_util::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
 static RE_SRC_DIR: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_SRC_DIR", r"/src/"));
 
-static TEST_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+static TEST_DIR_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        regex_or_die("test_location:test_spec", r"\.(test|spec)\.[jt]sx?$"),
         regex_or_die("test_location:__tests__dir", r"/__tests__/"),
         regex_or_die("test_location:test_dir", r"/tests?/"),
     ]
@@ -20,17 +19,17 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
             return Vec::new();
         }
 
-        for pattern in TEST_PATTERNS.iter() {
-            if pattern.is_match(file_path) {
-                return vec![Violation {
-                    rule: super::rule_id::TEST_LOCATION.to_owned(),
-                    severity: Severity::Medium,
-                    fix: "Test files should be in tests/ or __tests__/ directory outside src/"
-                        .to_owned(),
-                    file: file_path.to_owned(),
-                    line: None,
-                }];
-            }
+        if RE_TEST_FILE.is_match(file_path)
+            || TEST_DIR_PATTERNS.iter().any(|p| p.is_match(file_path))
+        {
+            return vec![Violation {
+                rule: super::rule_id::TEST_LOCATION.to_owned(),
+                severity: Severity::Medium,
+                fix: "Test files should be in tests/ or __tests__/ directory outside src/"
+                    .to_owned(),
+                file: file_path.to_owned(),
+                line: None,
+            }];
         }
         Vec::new()
     }),

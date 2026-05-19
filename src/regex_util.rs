@@ -1,8 +1,8 @@
 use regex::Regex;
 
-/// Compiles a `Regex` from a build-time literal, panicking with a symbol-tagged
-/// diagnostic on failure. The `name` argument should match the `static` symbol
-/// (or other call-site identifier) so a panic trace pinpoints the culprit.
+/// Compiles `pattern`; panics with `"{name}: invalid regex: {err}"` on failure.
+/// Pass the `static` symbol (or other call-site identifier) as `name` so a panic
+/// trace pinpoints the culprit.
 pub(crate) fn regex_or_die(name: &str, pattern: &str) -> Regex {
     Regex::new(pattern).unwrap_or_else(|e| panic!("{name}: invalid regex: {e}"))
 }
