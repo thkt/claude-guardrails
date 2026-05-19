@@ -76,7 +76,6 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     fn check(content: &str) -> Vec<Violation> {
         super::super::check_rule(&RULE, content, "/src/auth/login.ts")
@@ -192,17 +191,8 @@ mod tests {
         content.push_str("console.log('password', password);\n");
         content.push_str("logger.error('token', accessToken);\n");
 
-        let start = Instant::now();
-        let iterations = 100;
-        for _ in 0..iterations {
+        super::super::assert_under_10ms("sensitive-logging", 100, || {
             let _ = check(&content);
-        }
-        let elapsed = start.elapsed();
-        let per_file_us = elapsed.as_micros() / iterations;
-        eprintln!("NFR-001 sensitive-logging: {per_file_us}us/file ({iterations} iterations)");
-        assert!(
-            per_file_us < 10_000,
-            "sensitive_logging check exceeded 10ms/file: {per_file_us}us"
-        );
+        });
     }
 }

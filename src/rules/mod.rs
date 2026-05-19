@@ -306,19 +306,22 @@ pub fn load_rules(config: &Config) -> Vec<&'static Rule> {
 }
 
 #[cfg(test)]
-pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, path: &str) -> Vec<Violation> {
-    rule.check(content, path, &non_comment_lines(content))
-}
-
+use crate::ast::with_parsed_program;
 #[cfg(test)]
 use oxc_ast::ast::Program;
+#[cfg(test)]
+use std::time::Instant;
+
+#[cfg(test)]
+pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) -> Vec<Violation> {
+    rule.check(content, file_path, &non_comment_lines(content))
+}
 
 #[cfg(test)]
 pub(in crate::rules) fn ast_test_check<F>(content: &str, file_path: &str, f: F) -> Vec<Violation>
 where
     F: FnOnce(&Program<'_>, &[usize]) -> Vec<Violation>,
 {
-    use crate::ast::with_parsed_program;
     with_parsed_program(content, file_path, f).unwrap_or_default()
 }
 
@@ -327,7 +330,6 @@ pub(in crate::rules) fn assert_under_10ms<F>(label: &str, iterations: u128, f: F
 where
     F: Fn(),
 {
-    use std::time::Instant;
     let start = Instant::now();
     for _ in 0..iterations {
         f();
