@@ -20,6 +20,10 @@ oxc_span = "0.121"
 oxc_ast_visit = "0.121"
 oxc_syntax = "0.121"
 ureq = "3"
+sha2 = "0.10"
+constant_time_eq = "0.3"
+tar = "0.4"
+flate2 = "1"
 
 [lints.rust]
 unsafe_code = "forbid"
