@@ -286,8 +286,8 @@ guardrails --json < tool-call.json
 | `data.decision`   | `"block"` / `"allow"`                           | `severity.blockOn` に一致するエントリが 1 件以上ある場合のみ `block`  |
 | `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | 小文字                                                                |
 | `line`            | 整数または `null`                               | 位置が不明な場合は `null`                                             |
-| `degraded`        | bool                                            | ツール不在 (例: oxlint 未インストール) で `true`                      |
-| `notes`           | 文字列の配列                                    | degrade の理由。non-empty なら `degraded: true`                       |
+| `degraded`        | bool                                            | note が 1 件でもあれば `true`。環境系の note (project root canonicalize 失敗 / config load 失敗 / oxlint 不在) と post-edit content fallback の note を union する。原因は必ず `notes` を読む    |
+| `notes`           | 文字列の配列                                    | degrade の理由。source 順 (project root → config → linter → content fallback) で並び、dedup しない。non-empty なら `degraded: true` |
 
 ### Error envelope
 

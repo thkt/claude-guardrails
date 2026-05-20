@@ -25,6 +25,9 @@ impl<T: Serialize> SuccessEnvelope<T> {
     }
 
     pub fn with_notes(data: T, notes: Vec<String>) -> Self {
+        // `degraded` is the union of environmental notes (project root / config /
+        // linter) and `ContentResolution::Degraded` notes. See ADR-0007 §Degraded
+        // derivation semantics for the per-source aggregation order.
         let degraded = !notes.is_empty();
         Self {
             data,
