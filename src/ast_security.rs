@@ -274,13 +274,13 @@ fn rhs_has_insecure_math_random(expr: &Expression) -> bool {
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    ast::with_parsed_program(content, file_path, |program, line_offsets| {
+    use crate::rules::ast_fail_open_check;
+    ast_fail_open_check(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
         found.extend(check_bidi(content, file_path, line_offsets));
         found.extend(check_program(program, line_offsets, file_path));
         found
     })
-    .unwrap_or_default()
 }
 
 pub fn check_program(
