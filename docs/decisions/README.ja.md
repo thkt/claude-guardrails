@@ -1,13 +1,13 @@
-**English** | [日本語](README.ja.md)
+[English](README.md) | **日本語**
 
 # Architecture Decision Records
 
-This directory contains important decisions about the project's architecture.
+このディレクトリにはプロジェクトのアーキテクチャに関する重要な決定事項が記録されている。
 
-## ADR List
+## ADR 一覧
 
-| Number | Title | Status | Date |
-|--------|-------|--------|------|
+| 番号 | タイトル | ステータス | 日付 |
+|------|---------|-----------|------|
 | [0001](0001-adopt-installsh-prefetch-for-oxlint-provisioning.md) | Adopt install.sh prefetch for oxlint provisioning | accepted | 2026-05-08 |
 | [0002](0002-publish-release-binaries-via-orphan-branch-mirror.md) | Publish release binaries to sentinels via orphan-branch mirror | accepted | 2026-05-13 |
 | [0003](0003-math-random-severity-policy.md) | Math.random ルールの severity policy | accepted | 2026-05-14 |
@@ -26,52 +26,52 @@ This directory contains important decisions about the project's architecture.
 | [0016](0016-framework-coverage-axis-nextjs-api-middleware.md) | Server-side rule の scope は Next.js `app/api` + `pages/api` + `middleware` に揃え、shared regex pool 経由で統一する | accepted | 2026-05-17 |
 | [0017](0017-hook-must-not-create-tools-json.md) | Hook 起動時に `.claude/tools.json` を自動生成しない (hint stderr 出力のみ) | accepted | 2026-05-19 |
 
-## About MADR Format
+## MADR フォーマットについて
 
-This project uses [MADR (Markdown Any Decision Records)](https://adr.github.io/madr/) format, v4.
+本プロジェクトでは [MADR (Markdown Any Decision Records)](https://adr.github.io/madr/) v4 を採用している。
 
-### How to Create an ADR
+### ADR の作成方法
 
 ```bash
 /adr "Decision Title"
 ```
 
-### Status Meanings
+### ステータスの意味
 
-- **Proposed**: Awaiting review
-- **Accepted**: Approved, implementing or completed
-- **Rejected**: Considered but not adopted
-- **Deprecated**: Retired without a replacement ADR
-- **Superseded**: Replaced by another ADR (e.g. `superseded by ADR-0042`)
+- **Proposed**: レビュー待ち
+- **Accepted**: 承認済み、実装中または完了
+- **Rejected**: 検討したが採用しない
+- **Deprecated**: 後継 ADR なしで廃止
+- **Superseded**: 別 ADR で置き換え (例: `superseded by ADR-0042`)
 
 ### Authoring Convention
 
-Cite code in ADR Decision bodies by **function name / const name / test name**. Do not use `file:line` references (they go stale as code evolves).
+ADR Decision 本文の code 引用は **関数名 / const 名 / test 関数名** ベースで書く。`file:line` 形式の line ref は使わない (code 進化と共に陳腐化するため)。
 
 | OK                                                  | NG                              |
 | --------------------------------------------------- | ------------------------------- |
-| `check_client_env_public_leak` in `src/ast_security.rs` | `src/ast_security.rs:537-559`   |
+| `src/ast_security.rs` の `check_client_env_public_leak` | `src/ast_security.rs:537-559`   |
 | `CLIENT_ENV_ALLOW_LIST` const                       | `src/ast_security.rs:31-34`     |
 | `getStaticProps_is_not_in_scope_for_this_rule` test | `src/ast_security.rs:2889-2898` |
 
-File paths are fine. Add a range reference only when the symbol name alone is not unique.
+ファイル path 自体は記載してよい。symbol 名で uniqueness が確保できない場合のみ補助的に範囲 ref を併記する。
 
-## Language Policy
+## 言語ポリシー
 
-ADRs follow a bilingual structure.
+ADR は bilingual 構造で運用する。
 
-| Track       | Location              | Role             |
-| ----------- | --------------------- | ---------------- |
-| Canonical   | `docs/decisions/`     | English original |
-| Translation | `docs/decisions/ja/`  | Japanese mirror  |
+| トラック     | 配置                  | 役割              |
+| ------------ | --------------------- | ----------------- |
+| Canonical    | `docs/decisions/`     | 英語の原本        |
+| Translation  | `docs/decisions/ja/`  | 日本語訳の並列    |
 
-This split mirrors the root `README.md` / `README.ja.md` pattern. The English version is the source of truth; if the two diverge, the English version wins.
+ルートの `README.md` / `README.ja.md` パターンと同じ運用。英語版が source of truth。両者が乖離した場合は英語版を正とする。
 
-### Conventions
+### 運用ルール
 
-- New ADRs are authored in English. A Japanese translation under `ja/` is added when a Japanese reader needs it.
-- The directory index (`README.md` / `README.ja.md`) is kept in sync.
-- ADRs 0001-0017 predate this policy. Titles and bodies stay in their original language until back-translated under separate Issues.
+- 新規 ADR は英語で記述する。日本語訳が必要になったら `ja/` 配下に並列追加する。
+- ディレクトリの index (`README.md` / `README.ja.md`) は同期を保つ。
+- ADR 0001-0017 は本ポリシー策定前に記述されたもので、別 Issue による遡及英訳まではタイトルと本文を原語のまま維持する。
 
 ---
 
