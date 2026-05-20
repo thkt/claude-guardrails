@@ -357,28 +357,29 @@ fn lint_with_external_tools(
     file_path: &str,
     config: &Config,
     project_root: Option<&Path>,
-) -> (Vec<Violation>, Option<String>) {
+) -> (Vec<Violation>, Vec<String>) {
     if !config.rules.oxlint {
-        return (Vec::new(), None);
+        return (Vec::new(), Vec::new());
     }
 
-    let Some(bin) = oxlint::resolve(file_path, project_root) else {
+    // `resolve_notes` carries the `OutsideProjectRoot` reject record (if any)
+    // independently from the bundled-fallback outcome. Both must surface in
+    // the envelope so an attack-detection signal is not collapsed into a
+    // generic "oxlint not available" note.
+    let (bin, mut notes) = oxlint::resolve(file_path, project_root);
+    let Some(bin) = bin else {
         if env::var_os("GUARDRAILS_VERBOSE").is_some() {
             eprintln!("guardrails: warning: oxlint not available for {file_path}");
         }
-        return (
-            Vec::new(),
-            Some(String::from("oxlint not found, JS lint skipped")),
-        );
+        notes.push(String::from("oxlint not found, JS lint skipped"));
+        return (Vec::new(), notes);
     };
 
-    match oxlint::check(content, file_path, &bin, &config.oxlint_config) {
-        Some(violations) => (violations, None),
-        None => (
-            Vec::new(),
-            Some(String::from("oxlint check failed, JS lint skipped")),
-        ),
-    }
+    let Some(violations) = oxlint::check(content, file_path, &bin, &config.oxlint_config) else {
+        notes.push(String::from("oxlint check failed, JS lint skipped"));
+        return (Vec::new(), notes);
+    };
+    (violations, notes)
 }
 
 fn lint_with_ast(
@@ -470,11 +471,9 @@ fn collect_violations(
     let mut notes = Vec::new();
 
     if is_js {
-        let (vs, note) = lint_with_external_tools(content, file_path, config, project_root);
+        let (vs, ns) = lint_with_external_tools(content, file_path, config, project_root);
         violations.extend(vs);
-        if let Some(n) = note {
-            notes.push(n);
-        }
+        notes.extend(ns);
     }
 
     let lines = non_comment_lines(content);

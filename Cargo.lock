@@ -361,6 +361,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "thiserror",
  "ureq",
 ]
 
