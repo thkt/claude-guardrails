@@ -1083,7 +1083,12 @@ fn handler_validates_origin<'a>(
     scoping: &Scoping,
 ) -> bool {
     if let BindingPattern::BindingIdentifier(ident) = pat {
-        return has_origin_reference(body, ident.symbol_id.get(), scoping);
+        // `None` when semantic could not resolve the binding (parser failure
+        // etc.); treat as no reference to stay conservative.
+        let Some(symbol_id) = ident.symbol_id.get() else {
+            return false;
+        };
+        return has_origin_reference(body, symbol_id, scoping);
     }
     OriginReferenceFinder::pattern_destructures_origin(pat)
 }
@@ -1116,21 +1121,17 @@ fn handler_signature_from_expression<'a, 'b>(
 
 /// `event.origin` / `event["origin"]` / `const { origin } = event` /
 /// `({ origin } = event)` のいずれかの形で param binding が `origin` プロパティへ
-/// 触っているかを callback body 内で走査する。`param_symbol_id` は semantic
-/// analysis 後の binding identifier の `SymbolId`。`None` の場合は semantic が
-/// resolve できなかった (parser 失敗等) ので保守的に未参照扱い。
+/// 触っているかを callback body 内で走査する。
 fn has_origin_reference(
     body: &FunctionBody<'_>,
-    param_symbol_id: Option<SymbolId>,
+    param_symbol_id: SymbolId,
     scoping: &Scoping,
 ) -> bool {
-    let Some(symbol_id) = param_symbol_id else {
-        return false;
-    };
     let mut finder = OriginReferenceFinder {
-        param_symbol_id: symbol_id,
+        param_symbol_id,
         scoping,
         found: false,
+        clobbered: false,
     };
     finder.visit_function_body(body);
     finder.found
@@ -1140,14 +1141,23 @@ struct OriginReferenceFinder<'b> {
     param_symbol_id: SymbolId,
     scoping: &'b Scoping,
     found: bool,
+    /// `var event = ...` は同じ `SymbolId` を function-scoped に再 bind する
+    /// (`let`/`const` 同 scope は `SyntaxError` だが `oxc_semantic` は同じく
+    /// 単一 symbol で resolve する)。以降の `event.origin` は attacker-
+    /// controlled value を指すため、origin check として信用できない。
+    clobbered: bool,
 }
 
 impl OriginReferenceFinder<'_> {
     /// `expr` が handler param と同一 symbol を指す identifier reference か。
     /// `oxc_semantic` の scope analysis に従い、inner で shadow された binding は
     /// 別 `SymbolId` を持つので自動的に false になる (nested function / arrow /
-    /// block / destructuring rename を区別不要)。
+    /// block / destructuring rename を区別不要)。同 scope での `var` 再 bind は
+    /// param symbol を reuse するため `clobbered` で無効化する。
     fn refers_to_param(&self, expr: &Expression) -> bool {
+        if self.clobbered {
+            return false;
+        }
         let Expression::Identifier(id) = expr else {
             return false;
         };
@@ -1209,6 +1219,12 @@ impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
         if self.found {
             return;
+        }
+        if let BindingPattern::BindingIdentifier(ident) = &it.id {
+            if ident.symbol_id.get() == Some(self.param_symbol_id) {
+                self.clobbered = true;
+                return;
+            }
         }
         if let Some(init) = &it.init {
             if self.refers_to_param(init) && Self::pattern_destructures_origin(&it.id) {
@@ -3315,7 +3331,7 @@ mod tests {
 
     // Nested function shadows the handler param. The inner `event.origin`
     // reads belong to the inner binding, so the outer handler still lacks an
-    // origin check and must fire. Resolved via oxc_semantic SymbolId equality.
+    // origin check and must fire.
     #[test]
     fn postmessage_origin_missing_fires_on_nested_function_shadow() {
         assert_postmessage_fires(
@@ -3323,8 +3339,8 @@ mod tests {
         );
     }
 
-    // Same shape with a nested arrow function. The inner `event` is a separate
-    // symbol; the outer handler is unchecked and must fire.
+    // Arrow-function variant of the nested shadow case; verifies the same
+    // SymbolId-separation works for `const inner = (event) => ...`.
     #[test]
     fn postmessage_origin_missing_fires_on_nested_arrow_shadow() {
         assert_postmessage_fires(
@@ -3360,6 +3376,17 @@ mod tests {
     fn postmessage_origin_missing_fires_on_block_scope_shadow_inner_only() {
         assert_postmessage_fires(
             "window.addEventListener('message', (event) => { if (debug) { const event = { origin: 'attacker' }; console.log(event.origin); } handle(event.data); });",
+        );
+    }
+
+    // `var event = ...` is a legal function-scoped re-declaration that reuses
+    // the param's SymbolId. Later `event.origin` resolves to the same symbol
+    // but the value is attacker-controlled; the rule must invalidate the
+    // origin check and fire.
+    #[test]
+    fn postmessage_origin_missing_fires_on_var_clobber_of_param() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (event) => { var event = { origin: 'attacker' }; if (event.origin !== 'https://x') return; handle(event.data); });",
         );
     }
 
