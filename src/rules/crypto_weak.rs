@@ -106,6 +106,7 @@ mod tests {
                 "SHA-1",
             ),
             ("crypto.createCipher('des', key);", "DES"),
+            ("crypto.createCipher('rc4', key);", "RC4"),
         ];
         for (content, expected) in cases {
             let violations = check(content);
