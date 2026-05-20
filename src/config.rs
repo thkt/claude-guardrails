@@ -136,6 +136,7 @@ struct ProjectSeverityConfig {
     block_on: Option<Vec<Severity>>,
 }
 
+pub(crate) const GUARDRAILS_CONFIG_FILE: &str = ".guardrails.json";
 pub(crate) const TOOLS_CONFIG_FILE: &str = ".claude/tools.json";
 const LEGACY_CONFIG_FILE: &str = ".claude-guardrails.json";
 
@@ -158,6 +159,21 @@ impl Config {
             return Ok(self);
         };
         self.git_root = Some(git_root.clone());
+
+        let agent_neutral_path = git_root.join(GUARDRAILS_CONFIG_FILE);
+        match fs::read_to_string(&agent_neutral_path) {
+            Ok(content) => {
+                let project: ProjectConfig = serde_json::from_str(&content)
+                    .map_err(|e| format!("invalid project config {agent_neutral_path:?}: {e}"))?;
+                return Ok(self.merge(project));
+            }
+            Err(e) if e.kind() != ErrorKind::NotFound => {
+                return Err(format!(
+                    "cannot read project config {agent_neutral_path:?}: {e}"
+                ));
+            }
+            Err(_) => {}
+        }
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
         match fs::read_to_string(&tools_path) {
@@ -330,6 +346,75 @@ mod tests {
         assert!(merged.rules.biome);
         assert!(merged.rules.oxlint);
         assert_eq!(merged.severity.block_on.len(), 2);
+    }
+
+    #[test]
+    fn with_project_overrides_from_guardrails_json() {
+        let tmp = tmp_repo();
+        fs::write(
+            tmp.path().join(GUARDRAILS_CONFIG_FILE),
+            r#"{"rules": {"biome": false}}"#,
+        )
+        .unwrap();
+
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        assert!(!config.rules.biome);
+        assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn with_project_overrides_guardrails_json_takes_priority_over_tools_json() {
+        let tmp = tmp_repo_with_claude();
+        fs::write(
+            tmp.path().join(GUARDRAILS_CONFIG_FILE),
+            r#"{"rules": {"biome": false}}"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join(TOOLS_CONFIG_FILE),
+            r#"{"guardrails": {"rules": {"oxlint": false}}}"#,
+        )
+        .unwrap();
+
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        // .guardrails.json wins: biome disabled, oxlint stays default-on
+        assert!(!config.rules.biome);
+        assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn with_project_overrides_guardrails_json_takes_priority_over_legacy() {
+        let tmp = tmp_repo();
+        fs::write(
+            tmp.path().join(GUARDRAILS_CONFIG_FILE),
+            r#"{"rules": {"biome": false}}"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join(LEGACY_CONFIG_FILE),
+            r#"{"rules": {"oxlint": false}}"#,
+        )
+        .unwrap();
+
+        let config = Config::default()
+            .with_overrides_from_root(tmp.path())
+            .unwrap();
+        assert!(!config.rules.biome);
+        assert!(config.rules.oxlint);
+    }
+
+    #[test]
+    fn with_project_overrides_malformed_guardrails_json_returns_error() {
+        let tmp = tmp_repo();
+        fs::write(tmp.path().join(GUARDRAILS_CONFIG_FILE), "not valid json{{{").unwrap();
+
+        let result = Config::default().with_overrides_from_root(tmp.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid project config"));
     }
 
     #[test]
