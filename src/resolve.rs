@@ -146,36 +146,48 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
     })
 }
 
+// `OutsideProjectRoot` carries the canonical path so callers can record it for
+// forensics. The string is for human/log consumption only; never echo a "place
+// the bin under <root>/node_modules/.bin to use it" hint anywhere downstream —
+// the trust boundary is the spec, not a bypass instruction.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ResolveError {
+    #[error("no binary found in ancestor node_modules/.bin/")]
+    NotFound,
+    #[error("binary resolved outside trusted location: {canonical:?}")]
+    OutsideProjectRoot { canonical: PathBuf },
+}
+
 /// Resolves a local `node_modules/.bin/<name>` near `file_path`.
 ///
 /// When `project_root` is `Some`, the resolved bin must canonicalize inside
-/// that root or it is rejected. Canonicalize the bin, not `file_path`, because
-/// Write creates files that do not exist yet.
+/// that root or it is rejected with `ResolveError::OutsideProjectRoot`.
+/// Canonicalize the bin, not `file_path`, because Write creates files that do
+/// not exist yet.
 ///
-/// First-match-wins on the ancestor walk: a rejected closest bin falls through
-/// to the caller's fallback (e.g. `ensure_oxlint`) rather than continuing the
-/// walk. No PATH fallback — a globally installed `oxlint` could sit outside
-/// any project root. `None` disables the boundary and is reserved for tests
-/// over tempdirs.
-///
-/// Returns `None` for both "no bin found" and "bin found but rejected as
-/// outside `project_root`"; callers cannot distinguish the two and the
-/// attack-detection signal collapses into the bundled-oxlint fallback. Splitting
-/// to `Result<PathBuf, ResolveError>` is tracked separately.
+/// First-match-wins on the ancestor walk: a rejected closest bin returns
+/// `Err(OutsideProjectRoot)` without continuing the walk, leaving fallback
+/// (e.g. `ensure_oxlint`) to the caller. No PATH fallback — a globally
+/// installed `oxlint` could sit outside any project root. `None` disables the
+/// boundary and is reserved for tests over tempdirs.
 pub fn try_resolve_bin(
     name: &str,
     file_path: &str,
     project_root: Option<&Path>,
-) -> Option<PathBuf> {
+) -> Result<PathBuf, ResolveError> {
     let canonical = Path::new(file_path)
         .ancestors()
         .skip(1) // skip the file itself, start from parent dir
         .map(|d| d.join("node_modules/.bin").join(name))
-        .find_map(|c| fs::canonicalize(&c).ok())?;
+        .find_map(|c| fs::canonicalize(&c).ok())
+        .ok_or(ResolveError::NotFound)?;
 
-    project_root
-        .is_none_or(|root| canonical.starts_with(root))
-        .then_some(canonical)
+    if project_root.is_none_or(|root| canonical.starts_with(root)) {
+        Ok(canonical)
+    } else {
+        Err(ResolveError::OutsideProjectRoot { canonical })
+    }
 }
 
 pub fn run_linter_check<T: DeserializeOwned>(
@@ -313,7 +325,7 @@ mod tests {
 
         let file_path = tmp.path().join("src/app.ts");
         let result = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
-        assert_eq!(result, Some(fs::canonicalize(&bin_path).unwrap()));
+        assert_eq!(result.unwrap(), fs::canonicalize(&bin_path).unwrap());
     }
 
     #[test]
@@ -329,16 +341,19 @@ mod tests {
         let file_path = deep_dir.join("Button.tsx");
 
         let result = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
-        assert_eq!(result, Some(fs::canonicalize(&bin_path).unwrap()));
+        assert_eq!(result.unwrap(), fs::canonicalize(&bin_path).unwrap());
     }
 
     #[test]
-    fn returns_none_when_not_found() {
+    fn returns_not_found_when_no_bin_exists() {
         let tmp = TempDir::new().unwrap();
         let file_path = tmp.path().join("test.ts");
 
         let result = try_resolve_bin("nonexistent_tool_xyz", file_path.to_str().unwrap(), None);
-        assert_eq!(result, None);
+        assert!(
+            matches!(result, Err(ResolveError::NotFound)),
+            "expected NotFound, got {result:?}"
+        );
     }
 
     #[test]
@@ -356,14 +371,15 @@ mod tests {
         let file_path = tmp.path().join("packages/app/src/index.ts");
         let result = try_resolve_bin("oxlint", file_path.to_str().unwrap(), None);
         assert_eq!(
-            result,
-            Some(fs::canonicalize(nested_bin.join("oxlint")).unwrap())
+            result.unwrap(),
+            fs::canonicalize(nested_bin.join("oxlint")).unwrap()
         );
     }
 
     // A planted `node_modules/.bin/<name>` outside the canonical project root
     // must not be executed even when the hook runs on a file inside that tree
-    // (attacker-controlled scratch area, sibling repo, /tmp scaffold).
+    // (attacker-controlled scratch area, sibling repo, /tmp scaffold). The
+    // returned variant must carry the canonical path so callers can record it.
     #[test]
     fn rejects_bin_outside_project_root() {
         let project_tmp = TempDir::new().unwrap();
@@ -372,7 +388,8 @@ mod tests {
         let attack_tmp = TempDir::new().unwrap();
         let attack_bin_dir = attack_tmp.path().join("node_modules/.bin");
         fs::create_dir_all(&attack_bin_dir).unwrap();
-        fs::write(attack_bin_dir.join("oxlint"), "#!/bin/sh\nexit 0\n").unwrap();
+        let attack_bin = attack_bin_dir.join("oxlint");
+        fs::write(&attack_bin, "#!/bin/sh\nexit 0\n").unwrap();
 
         let file_path = attack_tmp.path().join("src/app.ts");
         let result = try_resolve_bin(
@@ -380,15 +397,17 @@ mod tests {
             file_path.to_str().unwrap(),
             Some(project_root.as_path()),
         );
-        assert_eq!(
-            result, None,
-            "binary outside project_root must be rejected; got {result:?}"
-        );
+        match result {
+            Err(ResolveError::OutsideProjectRoot { canonical }) => {
+                assert_eq!(canonical, fs::canonicalize(&attack_bin).unwrap());
+            }
+            other => panic!("expected OutsideProjectRoot, got {other:?}"),
+        }
     }
 
     // A sibling tempdir holding a planted oxlint must not leak in when
     // file_path lives inside project_root proper — the ancestor walk never
-    // reaches the sibling tree.
+    // reaches the sibling tree, so the outcome is `NotFound`, not a reject.
     #[test]
     fn sibling_tree_bin_not_selected_when_file_inside_root() {
         let project_tmp = TempDir::new().unwrap();
@@ -405,7 +424,10 @@ mod tests {
             file_path.to_str().unwrap(),
             Some(project_root.as_path()),
         );
-        assert_eq!(result, None);
+        assert!(
+            matches!(result, Err(ResolveError::NotFound)),
+            "expected NotFound, got {result:?}"
+        );
     }
 
     // Measure per-call cost of try_resolve_bin against an ancestor depth that
@@ -457,6 +479,6 @@ mod tests {
             file_path.to_str().unwrap(),
             Some(project_root.as_path()),
         );
-        assert_eq!(result, Some(fs::canonicalize(&bin_path).unwrap()));
+        assert_eq!(result.unwrap(), fs::canonicalize(&bin_path).unwrap());
     }
 }

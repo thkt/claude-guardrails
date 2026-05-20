@@ -1,6 +1,6 @@
 use crate::config::OxlintConfig;
 use crate::download::ensure_oxlint;
-use crate::resolve::{run_linter_check, try_resolve_bin};
+use crate::resolve::{run_linter_check, try_resolve_bin, ResolveError};
 use crate::rules::{Severity, Violation};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -44,12 +44,29 @@ struct OxlintSpan {
     line: u32,
 }
 
-pub fn resolve(file_path: &str, project_root: Option<&Path>) -> Option<PathBuf> {
-    try_resolve_bin("oxlint", file_path, project_root).or_else(|| {
-        ensure_oxlint()
-            .inspect_err(|e| eprintln!("guardrails: oxlint unavailable: {e}"))
-            .ok()
-    })
+// Reject note wording: state the fact (resolved outside trusted location) and
+// the recovery (bundled fallback). Never include "place it under X to use the
+// local bin" — that would turn the message into a placement guide for a
+// planted binary. The canonical path is logged for forensics but the source
+// of the trust boundary is intentionally not spelled out here.
+pub fn resolve(file_path: &str, project_root: Option<&Path>) -> (Option<PathBuf>, Vec<String>) {
+    match try_resolve_bin("oxlint", file_path, project_root) {
+        Ok(path) => (Some(path), Vec::new()),
+        Err(ResolveError::NotFound) => (download_bundled(), Vec::new()),
+        Err(ResolveError::OutsideProjectRoot { canonical }) => {
+            let note = format!(
+                "oxlint at {canonical:?} resolved outside trusted location; using bundled fallback"
+            );
+            eprintln!("guardrails: {note}");
+            (download_bundled(), vec![note])
+        }
+    }
+}
+
+fn download_bundled() -> Option<PathBuf> {
+    ensure_oxlint()
+        .inspect_err(|e| eprintln!("guardrails: oxlint unavailable: {e}"))
+        .ok()
 }
 
 pub fn check(

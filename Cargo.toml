@@ -24,6 +24,7 @@ sha2 = "0.10"
 constant_time_eq = "0.3"
 tar = "0.4"
 flate2 = "1"
+thiserror = "2"
 
 [lints.rust]
 unsafe_code = "forbid"
