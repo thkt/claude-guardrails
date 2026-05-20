@@ -345,9 +345,8 @@ where
 }
 
 /// Routes a rule's `check_program(program, line_offsets, file_path)` through
-/// `ast_test_check`. Each rule file's local `check` wrapper delegates here so
-/// the closure-creation step lives in one place; `eval` keeps a separate
-/// wrapper because it also builds an `ImportMap`.
+/// `ast_test_check`. Rules whose `check_program` needs extra arguments (e.g.,
+/// a precomputed import map) construct their own closure instead.
 #[cfg(test)]
 pub(in crate::rules) fn test_check_program<F>(
     content: &str,
@@ -355,7 +354,7 @@ pub(in crate::rules) fn test_check_program<F>(
     check_fn: F,
 ) -> Vec<Violation>
 where
-    F: Fn(&Program<'_>, &[usize], &str) -> Vec<Violation>,
+    F: FnOnce(&Program<'_>, &[usize], &str) -> Vec<Violation>,
 {
     ast_test_check(content, file_path, |p, lo| check_fn(p, lo, file_path))
 }
@@ -368,7 +367,7 @@ pub(in crate::rules) fn test_check_program_fail_open<F>(
     check_fn: F,
 ) -> Vec<Violation>
 where
-    F: Fn(&Program<'_>, &[usize], &str) -> Vec<Violation>,
+    F: FnOnce(&Program<'_>, &[usize], &str) -> Vec<Violation>,
 {
     ast_fail_open_check(content, file_path, |p, lo| check_fn(p, lo, file_path))
 }

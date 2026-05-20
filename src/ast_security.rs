@@ -1,4 +1,6 @@
 use crate::ast;
+#[cfg(test)]
+use crate::rules::ast_fail_open_check;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionExpression, AssignmentExpression,
@@ -274,7 +276,6 @@ fn rhs_has_insecure_math_random(expr: &Expression) -> bool {
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    use crate::rules::ast_fail_open_check;
     ast_fail_open_check(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
         found.extend(check_bidi(content, file_path, line_offsets));
