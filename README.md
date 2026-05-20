@@ -316,9 +316,13 @@ Without `--json`, output is byte-for-byte identical to the human-readable defaul
 
 ## Configuration
 
-Add a `guardrails` key to `.claude/tools.json` at your project root. All fields are optional — only specify what you want to override.
+Place a `.guardrails.json` at your project root. The format is the flat `ProjectConfig` schema (no `guardrails` key wrapper). All fields are optional — only specify what you want to override. This is the agent-neutral path that works the same from Claude Code, codex CLI, or any other AI agent that runs guardrails as a hook.
 
-> **Migration**: `.claude-guardrails.json` at the project root is still supported as a legacy fallback. If both exist, `.claude/tools.json` takes priority.
+> **Other supported paths**:
+> - `.claude/tools.json` (`guardrails` key configured) — Claude Code's 4-tool pipeline convention. Used when `.guardrails.json` is absent.
+> - `.claude-guardrails.json` — legacy fallback. Used when neither of the above is found.
+>
+> If multiple files exist, the priority is `.guardrails.json` > `.claude/tools.json` > `.claude-guardrails.json`. Only the first one found is loaded.
 
 **Defaults** (no config file needed):
 
@@ -327,49 +331,51 @@ Add a `guardrails` key to `.claude/tools.json` at your project root. All fields 
 
 ### Schema
 
+`.guardrails.json` (recommended, agent-neutral):
+
 ```json
 {
-  "guardrails": {
-    "enabled": true,
-    "rules": {
-      "oxlint": true,
-      "sensitiveFile": true,
-      "cryptoWeak": true,
-      "sensitiveLogging": true,
-      "security": true,
-      "architecture": true,
-      "eval": true,
-      "hardcodedSecrets": true,
-      "cotLeakageMarker": true,
-      "openRedirect": true,
-      "rawHtml": true,
-      "sqliConcat": true,
-      "httpResource": true,
-      "corsWildcard": true,
-      "transaction": true,
-      "domAccess": true,
-      "syncIo": true,
-      "bundleSize": true,
-      "testAssertion": true,
-      "generatedFile": true,
-      "testLocation": true,
-      "naming": true,
-      "flakyTest": true,
-      "noUseEffect": true,
-      "serviceWorker": true,
-      "jwtClient": true,
-      "astSecurity": true
-    },
-    "oxlint": {
-      "deny": [],
-      "allow": []
-    },
-    "severity": {
-      "blockOn": ["critical", "high"]
-    }
+  "enabled": true,
+  "rules": {
+    "oxlint": true,
+    "sensitiveFile": true,
+    "cryptoWeak": true,
+    "sensitiveLogging": true,
+    "security": true,
+    "architecture": true,
+    "eval": true,
+    "hardcodedSecrets": true,
+    "cotLeakageMarker": true,
+    "openRedirect": true,
+    "rawHtml": true,
+    "sqliConcat": true,
+    "httpResource": true,
+    "corsWildcard": true,
+    "transaction": true,
+    "domAccess": true,
+    "syncIo": true,
+    "bundleSize": true,
+    "testAssertion": true,
+    "generatedFile": true,
+    "testLocation": true,
+    "naming": true,
+    "flakyTest": true,
+    "noUseEffect": true,
+    "serviceWorker": true,
+    "jwtClient": true,
+    "astSecurity": true
+  },
+  "oxlint": {
+    "deny": [],
+    "allow": []
+  },
+  "severity": {
+    "blockOn": ["critical", "high"]
   }
 }
 ```
+
+For `.claude/tools.json`, wrap the same object under a `"guardrails"` key (4-tool pipeline convention).
 
 #### `oxlint.deny` / `oxlint.allow`
 
@@ -377,11 +383,9 @@ Add extra rules to enforce or suppress the default deny list:
 
 ```json
 {
-  "guardrails": {
-    "oxlint": {
-      "deny": ["eslint/curly"],
-      "allow": ["eslint/no-console"]
-    }
+  "oxlint": {
+    "deny": ["eslint/curly"],
+    "allow": ["eslint/no-console"]
   }
 }
 ```
@@ -399,10 +403,8 @@ All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
 
 ```json
 {
-  "guardrails": {
-    "rules": {
-      "oxlint": false
-    }
+  "rules": {
+    "oxlint": false
   }
 }
 ```
@@ -411,14 +413,12 @@ All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
 
 ```json
 {
-  "guardrails": {
-    "rules": {
-      "domAccess": false,
-      "bundleSize": false
-    },
-    "oxlint": {
-      "allow": ["eslint/no-console"]
-    }
+  "rules": {
+    "domAccess": false,
+    "bundleSize": false
+  },
+  "oxlint": {
+    "allow": ["eslint/no-console"]
   }
 }
 ```
@@ -427,10 +427,8 @@ All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
 
 ```json
 {
-  "guardrails": {
-    "severity": {
-      "blockOn": ["critical", "high", "medium", "low"]
-    }
+  "severity": {
+    "blockOn": ["critical", "high", "medium", "low"]
   }
 }
 ```
@@ -439,23 +437,22 @@ All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
 
 ```json
 {
-  "guardrails": {
-    "enabled": false
-  }
+  "enabled": false
 }
 ```
 
 ### Config Resolution
 
-The config file is found by walking up from the target file to the nearest `.git` directory.
+The config file is found by walking up from the target file to the nearest `.git` directory. Discovery stops at the first file found in this order:
 
 ```text
 project-root/
+├── .guardrails.json         ← preferred (agent-neutral, flat schema)
 ├── .claude/
-│   └── tools.json     ← preferred (guardrails key)
+│   └── tools.json           ← Claude Code 4-tool pipeline (guardrails key)
 ├── .git/
 ├── src/
-│   └── app.ts         ← file being checked → walks up to find config
+│   └── app.ts               ← file being checked → walks up to find config
 └── .claude-guardrails.json  ← legacy fallback
 ```
 
@@ -472,10 +469,8 @@ To disable oxlint in guardrails and rely on your commit hook instead:
 
 ```json
 {
-  "guardrails": {
-    "rules": {
-      "oxlint": false
-    }
+  "rules": {
+    "oxlint": false
   }
 }
 ```

@@ -318,9 +318,13 @@ guardrails --json < tool-call.json
 
 ## 設定
 
-プロジェクトルートの `.claude/tools.json` に `guardrails` キーを追加します。すべてのフィールドはオプションで、オーバーライドしたいもののみ指定してください。
+プロジェクトルートに `.guardrails.json` を配置します。フォーマットは flat な `ProjectConfig` スキーマ（`guardrails` キーで包まない）。すべてのフィールドはオプションで、オーバーライドしたいもののみ指定してください。これは agent-neutral な path で、Claude Code、codex CLI、その他の AI agent から guardrails を hook として実行する場合のいずれでも同じように動作します。
 
-> **移行**: プロジェクトルートの `.claude-guardrails.json` もレガシーフォールバックとしてサポートされています。両方存在する場合、`.claude/tools.json` が優先されます。
+> **その他の対応 path**:
+> - `.claude/tools.json`（`guardrails` キー配下に設定）— Claude Code の 4-tool pipeline 規約。`.guardrails.json` 不在時に使われる
+> - `.claude-guardrails.json` — レガシーフォールバック。上記いずれも見つからない場合に使われる
+>
+> 複数 file が存在する場合、優先順位は `.guardrails.json` > `.claude/tools.json` > `.claude-guardrails.json`。最初に見つかった 1 つだけが読み込まれます。
 
 設定ファイルがない場合のデフォルト構成です。
 
@@ -329,49 +333,51 @@ guardrails --json < tool-call.json
 
 ### スキーマ
 
+`.guardrails.json`（推奨、agent-neutral）:
+
 ```json
 {
-  "guardrails": {
-    "enabled": true,
-    "rules": {
-      "oxlint": true,
-      "sensitiveFile": true,
-      "cryptoWeak": true,
-      "sensitiveLogging": true,
-      "security": true,
-      "architecture": true,
-      "eval": true,
-      "hardcodedSecrets": true,
-      "cotLeakageMarker": true,
-      "openRedirect": true,
-      "rawHtml": true,
-      "sqliConcat": true,
-      "httpResource": true,
-      "corsWildcard": true,
-      "transaction": true,
-      "domAccess": true,
-      "syncIo": true,
-      "bundleSize": true,
-      "testAssertion": true,
-      "generatedFile": true,
-      "testLocation": true,
-      "naming": true,
-      "flakyTest": true,
-      "noUseEffect": true,
-      "serviceWorker": true,
-      "jwtClient": true,
-      "astSecurity": true
-    },
-    "oxlint": {
-      "deny": [],
-      "allow": []
-    },
-    "severity": {
-      "blockOn": ["critical", "high"]
-    }
+  "enabled": true,
+  "rules": {
+    "oxlint": true,
+    "sensitiveFile": true,
+    "cryptoWeak": true,
+    "sensitiveLogging": true,
+    "security": true,
+    "architecture": true,
+    "eval": true,
+    "hardcodedSecrets": true,
+    "cotLeakageMarker": true,
+    "openRedirect": true,
+    "rawHtml": true,
+    "sqliConcat": true,
+    "httpResource": true,
+    "corsWildcard": true,
+    "transaction": true,
+    "domAccess": true,
+    "syncIo": true,
+    "bundleSize": true,
+    "testAssertion": true,
+    "generatedFile": true,
+    "testLocation": true,
+    "naming": true,
+    "flakyTest": true,
+    "noUseEffect": true,
+    "serviceWorker": true,
+    "jwtClient": true,
+    "astSecurity": true
+  },
+  "oxlint": {
+    "deny": [],
+    "allow": []
+  },
+  "severity": {
+    "blockOn": ["critical", "high"]
   }
 }
 ```
+
+`.claude/tools.json` で記述する場合は、上記オブジェクト全体を `"guardrails"` キーで包んでください（4-tool pipeline 規約）。
 
 #### `oxlint.deny` / `oxlint.allow`
 
@@ -379,11 +385,9 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 
 ```json
 {
-  "guardrails": {
-    "oxlint": {
-      "deny": ["eslint/curly"],
-      "allow": ["eslint/no-console"]
-    }
+  "oxlint": {
+    "deny": ["eslint/curly"],
+    "allow": ["eslint/no-console"]
   }
 }
 ```
@@ -399,10 +403,8 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 
 ```json
 {
-  "guardrails": {
-    "rules": {
-      "oxlint": false
-    }
+  "rules": {
+    "oxlint": false
   }
 }
 ```
@@ -411,14 +413,12 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 
 ```json
 {
-  "guardrails": {
-    "rules": {
-      "domAccess": false,
-      "bundleSize": false
-    },
-    "oxlint": {
-      "allow": ["eslint/no-console"]
-    }
+  "rules": {
+    "domAccess": false,
+    "bundleSize": false
+  },
+  "oxlint": {
+    "allow": ["eslint/no-console"]
   }
 }
 ```
@@ -427,10 +427,8 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 
 ```json
 {
-  "guardrails": {
-    "severity": {
-      "blockOn": ["critical", "high", "medium", "low"]
-    }
+  "severity": {
+    "blockOn": ["critical", "high", "medium", "low"]
   }
 }
 ```
@@ -439,23 +437,22 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 
 ```json
 {
-  "guardrails": {
-    "enabled": false
-  }
+  "enabled": false
 }
 ```
 
 ### 設定の解決
 
-対象ファイルからもっとも近い `.git` ディレクトリまで上方向に探索されます。
+対象ファイルからもっとも近い `.git` ディレクトリまで上方向に探索されます。次の順序で最初に見つかった file のみが読み込まれます。
 
 ```text
 project-root/
+├── .guardrails.json         ← 推奨（agent-neutral、flat スキーマ）
 ├── .claude/
-│   └── tools.json     ← 優先（guardrails キー）
+│   └── tools.json           ← Claude Code 4-tool pipeline（guardrails キー）
 ├── .git/
 ├── src/
-│   └── app.ts         ← チェック対象ファイル → 上方向に設定を探索
+│   └── app.ts               ← チェック対象ファイル → 上方向に設定を探索
 └── .claude-guardrails.json  ← レガシーフォールバック
 ```
 
@@ -472,10 +469,8 @@ oxlintをguardrailsで無効化し、コミットフックに任せる場合の�
 
 ```json
 {
-  "guardrails": {
-    "rules": {
-      "oxlint": false
-    }
+  "rules": {
+    "oxlint": false
   }
 }
 ```

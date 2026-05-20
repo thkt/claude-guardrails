@@ -563,7 +563,7 @@ fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput,
 }
 
 const CONFIG_HINT_MESSAGE: &str =
-    "Guardrails: using defaults. Customize via .claude/tools.json \u{2014} see https://github.com/thkt/guardrails#configuration";
+    "Guardrails: using defaults. Customize via .guardrails.json \u{2014} see https://github.com/thkt/guardrails#configuration";
 
 #[derive(Debug, PartialEq)]
 enum HintAction {
