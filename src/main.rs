@@ -704,6 +704,12 @@ fn run_hook(json_mode: bool) -> i32 {
     )
 }
 
+/// Runs the hook against a parsed `ToolInput`, returning a sysexits exit code.
+///
+/// `load_config` is `FnOnce` so config is **deferred** past the unsupported-tool
+/// / empty-content early-returns: those paths never read `.claude/tools.json`,
+/// keeping hook startup off the disk for tool calls we do not audit. The same
+/// seam lets tests inject a stub config without touching the real loader.
 fn run_hook_with_input<F>(
     input: &ToolInput,
     project_root_result: io::Result<PathBuf>,

@@ -157,6 +157,11 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
 /// walk. No PATH fallback — a globally installed `oxlint` could sit outside
 /// any project root. `None` disables the boundary and is reserved for tests
 /// over tempdirs.
+///
+/// Returns `None` for both "no bin found" and "bin found but rejected as
+/// outside `project_root`"; callers cannot distinguish the two and the
+/// attack-detection signal collapses into the bundled-oxlint fallback. Splitting
+/// to `Result<PathBuf, ResolveError>` is tracked separately.
 pub fn try_resolve_bin(
     name: &str,
     file_path: &str,
