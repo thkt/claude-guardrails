@@ -325,7 +325,7 @@ pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) 
 /// type is unsupported or the parser failed). Use `ast_fail_open_check` for
 /// tests that assert the production fail-open path.
 #[cfg(test)]
-pub(in crate::rules) fn ast_test_check<F>(content: &str, file_path: &str, f: F) -> Vec<Violation>
+pub(crate) fn ast_test_check<F>(content: &str, file_path: &str, f: F) -> Vec<Violation>
 where
     F: FnOnce(&Program<'_>, &[usize]) -> Vec<Violation>,
 {
@@ -337,15 +337,39 @@ where
 /// Vec when parsing fails or the file type is unsupported. Use `ast_test_check`
 /// for tests that pass valid fixtures.
 #[cfg(test)]
-pub(in crate::rules) fn ast_fail_open_check<F>(
-    content: &str,
-    file_path: &str,
-    f: F,
-) -> Vec<Violation>
+pub(crate) fn ast_fail_open_check<F>(content: &str, file_path: &str, f: F) -> Vec<Violation>
 where
     F: FnOnce(&Program<'_>, &[usize]) -> Vec<Violation>,
 {
     with_parsed_program(content, file_path, f).unwrap_or_default()
+}
+
+/// Routes a rule's `check_program(program, line_offsets, file_path)` through
+/// `ast_test_check`. Rules whose `check_program` needs extra arguments (e.g.,
+/// a precomputed import map) construct their own closure instead.
+#[cfg(test)]
+pub(in crate::rules) fn test_check_program<F>(
+    content: &str,
+    file_path: &str,
+    check_fn: F,
+) -> Vec<Violation>
+where
+    F: FnOnce(&Program<'_>, &[usize], &str) -> Vec<Violation>,
+{
+    ast_test_check(content, file_path, |p, lo| check_fn(p, lo, file_path))
+}
+
+/// Fail-open companion to `test_check_program`.
+#[cfg(test)]
+pub(in crate::rules) fn test_check_program_fail_open<F>(
+    content: &str,
+    file_path: &str,
+    check_fn: F,
+) -> Vec<Violation>
+where
+    F: FnOnce(&Program<'_>, &[usize], &str) -> Vec<Violation>,
+{
+    ast_fail_open_check(content, file_path, |p, lo| check_fn(p, lo, file_path))
 }
 
 #[cfg(test)]

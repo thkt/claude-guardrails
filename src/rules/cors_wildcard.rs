@@ -17,16 +17,12 @@ const FIX_MESSAGE: &str =
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    super::ast_test_check(content, file_path, |program, line_offsets| {
-        check_program(program, line_offsets, file_path)
-    })
+    super::test_check_program(content, file_path, check_program)
 }
 
 #[cfg(test)]
 fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
-    super::ast_fail_open_check(content, file_path, |program, line_offsets| {
-        check_program(program, line_offsets, file_path)
-    })
+    super::test_check_program_fail_open(content, file_path, check_program)
 }
 
 pub fn check_program(
