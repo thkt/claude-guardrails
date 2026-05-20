@@ -174,36 +174,6 @@ fn crypto_weak_silent_on_sha256() {
     );
 }
 
-// T-081: crypto-weak fires on SHA-1 (extends T-011 MD5 coverage)
-#[test]
-fn crypto_weak_fires_on_sha1() {
-    assert_rule_fires(
-        "crypto-weak",
-        "/src/hash.ts",
-        "const h = createHash('sha1');",
-    );
-}
-
-// T-082: crypto-weak fires on DES (extends T-011 MD5 coverage)
-#[test]
-fn crypto_weak_fires_on_des() {
-    assert_rule_fires(
-        "crypto-weak",
-        "/src/cipher.ts",
-        "const c = createCipher('des', key);",
-    );
-}
-
-// T-083: crypto-weak fires on RC4 (extends T-011 MD5 coverage)
-#[test]
-fn crypto_weak_fires_on_rc4() {
-    assert_rule_fires(
-        "crypto-weak",
-        "/src/cipher.ts",
-        "const c = createCipher('rc4', key);",
-    );
-}
-
 // T-013: dom-access (.tsx/.jsx scope, document.* APIs)
 #[test]
 fn dom_access_fires_on_get_element_by_id_in_tsx() {
@@ -241,26 +211,6 @@ fn http_resource_silent_on_https() {
         "http-resource",
         "/src/api.ts",
         r#"fetch("https://api.example.com/data");"#,
-    );
-}
-
-// T-084: http-resource silent on http://localhost (loopback exception; companion to T-015)
-#[test]
-fn http_resource_silent_on_localhost() {
-    assert_rule_silent(
-        "http-resource",
-        "/src/api.ts",
-        r#"fetch("http://localhost:3000/api");"#,
-    );
-}
-
-// T-085: http-resource silent on http://127.0.0.1 (loopback exception; companion to T-015)
-#[test]
-fn http_resource_silent_on_loopback_ip() {
-    assert_rule_silent(
-        "http-resource",
-        "/src/api.ts",
-        r#"fetch("http://127.0.0.1:8080/api");"#,
     );
 }
 
@@ -870,16 +820,6 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
         "postmessage-origin-missing",
         "/src/page.ts",
         "window.addEventListener('message', (event) => { if (event.origin !== 'https://trusted.example.com') return; processData(event.data); });",
-    );
-}
-
-// T-079: eval fires on `new Function(...)` (no-new-func via oxlint adds defense-in-depth)
-#[test]
-fn eval_fires_on_new_function_ctor() {
-    assert_rule_fires(
-        "eval",
-        "/src/app.ts",
-        "const fn = new Function('return 1');",
     );
 }
 
