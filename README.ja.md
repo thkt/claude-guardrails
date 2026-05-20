@@ -147,63 +147,63 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 
 ### ルール
 
-| ルール             | 重大度   | 説明                                                                            | 無効化する場面                                       |
-| ------------------ | -------- | ------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `sensitiveFile`         | Critical | .env、credentials.\*、\*.pem への書き込みをブロック                             | 無効化不可（セキュリティ上重要）                          |
-| `cryptoWeak`            | High     | MD5、SHA1、DES、RC4 の使用を検出                                                | 既知の制約があるレガシーシステムの保守                    |
-| `sensitiveLogging`      | High     | console.log 内の password/token/secret を検出                                   | 無効化不可（セキュリティ上重要）                          |
-| `security`              | Mixed    | XSS ベクター、安全でない API、機密ストレージ。rule_id 別の内訳は下記の `Security Rules` を参照 | 無効化不可（セキュリティ上重要）                          |
-| `architecture`          | High     | レイヤー違反（例: UI がドメインをインポート）                                   | 小規模プロジェクト、モノリス、スクリプト                  |
-| `eval`                  | High     | eval()、new Function()、間接的 eval                                             | 無効化不可（セキュリティ上重要）                          |
-| `hardcodedSecrets`      | High     | ソースコード内の API キー、トークン、パスワード                                 | 無効化不可（セキュリティ上重要）                          |
-| `cotLeakageMarker`      | High     | AI Chain-of-Thought リークマーカー (`<thinking>`、`<\|channel\|>`、`<\|start\|>assistant`、`to=functions.`) | AI トレース/トランスクリプトを意図的に保存するプロジェクト |
-| `openRedirect`          | High     | ユーザー制御入力による location.href/assign                                     | Web 以外のプロジェクト                                    |
-| `rawHtml`               | High     | 変数を含む HTML の文字列結合                                                    | Web 以外のプロジェクト                                    |
-| `sqliConcat`            | High     | テンプレートリテラル/文字列結合で組み立てた SQL を検出                          | データベースを使用しないプロジェクト                      |
-| `httpResource`          | Medium   | HTTP（非 HTTPS）リソース URL                                                    | 開発専用の設定                                            |
-| `corsWildcard`          | Medium   | CORS ワイルドカード origin (`cors({ origin: '*' })`、`Access-Control-Allow-Origin: *`) | Web 以外のプロジェクト、社内 API 専用              |
-| `transaction`           | Medium   | トランザクションラッパーなしの複数書き込み。スコープは `usecases/`、`use-cases/`、`application/`、`services/`、`domain/`、`handlers/`、`app/`、`server/` ディレクトリと `app/**/route.{ts,js}` セグメント | データベースを使用しないプロジェクト                      |
-| `domAccess`             | Medium   | React（.tsx/.jsx）での直接 DOM 操作                                             | React 以外のプロジェクト、またはバニラ JS/TS              |
-| `syncIo`                | Medium   | readFileSync、writeFileSync（イベントループをブロック）                         | CLI ツール、ビルドスクリプト、同期のみのコンテキスト      |
-| `bundleSize`            | Medium   | lodash/moment のフルインポート                                                  | バックエンド/Node.js（バンドルサイズの懸念なし）          |
-| `testAssertion`         | Medium   | expect() や assert のないテスト                                                 | Playwright、カスタムテストフレームワーク                  |
-| `flakyTest`             | Low      | テスト内の setTimeout、Math.random                                              | 意図的なタイミング/ランダムネスのテスト                   |
-| `generatedFile`         | High     | \*.generated.\*、\*.g.ts の編集を警告                                           | コード生成のないプロジェクト                              |
-| `testLocation`          | Medium   | src/ ディレクトリ内のテストファイル                                             | コロケーションテスト戦略（ソースと同じ場所）              |
-| `naming`                | Mixed    | 命名規則（hooks、コンポーネント、型）                                           | チーム/プロジェクトで異なる命名規則がある場合             |
-| `noUseEffect`           | Medium   | .tsx/.jsx内のuseEffectを検出し代替案を提示                                      | useEffectを意図的に使用するプロジェクト                   |
-| `serviceWorker`         | Medium   | ルートスコープ（`{ scope: '/' }`）での Service Worker 登録。特定パスへのスコープ絞り込みを提案 | サイト全体に worker を意図的に配信するプロジェクト        |
-| `jwtClient`             | Medium   | クライアント側 JWT デコード（`jwtDecode`、`jwt_decode`、`atob(token.split('.'))`）。サーバー側 `jwtVerify` を推奨 | サーバー専用 JWT デコード経路（Node 専用ファイル等）      |
-| `astSecurity`           | Mixed    | ASTベース: コマンド/正規表現/require インジェクション、スタック露出、パストラバーサル、プロトタイプ汚染、bidi 文字、env-var フォールバック、不安全な乱数、HTML インジェクション、client env leak、SSR secret bleed、postMessage origin（下記参照） | Node.js以外のプロジェクト                                 |
+| ルール             | 重大度   | 説明                                                                            | なぜ重要か                                                                                              | 無効化する場面                                       |
+| ------------------ | -------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `sensitiveFile`         | Critical | .env、credentials.\*、\*.pem への書き込みをブロック                             | 一度コミットすると git 履歴と CI ログに永続化し、無効化にはローテートが必要になる                       | 無効化不可（セキュリティ上重要）                          |
+| `cryptoWeak`            | High     | MD5、SHA1、DES、RC4 の使用を検出                                                | 衝突攻撃や鍵回復が現実的で、プリミティブ自体が約束した保証を提供できない                                | 既知の制約があるレガシーシステムの保守                    |
+| `sensitiveLogging`      | High     | console.log 内の password/token/secret を検出                                   | ログは CI runner / 監視 sink / クラッシュレポータに流れ、下流の全ての読み手にシークレットが届く         | 無効化不可（セキュリティ上重要）                          |
+| `security`              | Mixed    | XSS ベクター、安全でない API、機密ストレージ。rule_id 別の内訳は下記の `Security Rules` を参照 | 各パターンが eval sink もしくは origin から読み取れる storage で、同一オリジンの任意スクリプトが state を抜ける | 無効化不可（セキュリティ上重要）                          |
+| `architecture`          | High     | レイヤー違反（例: UI がドメインをインポート）                                   | UI がドメイン内部に到達すると境界が将来の変更を制約しなくなり、refactor が止まる                        | 小規模プロジェクト、モノリス、スクリプト                  |
+| `eval`                  | High     | eval()、new Function()、間接的 eval                                             | そこに到達した文字列はそのままコードとして走るので、汚染入力が任意コード実行に化ける                    | 無効化不可（セキュリティ上重要）                          |
+| `hardcodedSecrets`      | High     | ソースコード内の API キー、トークン、パスワード                                 | リポジトリを push した瞬間にキーは公開され、ローテート以外に対処手段が無い                              | 無効化不可（セキュリティ上重要）                          |
+| `cotLeakageMarker`      | High     | AI Chain-of-Thought リークマーカー (`<thinking>`、`<\|channel\|>`、`<\|start\|>assistant`、`to=functions.`) | コピペで生き残ったタグごと、モデル内部状態が本番ログ / UI / ドキュメントに流出する                       | AI トレース/トランスクリプトを意図的に保存するプロジェクト |
+| `openRedirect`          | High     | ユーザー制御入力による location.href/assign                                     | 攻撃者が遷移先を選べるのに URL は自オリジンを纏ったままで、フィッシングの理想形になる                   | Web 以外のプロジェクト                                    |
+| `rawHtml`               | High     | 変数を含む HTML の文字列結合                                                    | 文字列結合 HTML は攻撃者入力をそのまま live DOM に置く XSS sink                                         | Web 以外のプロジェクト                                    |
+| `sqliConcat`            | High     | テンプレートリテラル/文字列結合で組み立てた SQL を検出                          | 補間 SQL はユーザー入力をクエリ本体に混入させる、典型的な SQL injection                                 | データベースを使用しないプロジェクト                      |
+| `httpResource`          | Medium   | HTTP（非 HTTPS）リソース URL                                                    | 非 TLS リソースは on-path 攻撃者が中身を差し替えられる（mixed-content downgrade、サプライチェーン改竄） | 開発専用の設定                                            |
+| `corsWildcard`          | Medium   | CORS ワイルドカード origin (`cors({ origin: '*' })`、`Access-Control-Allow-Origin: *`) | `*` は任意オリジンに応答を読ませ、ユーザーデータを守る same-origin policy を外す                       | Web 以外のプロジェクト、社内 API 専用              |
+| `transaction`           | Medium   | トランザクションラッパーなしの複数書き込み。スコープは `usecases/`、`use-cases/`、`application/`、`services/`、`domain/`、`handlers/`、`app/`、`server/` ディレクトリと `app/**/route.{ts,js}` セグメント | 書き込み途中で失敗すると部分状態が残る: 孤児レコード、残高ずれ、不変条件の崩れ                          | データベースを使用しないプロジェクト                      |
+| `domAccess`             | Medium   | React（.tsx/.jsx）での直接 DOM 操作                                             | 命令的 DOM 操作は React の reconciler と競合し、不変条件が崩れて再現性の低いバグになる                  | React 以外のプロジェクト、またはバニラ JS/TS              |
+| `syncIo`                | Medium   | readFileSync、writeFileSync（イベントループをブロック）                         | 一回の同期 I/O が event loop を凍結し、並行リクエストが全てそこで詰まる                                 | CLI ツール、ビルドスクリプト、同期のみのコンテキスト      |
+| `bundleSize`            | Medium   | lodash/moment のフルインポート                                                  | `lodash` / `moment` を丸ごとインポートすると、数個の utility のために数百 KB が全訪問者に届く            | バックエンド/Node.js（バンドルサイズの懸念なし）          |
+| `testAssertion`         | Medium   | expect() や assert のないテスト                                                 | 表明が無いテストは何が返っても green になり、CI が回帰を隠す                                            | Playwright、カスタムテストフレームワーク                  |
+| `flakyTest`             | Low      | テスト内の setTimeout、Math.random                                              | 時刻と RNG で失敗が非決定的になり、原因究明より retry が選ばれて CI シグナルが劣化する                  | 意図的なタイミング/ランダムネスのテスト                   |
+| `generatedFile`         | High     | \*.generated.\*、\*.g.ts の編集を警告                                           | 手編集は次回生成で上書きされ、修正が消える                                                              | コード生成のないプロジェクト                              |
+| `testLocation`          | Medium   | src/ ディレクトリ内のテストファイル                                             | `src/` 配下のテストは build 除外漏れで本番バンドルに混入する                                            | コロケーションテスト戦略（ソースと同じ場所）              |
+| `naming`                | Mixed    | 命名規則（hooks、コンポーネント、型）                                           | 一貫性のない命名は code search と、hook / component を識別するパターン認識を破壊する                    | チーム/プロジェクトで異なる命名規則がある場合             |
+| `noUseEffect`           | Medium   | .tsx/.jsx内のuseEffectを検出し代替案を提示                                      | 派生 state に対する `useEffect` は余分な再 render を生み、依存配列が stale-data の罠になる              | useEffectを意図的に使用するプロジェクト                   |
+| `serviceWorker`         | Medium   | ルートスコープ（`{ scope: '/' }`）での Service Worker 登録。特定パスへのスコープ絞り込みを提案 | ルートスコープはオリジンの全 navigation を傍受するので、一度の誤登録でサイト全体を乗っ取られる          | サイト全体に worker を意図的に配信するプロジェクト        |
+| `jwtClient`             | Medium   | クライアント側 JWT デコード（`jwtDecode`、`jwt_decode`、`atob(token.split('.'))`）。サーバー側 `jwtVerify` を推奨 | JWT payload は base64url で読めるが、署名検証なしには改竄も通る。クライアントで信用すると認可回避になる | サーバー専用 JWT デコード経路（Node 専用ファイル等）      |
+| `astSecurity`           | Mixed    | ASTベース: コマンド/正規表現/require インジェクション、スタック露出、パストラバーサル、プロトタイプ汚染、bidi 文字、env-var フォールバック、不安全な乱数、HTML インジェクション、client env leak、SSR secret bleed、postMessage origin（下記参照） | AST ベースの集約。各 sub-rule にそれぞれの脅威がある（下記 sub-rule 表を参照）                          | Node.js以外のプロジェクト                                 |
 
 ### セキュリティルール（`security`）
 
 `security` toggle 配下には 2 つの rule_id が含まれます。JSON `rule` フィールドで振り分ける consumer 向けに内訳を以下に示します。
 
-| サブルール (rule_id)   | 重大度 | 説明                                                                                                                  |
-| ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
-| `security`             | Mixed  | `setTimeout('str')` / `setInterval('str')` / `postMessage(_, '*')` (High)、機密 `localStorage` / `sessionStorage` (Medium) |
-| `dangerous-inner-html` | High   | React の `dangerouslySetInnerHTML={...}`（XSS sink、`.tsx` / `.jsx` のみ対象）                                        |
+| サブルール (rule_id)   | 重大度 | 説明                                                                                                                  | なぜ重要か                                                                                                  |
+| ---------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `security`             | Mixed  | `setTimeout('str')` / `setInterval('str')` / `postMessage(_, '*')` (High)、機密 `localStorage` / `sessionStorage` (Medium) | 文字列引数のタイマーは eval と同等、wildcard `postMessage` は任意の listener にブロードキャスト、storage 内のシークレットはオリジン上の任意スクリプトから読める |
+| `dangerous-inner-html` | High   | React の `dangerouslySetInnerHTML={...}`（XSS sink、`.tsx` / `.jsx` のみ対象）                                        | React のテキストエスケープを迂回し、汚染変数が live DOM になって攻撃者のスクリプトが走る                    |
 
 ### ASTセキュリティルール（`astSecurity`）
 
 [oxc](https://oxc.rs)パーサーによる深層セキュリティチェック。ASTを直接解析し、正規表現ベースのパターンマッチングの偽陰性を回避します。
 
-| サブルール                | 重大度 | 説明                                                                                                                                 |
-| ------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `child-process-injection` | High   | exec/execSync/spawn/spawnSync への非リテラル引数                                                                                     |
-| `err-stack-exposure`      | High   | HTTP レスポンス（res.json/res.send）でのエラースタックトレース漏洩                                                                   |
-| `non-literal-fs-path`     | Medium | fs.\* 呼び出しでの非リテラルファイルパス（パストラバーサルリスク）                                                                   |
-| `non-literal-require`     | Medium | require() への非リテラル引数（動的モジュールロード）                                                                                 |
-| `unsafe-regex`            | Medium | ReDoS に脆弱な正規表現リテラル（ネストされた量指定子、catastrophic backtracking）                                                    |
-| `bidi-characters`         | High   | ソース中に潜む Unicode 双方向制御文字（CVE-2021-42574 / Trojan Source）                                                              |
-| `env-var-fallback`        | High   | `process.env.X \|\| 'default'` 形式 — ハードコードされたフォールバックでシークレットが漏洩する                                       |
-| `prototype-pollution`     | High   | `Object.assign({}, untrusted)`、`_.merge`、`__proto__`/`constructor` を伴う `Object.create`                                          |
-| `math-random-insecure`    | Mixed  | トークン/ID/シークレット用途の `Math.random()`。用法が確定する場合（`toString(36)` イディオム / 暗号 API 引数）は High、命名ヒューリスティック（security 系の変数名・関数名、`toString` 他基数）止まりは Medium。詳細は [ADR-0003](docs/decisions/0003-math-random-severity-policy.md) |
-| `unsafe-html-injection`   | Mixed  | `innerHTML`（High）/ `outerHTML`（Medium）/ `document.write[ln]`（High）への非リテラル代入。詳細は [ADR-0008](docs/decisions/0008-unsafe-html-injection-rule-id-separation.md) |
-| `client-env-public-leak`  | High   | `'use client'` モジュール内での `process.env.X` 参照（`NEXT_PUBLIC_*` および allow-list は除外）。Next.js によりブラウザにバンドルされる                                              |
-| `ssr-secret-bleed`        | High   | `getServerSideProps` や `'use server'` Server Action が返す secret 名 (`apiKey`、`token`…) や `process.env.*` を flag。これらは Next.js がクライアントペイロードへシリアライズする |
-| `postmessage-origin-missing` | High   | `window.addEventListener('message', handler)` のインラインハンドラが `event.origin` を読まない場合。origin チェックなしでは任意の sender からのクロスオリジン postMessage を受け入れてしまう。外部ハンドラ参照やパラメータ側 destructure は 1-file static analysis の範囲外 |
+| サブルール                | 重大度 | 説明                                                                                                                                 | なぜ重要か                                                                                                                          |
+| ------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `child-process-injection` | High   | exec/execSync/spawn/spawnSync への非リテラル引数                                                                                     | 信頼できないセグメントが shell コマンドに化け、リクエスト送信者がサーバー上で任意プロセスを起動できる                               |
+| `err-stack-exposure`      | High   | HTTP レスポンス（res.json/res.send）でのエラースタックトレース漏洩                                                                   | スタックでファイルパス・ライブラリバージョン・ホスティング構成が露出し、次の攻撃ステップの偵察材料になる                            |
+| `non-literal-fs-path`     | Medium | fs.\* 呼び出しでの非リテラルファイルパス（パストラバーサルリスク）                                                                   | `..` セグメントが意図したルートを越えて、任意ファイルを read / overwrite できるようになる                                            |
+| `non-literal-require`     | Medium | require() への非リテラル引数（動的モジュールロード）                                                                                 | 汚染されたモジュール名で攻撃者制御の JavaScript を実行中プロセスにロードする                                                        |
+| `unsafe-regex`            | Medium | ReDoS に脆弱な正規表現リテラル（ネストされた量指定子、catastrophic backtracking）                                                    | 細工した入力でエンジンが指数バックトラックに陥り、CPU が 100% になって他のリクエストに応答できなくなる                              |
+| `bidi-characters`         | High   | ソース中に潜む Unicode 双方向制御文字（CVE-2021-42574 / Trojan Source）                                                              | bidi 文字は描画時にソースを並べ替えるので、レビュワーが見るコードとコンパイラが見るコードが食い違い、悪意あるロジックが平然と隠れる |
+| `env-var-fallback`        | High   | `process.env.X \|\| 'default'` 形式 — ハードコードされたフォールバックでシークレットが漏洩する                                       | env var が未設定だとハードコードされたデフォルトが本物の credential として動き、しかもソース内に永遠に残る                          |
+| `prototype-pollution`     | High   | `Object.assign({}, untrusted)`、`_.merge`、`__proto__`/`constructor` を伴う `Object.create`                                          | `__proto__` への書き込みがランタイム上の全オブジェクトを汚染し、認可チェックが誤動作し、sink 次第ではコード実行も開く               |
+| `math-random-insecure`    | Mixed  | トークン/ID/シークレット用途の `Math.random()`。用法が確定する場合（`toString(36)` イディオム / 暗号 API 引数）は High、命名ヒューリスティック（security 系の変数名・関数名、`toString` 他基数）止まりは Medium。詳細は [ADR-0003](docs/decisions/0003-math-random-severity-policy.md) | `Math.random` は予測可能で、これで作ったトークンは推測されセッションがハイジャックされうる                                          |
+| `unsafe-html-injection`   | Mixed  | `innerHTML`（High）/ `outerHTML`（Medium）/ `document.write[ln]`（High）への非リテラル代入。詳細は [ADR-0008](docs/decisions/0008-unsafe-html-injection-rule-id-separation.md) | 汚染値が HTML sink に到達すると、パーサが見つけた script タグを実行する。DOM 層での XSS                                             |
+| `client-env-public-leak`  | High   | `'use client'` モジュール内での `process.env.X` 参照（`NEXT_PUBLIC_*` および allow-list は除外）。Next.js によりブラウザにバンドルされる                                              | Next.js は `process.env.*` を build 時にインライン化し、server 専用 secret がブラウザバンドルに同梱される                            |
+| `ssr-secret-bleed`        | High   | `getServerSideProps` や `'use server'` Server Action が返す secret 名 (`apiKey`、`token`…) や `process.env.*` を flag。これらは Next.js がクライアントペイロードへシリアライズする | SSR の返り値は HTML payload にシリアライズされ、認証していない訪問者を含む全員に secret が届く                                      |
+| `postmessage-origin-missing` | High   | `window.addEventListener('message', handler)` のインラインハンドラが `event.origin` を読まない場合。origin チェックなしでは任意の sender からのクロスオリジン postMessage を受け入れてしまう。外部ハンドラ参照やパラメータ側 destructure は 1-file static analysis の範囲外 | 埋め込まれた iframe や popup から送られたメッセージをハンドラが信用し、ページが攻撃者の選んだコマンドを実行してしまう               |
 
 ## サブコマンド
 
