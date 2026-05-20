@@ -158,6 +158,10 @@ where
     let version = OXLINT_VERSION;
     let target = cache.join(format!("oxlint-{version}"));
 
+    // Trust-on-first-write: cache hit skips SHA re-verification because
+    // `extract_to_cache` only ever persists a `write_atomic`-renamed entry
+    // after a successful SHA check, so anything already at `target` came
+    // through that path. Keeps hook startup off the verify hot path.
     if target.exists() {
         return Ok(target);
     }
