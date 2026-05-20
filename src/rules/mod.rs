@@ -321,8 +321,27 @@ pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) 
     rule.check(content, file_path, &non_comment_lines(content))
 }
 
+/// Test helper for valid fixtures. Panics when no AST is produced (the file
+/// type is unsupported or the parser failed). Use `ast_fail_open_check` for
+/// tests that assert the production fail-open path.
 #[cfg(test)]
 pub(in crate::rules) fn ast_test_check<F>(content: &str, file_path: &str, f: F) -> Vec<Violation>
+where
+    F: FnOnce(&Program<'_>, &[usize]) -> Vec<Violation>,
+{
+    with_parsed_program(content, file_path, f)
+        .unwrap_or_else(|| panic!("ast_test_check: no AST produced for {file_path}"))
+}
+
+/// Test helper that mirrors the production fail-open behavior: returns empty
+/// Vec when parsing fails or the file type is unsupported. Use `ast_test_check`
+/// for tests that pass valid fixtures.
+#[cfg(test)]
+pub(in crate::rules) fn ast_fail_open_check<F>(
+    content: &str,
+    file_path: &str,
+    f: F,
+) -> Vec<Violation>
 where
     F: FnOnce(&Program<'_>, &[usize]) -> Vec<Violation>,
 {
@@ -563,5 +582,17 @@ mod tests {
             overlap.is_empty(),
             "rule_id が REGISTERED と UNREGISTERED の両方に登録されている: {overlap:?}"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "ast_test_check: no AST produced for /broken.ts")]
+    fn ast_test_check_panics_on_parser_failure() {
+        ast_test_check("const x = ;", "/broken.ts", |_, _| Vec::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "ast_test_check: no AST produced for /docs/README.md")]
+    fn ast_test_check_panics_on_unsupported_extension() {
+        ast_test_check("any content", "/docs/README.md", |_, _| Vec::new());
     }
 }

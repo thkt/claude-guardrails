@@ -38,6 +38,14 @@ fn check(content: &str, file_path: &str) -> Vec<Violation> {
     })
 }
 
+#[cfg(test)]
+fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
+    super::ast_fail_open_check(content, file_path, |program, line_offsets| {
+        let import_map = ImportMap::build(program);
+        check_program(program, line_offsets, file_path, &import_map)
+    })
+}
+
 pub fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
@@ -180,7 +188,7 @@ mod tests {
 
     #[test]
     fn ignores_non_js_file() {
-        assert!(check("eval(x);", "/docs/README.md").is_empty());
+        assert!(check_fail_open("eval(x);", "/docs/README.md").is_empty());
     }
 
     #[test]
@@ -280,7 +288,7 @@ mod tests {
 
     #[test]
     fn fail_open_on_invalid_syntax() {
-        assert!(check_js("function { invalid !!!").is_empty());
+        assert!(check_fail_open("function { invalid !!!", "/src/app.ts").is_empty());
     }
 
     #[test]
@@ -290,7 +298,7 @@ mod tests {
 
     #[test]
     fn css_file_not_analyzed() {
-        assert!(check("body { color: red; }", "/src/styles.css").is_empty());
+        assert!(check_fail_open("body { color: red; }", "/src/styles.css").is_empty());
     }
 
     #[test]

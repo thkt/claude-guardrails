@@ -22,6 +22,13 @@ fn check(content: &str, file_path: &str) -> Vec<Violation> {
     })
 }
 
+#[cfg(test)]
+fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
+    super::ast_fail_open_check(content, file_path, |program, line_offsets| {
+        check_program(program, line_offsets, file_path)
+    })
+}
+
 pub fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
@@ -206,7 +213,7 @@ mod tests {
     // T-008: non-JS files out of scope
     #[test]
     fn ignores_non_js_files() {
-        let v = check("app.use(cors({ origin: '*' }));", "/docs/README.md");
+        let v = check_fail_open("app.use(cors({ origin: '*' }));", "/docs/README.md");
         assert!(v.is_empty(), "non-js file must not flag: {v:?}");
     }
 
@@ -225,7 +232,9 @@ mod tests {
 
     #[test]
     fn fail_open_on_invalid_syntax() {
-        assert!(check_js("function { invalid !!!").is_empty());
+        assert!(
+            check_fail_open("function { invalid !!!", "/src/app/api/users/route.ts").is_empty()
+        );
     }
 
     // T-011: violation carries correct line number
