@@ -3,10 +3,10 @@ rules:
     ignore:
       # update-homebrew job requires HOMEBREW_TAP_TOKEN to be persisted for git push
       - release.yml:137
-      # update-sentinels job requires SENTINELS_TOKEN to be persisted for git push
-      - release.yml:205
+      # update-sentinels job requires sentinels App token to be persisted for git push
+      - release.yml:215
       # publish-binaries-to-sentinels job requires sentinels App token to be persisted for git push -f
-      - release.yml:255
+      - release.yml:265
   cache-poisoning:
     ignore:
       # Swatinem/rust-cache in build job; release workflow runs on tag push only,
