@@ -8,7 +8,7 @@ fn use_color() -> bool {
     *COLOR
 }
 
-pub(crate) fn use_color_with(no_color_unset: bool, stderr_is_tty: bool) -> bool {
+fn use_color_with(no_color_unset: bool, stderr_is_tty: bool) -> bool {
     no_color_unset && stderr_is_tty
 }
 
@@ -16,7 +16,7 @@ fn wrap(ansi_code: &str, text: &str) -> String {
     wrap_with(use_color(), ansi_code, text)
 }
 
-pub(crate) fn wrap_with(color: bool, ansi_code: &str, text: &str) -> String {
+fn wrap_with(color: bool, ansi_code: &str, text: &str) -> String {
     if color {
         format!("\x1b[{ansi_code}m{text}\x1b[0m")
     } else {

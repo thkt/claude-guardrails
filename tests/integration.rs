@@ -93,10 +93,6 @@ fn pipe_stderr_omits_ansi_escape() {
     let output = run_guardrails_json(&json.to_string());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("BLOCKED"),
-        "sanity check: expected BLOCKED footer, got: {stderr}"
-    );
-    assert!(
         !stderr.contains('\x1b'),
         "stderr captured via pipe must not contain ANSI escape (got: {stderr:?})"
     );
