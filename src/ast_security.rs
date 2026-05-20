@@ -2,14 +2,16 @@ use crate::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, ArrowFunctionExpression, AssignmentExpression,
-    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, BlockStatement,
-    CallExpression, ComputedMemberExpression, Expression, FormalParameters, Function, FunctionBody,
+    AssignmentTarget, AssignmentTargetProperty, BinaryOperator, BindingPattern, CallExpression,
+    ComputedMemberExpression, Expression, FormalParameters, Function, FunctionBody,
     LogicalExpression, LogicalOperator, MethodDefinition, ObjectProperty, ObjectPropertyKind,
     Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
+use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::Span;
 use oxc_syntax::scope::ScopeFlags;
+use oxc_syntax::symbol::SymbolId;
 
 // SECRET_KEY / SESSION_SECRET 等は SECRET の substring match で網羅される。
 // KEY 単体は PUBLIC_KEY / SORT_KEY 等を誤検知するため除外し API_KEY のみ採用。
@@ -289,6 +291,7 @@ pub fn check_program(
     let is_api_file = RE_API_FILE.is_match(file_path);
     let has_top_level_use_server = !is_api_file && has_use_server_directive(&program.directives);
     let has_use_client = !is_api_file && has_use_client_directive(&program.directives);
+    let semantic = SemanticBuilder::new().build(program).semantic;
     let mut visitor = SecurityVisitor {
         violations: Vec::new(),
         file_path,
@@ -302,6 +305,7 @@ pub fn check_program(
         function_depth: 0,
         in_security_named_fn: false,
         has_use_client,
+        scoping: semantic.scoping(),
     };
     visitor.visit_program(program);
     visitor.violations
@@ -353,6 +357,7 @@ struct SecurityVisitor<'s> {
     in_security_named_fn: bool,
     // File-level only; re-declarations in nested modules/components are out of scope.
     has_use_client: bool,
+    scoping: &'s Scoping,
 }
 
 impl SecurityVisitor<'_> {
@@ -740,7 +745,7 @@ impl SecurityVisitor<'_> {
         let Some(first_param) = params.items.first() else {
             return;
         };
-        if handler_validates_origin(&first_param.pattern, body) {
+        if handler_validates_origin(&first_param.pattern, body, self.scoping) {
             return;
         }
         self.push_violation(
@@ -769,7 +774,7 @@ impl SecurityVisitor<'_> {
         let Some(first_param) = params.items.first() else {
             return;
         };
-        if handler_validates_origin(&first_param.pattern, body) {
+        if handler_validates_origin(&first_param.pattern, body, self.scoping) {
             return;
         }
         self.push_violation(
@@ -1072,9 +1077,18 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
 /// Identifier param は body 内で `event.origin` を参照しているか。
 /// `ObjectPattern` は param 段階で `origin` を取り出していれば検査経路ありとみなす。
 /// その他 (`ArrayPattern`, rest 等) は経路なし扱いで保守的に fire。
-fn handler_validates_origin(pat: &BindingPattern, body: &FunctionBody<'_>) -> bool {
+fn handler_validates_origin<'a>(
+    pat: &BindingPattern<'a>,
+    body: &FunctionBody<'a>,
+    scoping: &Scoping,
+) -> bool {
     if let BindingPattern::BindingIdentifier(ident) = pat {
-        return has_origin_reference(body, ident.name.as_str());
+        // `None` when semantic could not resolve the binding (parser failure
+        // etc.); treat as no reference to stay conservative.
+        let Some(symbol_id) = ident.symbol_id.get() else {
+            return false;
+        };
+        return has_origin_reference(body, symbol_id, scoping);
     }
     OriginReferenceFinder::pattern_destructures_origin(pat)
 }
@@ -1108,28 +1122,49 @@ fn handler_signature_from_expression<'a, 'b>(
 /// `event.origin` / `event["origin"]` / `const { origin } = event` /
 /// `({ origin } = event)` のいずれかの形で param binding が `origin` プロパティへ
 /// 触っているかを callback body 内で走査する。
-fn has_origin_reference(body: &FunctionBody<'_>, binding: &str) -> bool {
+fn has_origin_reference(
+    body: &FunctionBody<'_>,
+    param_symbol_id: SymbolId,
+    scoping: &Scoping,
+) -> bool {
     let mut finder = OriginReferenceFinder {
-        binding,
+        param_symbol_id,
+        scoping,
         found: false,
-        shadowed: false,
+        clobbered: false,
     };
     finder.visit_function_body(body);
     finder.found
 }
 
 struct OriginReferenceFinder<'b> {
-    binding: &'b str,
+    param_symbol_id: SymbolId,
+    scoping: &'b Scoping,
     found: bool,
-    /// Issue #137 暫定対応: handler 引数と同名の `const`/`let`/`var` 宣言が現れたら
-    /// 以降の `event.origin` 参照は外側 binding を保証しない (TDZ や inner scope
-    /// 由来の false negative を防ぐ)。完全 scope-aware walk は別 issue で対応。
-    shadowed: bool,
+    /// `var event = ...` は同じ `SymbolId` を function-scoped に再 bind する
+    /// (`let`/`const` 同 scope は `SyntaxError` だが `oxc_semantic` は同じく
+    /// 単一 symbol で resolve する)。以降の `event.origin` は attacker-
+    /// controlled value を指すため、origin check として信用できない。
+    clobbered: bool,
 }
 
 impl OriginReferenceFinder<'_> {
-    fn binding_target(&self, expr: &Expression) -> bool {
-        matches!(expr, Expression::Identifier(id) if id.name == self.binding)
+    /// `expr` が handler param と同一 symbol を指す identifier reference か。
+    /// `oxc_semantic` の scope analysis に従い、inner で shadow された binding は
+    /// 別 `SymbolId` を持つので自動的に false になる (nested function / arrow /
+    /// block / destructuring rename を区別不要)。同 scope での `var` 再 bind は
+    /// param symbol を reuse するため `clobbered` で無効化する。
+    fn refers_to_param(&self, expr: &Expression) -> bool {
+        if self.clobbered {
+            return false;
+        }
+        let Expression::Identifier(id) = expr else {
+            return false;
+        };
+        let Some(ref_id) = id.reference_id.get() else {
+            return false;
+        };
+        self.scoping.get_reference(ref_id).symbol_id() == Some(self.param_symbol_id)
     }
 
     fn pattern_destructures_origin(pat: &BindingPattern) -> bool {
@@ -1154,29 +1189,14 @@ impl OriginReferenceFinder<'_> {
             }
         })
     }
-
-    fn stop(&self) -> bool {
-        self.found || self.shadowed
-    }
 }
 
 impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
-    fn visit_block_statement(&mut self, it: &BlockStatement<'a>) {
-        if self.stop() {
-            return;
-        }
-        let prev_shadowed = self.shadowed;
-        walk::walk_block_statement(self, it);
-        if !self.found {
-            self.shadowed = prev_shadowed;
-        }
-    }
-
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        if self.stop() {
+        if self.found {
             return;
         }
-        if it.property.name == "origin" && self.binding_target(&it.object) {
+        if it.property.name == "origin" && self.refers_to_param(&it.object) {
             self.found = true;
             return;
         }
@@ -1184,11 +1204,11 @@ impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
     }
 
     fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
-        if self.stop() {
+        if self.found {
             return;
         }
         if let Expression::StringLiteral(s) = &it.expression {
-            if s.value == "origin" && self.binding_target(&it.object) {
+            if s.value == "origin" && self.refers_to_param(&it.object) {
                 self.found = true;
                 return;
             }
@@ -1197,17 +1217,17 @@ impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
     }
 
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        if self.stop() {
+        if self.found {
             return;
         }
         if let BindingPattern::BindingIdentifier(ident) = &it.id {
-            if ident.name.as_str() == self.binding {
-                self.shadowed = true;
+            if ident.symbol_id.get() == Some(self.param_symbol_id) {
+                self.clobbered = true;
                 return;
             }
         }
         if let Some(init) = &it.init {
-            if self.binding_target(init) && Self::pattern_destructures_origin(&it.id) {
+            if self.refers_to_param(init) && Self::pattern_destructures_origin(&it.id) {
                 self.found = true;
                 return;
             }
@@ -1216,10 +1236,10 @@ impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        if self.stop() {
+        if self.found {
             return;
         }
-        if self.binding_target(&it.right) && Self::target_destructures_origin(&it.left) {
+        if self.refers_to_param(&it.right) && Self::target_destructures_origin(&it.left) {
             self.found = true;
             return;
         }
@@ -3309,23 +3329,64 @@ mod tests {
         assert_postmessage_silent("globalThis.onmessage = (event) => { handle(event.data); };");
     }
 
-    // Interim shadowing detection: inner `event` binding hides the handler
-    // param, so the inner `event.origin` must not satisfy the origin check.
-    // Full scope-aware walk is deferred to a follow-up.
+    // Nested function shadows the handler param. The inner `event.origin`
+    // reads belong to the inner binding, so the outer handler still lacks an
+    // origin check and must fire.
     #[test]
-    fn postmessage_origin_missing_fires_on_shadowed_event_binding() {
+    fn postmessage_origin_missing_fires_on_nested_function_shadow() {
         assert_postmessage_fires(
-            "window.addEventListener('message', (event) => { const event = { origin: 'attacker' }; console.log(event.origin); });",
+            "window.addEventListener('message', (event) => { function inner(event) { if (event.origin !== 'https://x') return; } inner(event); });",
         );
     }
 
-    // Shadowing inside a nested block must not invalidate the outer origin
-    // check. Lexically scoped restoration on block exit prevents the
-    // false-positive that the flat shadow flag caused.
+    // Arrow-function variant of the nested shadow case; verifies the same
+    // SymbolId-separation works for `const inner = (event) => ...`.
+    #[test]
+    fn postmessage_origin_missing_fires_on_nested_arrow_shadow() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (event) => { const inner = (event) => { if (event.origin !== 'https://x') return; }; inner(event); });",
+        );
+    }
+
+    // Destructuring rename `({ origin: trusted }) => ...` extracts origin at
+    // the param boundary; pattern_destructures_origin covers it without
+    // requiring a body reference.
+    #[test]
+    fn postmessage_origin_missing_silent_on_destructured_origin_rename() {
+        assert_postmessage_silent(
+            "window.addEventListener('message', ({ origin: trusted, data }) => { if (trusted !== 'https://x') return; handle(data); });",
+        );
+    }
+
+    // Block-scoped shadow must not invalidate the outer origin check. The
+    // inner `const event` is a separate symbol; the outer `event.origin`
+    // resolves to the handler param.
     #[test]
     fn postmessage_origin_missing_silent_on_shadowed_event_in_inner_block() {
         assert_postmessage_silent(
             "window.addEventListener('message', (event) => { if (debug) { const event = { origin: 'local' }; console.log(event.origin); } if (event.origin !== 'https://x') return; handle(event.data); });",
+        );
+    }
+
+    // Block-scoped shadow with origin reference inside the block only: the
+    // inner `event.origin` belongs to the inner symbol, so the outer handler
+    // has no origin check and must fire. Discriminator that block-scope
+    // creates a separate symbol (vs. the same-scope SyntaxError case).
+    #[test]
+    fn postmessage_origin_missing_fires_on_block_scope_shadow_inner_only() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (event) => { if (debug) { const event = { origin: 'attacker' }; console.log(event.origin); } handle(event.data); });",
+        );
+    }
+
+    // `var event = ...` is a legal function-scoped re-declaration that reuses
+    // the param's SymbolId. Later `event.origin` resolves to the same symbol
+    // but the value is attacker-controlled; the rule must invalidate the
+    // origin check and fire.
+    #[test]
+    fn postmessage_origin_missing_fires_on_var_clobber_of_param() {
+        assert_postmessage_fires(
+            "window.addEventListener('message', (event) => { var event = { origin: 'attacker' }; if (event.origin !== 'https://x') return; handle(event.data); });",
         );
     }
 
