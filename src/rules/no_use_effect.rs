@@ -17,6 +17,13 @@ fn check(content: &str, file_path: &str) -> Vec<Violation> {
     })
 }
 
+#[cfg(test)]
+fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
+    super::ast_fail_open_check(content, file_path, |program, line_offsets| {
+        check_program(program, line_offsets, file_path)
+    })
+}
+
 pub fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
@@ -142,7 +149,7 @@ mod tests {
 
     #[test]
     fn invalid_syntax_fail_open() {
-        assert!(check("function { invalid !!!", "/src/App.tsx").is_empty());
+        assert!(check_fail_open("function { invalid !!!", "/src/App.tsx").is_empty());
     }
 
     #[test]

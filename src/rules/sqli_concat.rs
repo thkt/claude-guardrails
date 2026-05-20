@@ -19,6 +19,13 @@ fn check(content: &str, file_path: &str) -> Vec<Violation> {
     })
 }
 
+#[cfg(test)]
+fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
+    super::ast_fail_open_check(content, file_path, |program, line_offsets| {
+        check_program(program, line_offsets, file_path)
+    })
+}
+
 pub fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
@@ -201,7 +208,7 @@ mod tests {
     // T-008: non-JS files are out of scope
     #[test]
     fn ignores_non_js_files() {
-        let v = check(
+        let v = check_fail_open(
             "db.execute(`SELECT * FROM users WHERE id = ${userId}`);",
             "/docs/README.md",
         );
@@ -226,7 +233,7 @@ mod tests {
     // T-011: fail-open on invalid syntax (parser failure returns no violations)
     #[test]
     fn fail_open_on_invalid_syntax() {
-        assert!(check_js("function { invalid !!!").is_empty());
+        assert!(check_fail_open("function { invalid !!!", "/src/app.ts").is_empty());
     }
 
     // T-012: SQL keyword inside non-call context (variable assignment) is not flagged
