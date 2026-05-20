@@ -284,8 +284,8 @@ guardrails --json < tool-call.json
 | `data.decision`   | `"block"` / `"allow"`                           | `block` only when at least one entry matches `severity.blockOn`  |
 | `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | Lowercase                                                        |
 | `line`            | integer or `null`                               | `null` when location is unknown                                  |
-| `degraded`        | boolean                                         | `true` when a tool was unavailable (e.g. oxlint not installed)   |
-| `notes`           | array of strings                                | Reasons for degradation; non-empty implies `degraded: true`      |
+| `degraded`        | boolean                                         | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause |
+| `notes`           | array of strings                                | Reasons for degradation in order of source (project root → config → linter → content fallback). Not deduplicated. Non-empty implies `degraded: true` |
 
 ### Error envelope
 

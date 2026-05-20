@@ -87,6 +87,33 @@ snippet 単独に対して security check を走らせると、context が不足
 
 security check は止めない。snippet 単独でも false positive が出る方向で動作する (false negative より false positive を優先する `README.md` 既定方針)。
 
+### Notes aggregation order
+
+`run_hook_with_input` (`src/main.rs`) は単一の `notes: Vec<String>` に複数 source から push してから `SuccessEnvelope` に渡す。順序と作法は固定。
+
+| Order | Source                                                     | Pushed by                       |
+| ----- | ---------------------------------------------------------- | ------------------------------- |
+| 1     | project root canonicalize 失敗 (環境失敗軸)                 | `resolve_project_root_or_note`  |
+| 2     | config load 失敗 (legacy migration 含む環境失敗軸)          | `load_config_or_note`           |
+| 3     | linter (oxlint) 不在 / 起動失敗 (環境失敗軸)                | `lint_with_external_tools`     |
+| 4     | `DegradedReason::note()` (post-edit content degradation)    | `get_file_and_content` の戻り値 |
+
+固定方針:
+
+- **No dedup**: 同じ理由が複数経路から発生しても両方残す。AI agent は「signal がいくつあるか」も解釈に使う
+- **Dual emit**: stderr (human readable) と `SuccessEnvelope.notes` (machine readable) の両方に同じ文字列が出る
+- **Early-return も propagate**: unsupported tool / empty content で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
+
+### Degraded derivation semantics
+
+`SuccessEnvelope.degraded` は `envelope.rs::SuccessEnvelope::with_notes` で `!notes.is_empty()` として派生する。次の意味を持つ。
+
+- `degraded: true` は `ContentResolution::Degraded` 由来に限らず、上記 Order 1〜4 のどれか 1 つでも note が積まれた状態を包含する
+- 「ContentResolution::Degraded」と「any environmental note present」を **同じ flag に union** している。flag 単体では原因軸を区別できない設計
+- AI agent は `degraded: true` を見ても失敗事由を判断せず、必ず `notes` を読んで対応行動を選ぶ契約。flag は「`notes` を読むべき signal」のみを意味する
+- `notes` が空であれば `degraded: false`、`notes.len() >= 1` なら `degraded: true` (`SuccessEnvelope::with_notes` の不変条件)
+- 経路の境界は固定。envelope 側で flag derivation logic を変えると Order 1〜4 のいずれの caller も影響を受ける
+
 ### Consequences
 
 * Good, AI agent は note を読んで「次にどの行動を取れば content 取り直せるか」を判断できる
