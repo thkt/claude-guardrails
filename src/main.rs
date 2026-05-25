@@ -158,10 +158,14 @@ enum ContentResolution {
     NotApplicable,
 }
 
-fn get_file_and_content(
-    input: &ToolInput,
-    project_root: Option<&Path>,
-) -> Option<(String, String, bool, Option<DegradedReason>)> {
+struct ResolvedTarget {
+    file_path: String,
+    content: String,
+    is_js: bool,
+    degraded: Option<DegradedReason>,
+}
+
+fn get_file_and_content(input: &ToolInput, project_root: Option<&Path>) -> Option<ResolvedTarget> {
     let file_path = input.tool_input.file_path.clone()?;
     let is_js = RE_JS_FILE.is_match(&file_path);
 
@@ -205,7 +209,12 @@ fn get_file_and_content(
         return None;
     }
 
-    Some((file_path, content, is_js, degraded))
+    Some(ResolvedTarget {
+        file_path,
+        content,
+        is_js,
+        degraded,
+    })
 }
 
 fn join_new_strings(edits: &[EditItem]) -> String {
@@ -735,8 +744,12 @@ where
     let mut notes = Vec::new();
     let project_root = resolve_project_root_or_note(project_root_result, &mut notes);
 
-    let Some((file_path, content, is_js, degraded)) =
-        get_file_and_content(input, project_root.as_deref())
+    let Some(ResolvedTarget {
+        file_path,
+        content,
+        is_js,
+        degraded,
+    }) = get_file_and_content(input, project_root.as_deref())
     else {
         let is_write_tool = matches!(
             input.tool_name.as_str(),
@@ -869,7 +882,11 @@ mod tests {
     #[test]
     fn write_extracts_content() {
         let input = make_write_input(Some("/src/app.ts"), Some("const x = 1;"));
-        let (path, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget {
+            file_path: path,
+            content,
+            ..
+        } = get_file_and_content(&input, None).unwrap();
         assert_eq!(path, "/src/app.ts");
         assert_eq!(content, "const x = 1;");
     }
@@ -877,7 +894,7 @@ mod tests {
     #[test]
     fn edit_extracts_new_string() {
         let input = make_edit_input(Some("/src/app.ts"), Some("const y = 2;"));
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "const y = 2;");
     }
 
@@ -900,7 +917,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "line1\nline2");
     }
 
@@ -928,7 +945,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "\nkept");
     }
 
@@ -1051,7 +1068,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(
             content,
             "import { exec } from 'child_process';\nconst y = 2;\n"
@@ -1069,7 +1086,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -1087,7 +1104,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -1115,7 +1132,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "let a = 10;\nlet b = 20;\n");
     }
 
@@ -1133,7 +1150,7 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, _) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget { content, .. } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(userInput);");
     }
 
@@ -1334,7 +1351,9 @@ mod tests {
                 ..ToolInputData::default()
             },
         };
-        let (_, content, _, degraded) = get_file_and_content(&input, None).unwrap();
+        let ResolvedTarget {
+            content, degraded, ..
+        } = get_file_and_content(&input, None).unwrap();
         assert_eq!(content, "eval(x);");
         assert_eq!(degraded, Some(DegradedReason::OldStringNotFound));
     }
