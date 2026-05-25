@@ -2,7 +2,7 @@ use crate::rules::Severity;
 use serde::Deserialize;
 use std::env;
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 /// Generates `RulesConfig` (runtime flags), `ProjectRulesConfig` (serde DTO),
@@ -145,16 +145,34 @@ struct ToolsConfig {
     guardrails: Option<ProjectConfig>,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConfigError {
+    #[error("cannot determine working directory: {0}")]
+    WorkingDir(#[source] io::Error),
+    #[error("cannot read config {path:?}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("invalid config {path:?}: {source}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
 impl Config {
     // Uses CWD (not file_path) as trust boundary to prevent
     // LLM-controlled paths from influencing config discovery.
-    pub fn with_project_overrides(self) -> Result<Self, String> {
-        let cwd =
-            env::current_dir().map_err(|e| format!("cannot determine working directory: {e}"))?;
+    pub fn with_project_overrides(self) -> Result<Self, ConfigError> {
+        let cwd = env::current_dir().map_err(ConfigError::WorkingDir)?;
         self.with_overrides_from_root(&cwd)
     }
 
-    fn with_overrides_from_root(mut self, start: &Path) -> Result<Self, String> {
+    fn with_overrides_from_root(mut self, start: &Path) -> Result<Self, ConfigError> {
         let Some(git_root) = Self::find_git_root(start) else {
             return Ok(self);
         };
@@ -163,14 +181,18 @@ impl Config {
         let agent_neutral_path = git_root.join(GUARDRAILS_CONFIG_FILE);
         match fs::read_to_string(&agent_neutral_path) {
             Ok(content) => {
-                let project: ProjectConfig = serde_json::from_str(&content)
-                    .map_err(|e| format!("invalid project config {agent_neutral_path:?}: {e}"))?;
+                let project: ProjectConfig =
+                    serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
+                        path: agent_neutral_path.clone(),
+                        source: e,
+                    })?;
                 return Ok(self.merge(project));
             }
             Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(format!(
-                    "cannot read project config {agent_neutral_path:?}: {e}"
-                ));
+                return Err(ConfigError::Io {
+                    path: agent_neutral_path.clone(),
+                    source: e,
+                });
             }
             Err(_) => {}
         }
@@ -178,15 +200,21 @@ impl Config {
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
         match fs::read_to_string(&tools_path) {
             Ok(content) => {
-                let tools: ToolsConfig = serde_json::from_str(&content)
-                    .map_err(|e| format!("invalid config {tools_path:?}: {e}"))?;
+                let tools: ToolsConfig =
+                    serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
+                        path: tools_path.clone(),
+                        source: e,
+                    })?;
                 if let Some(project) = tools.guardrails {
                     return Ok(self.merge(project));
                 }
                 return Ok(self);
             }
             Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(format!("cannot read config {tools_path:?}: {e}"));
+                return Err(ConfigError::Io {
+                    path: tools_path.clone(),
+                    source: e,
+                });
             }
             Err(_) => {}
         }
@@ -194,12 +222,18 @@ impl Config {
         let legacy_path = git_root.join(LEGACY_CONFIG_FILE);
         match fs::read_to_string(&legacy_path) {
             Ok(content) => {
-                let project: ProjectConfig = serde_json::from_str(&content)
-                    .map_err(|e| format!("invalid project config {legacy_path:?}: {e}"))?;
+                let project: ProjectConfig =
+                    serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
+                        path: legacy_path.clone(),
+                        source: e,
+                    })?;
                 return Ok(self.merge(project));
             }
             Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(format!("cannot read project config {legacy_path:?}: {e}"));
+                return Err(ConfigError::Io {
+                    path: legacy_path.clone(),
+                    source: e,
+                });
             }
             Err(_) => {}
         }
@@ -413,8 +447,7 @@ mod tests {
         fs::write(tmp.path().join(GUARDRAILS_CONFIG_FILE), "not valid json{{{").unwrap();
 
         let result = Config::default().with_overrides_from_root(tmp.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid project config"));
+        assert!(matches!(result.unwrap_err(), ConfigError::Parse { .. }));
     }
 
     #[test]
@@ -487,8 +520,7 @@ mod tests {
         fs::write(tmp.path().join(TOOLS_CONFIG_FILE), "not valid json{{{").unwrap();
 
         let result = Config::default().with_overrides_from_root(tmp.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid config"));
+        assert!(matches!(result.unwrap_err(), ConfigError::Parse { .. }));
     }
 
     #[test]
@@ -497,8 +529,7 @@ mod tests {
         fs::write(tmp.path().join(LEGACY_CONFIG_FILE), "not valid json{{{").unwrap();
 
         let result = Config::default().with_overrides_from_root(tmp.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid project config"));
+        assert!(matches!(result.unwrap_err(), ConfigError::Parse { .. }));
     }
 
     #[test]

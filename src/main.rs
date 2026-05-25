@@ -16,7 +16,7 @@ mod scanner;
 mod tempfile_util;
 
 use clap::{Parser, Subcommand};
-use config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
+use config::{Config, ConfigError, ConfigSource, TOOLS_CONFIG_FILE};
 use envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelope};
 use hook_exit::HookExitCode;
 use reporter::{build_json_report, format_violations, format_warnings};
@@ -727,7 +727,7 @@ fn resolve_project_root_or_note(
     }
 }
 
-fn load_config_or_note(result: Result<Config, String>, notes: &mut Vec<String>) -> Config {
+fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<String>) -> Config {
     match result {
         Ok(c) => c,
         Err(e) => {
@@ -770,7 +770,7 @@ fn run_hook_with_input<F>(
     json_mode: bool,
 ) -> i32
 where
-    F: FnOnce() -> Result<Config, String>,
+    F: FnOnce() -> Result<Config, ConfigError>,
 {
     let mut notes = Vec::new();
     let project_root = resolve_project_root_or_note(project_root_result, &mut notes);
@@ -1747,7 +1747,10 @@ mod tests {
     fn load_config_or_note_pushes_note_and_falls_back_to_default_on_err() {
         let mut notes = Vec::new();
         let result = load_config_or_note(
-            Err(String::from("invalid config \"x\": expected value")),
+            Err(ConfigError::Parse {
+                path: PathBuf::from("x"),
+                source: serde_json::from_str::<serde_json::Value>("!").unwrap_err(),
+            }),
             &mut notes,
         );
         assert!(result.enabled, "fallback must be Config::default()");
