@@ -32,6 +32,9 @@ updates:
       prefix: chore
       include: scope
     groups:
+      oxc:
+        patterns:
+          - "oxc*"
       patch-and-minor:
         update-types:
           - minor
