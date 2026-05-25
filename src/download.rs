@@ -3,7 +3,6 @@ use constant_time_eq::constant_time_eq;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 use std::env;
-use std::fmt;
 use std::fs;
 use std::io::{self, Cursor, Read};
 use std::path::{Component, Path, PathBuf};
@@ -57,18 +56,21 @@ const PLATFORMS: &[(&str, &str, PlatformPin)] = &[
     ),
 ];
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum OxlintError {
+    #[error("no cache directory available (set XDG_CACHE_HOME or HOME)")]
     CacheDirUnavailable,
+    #[error("unsupported platform for oxlint download (os={os}, arch={arch})")]
     UnsupportedPlatform {
         os: &'static str,
         arch: &'static str,
     },
+    #[error("oxlint download failed: {0}")]
     NetworkFailure(String),
-    ChecksumMismatch {
-        expected: String,
-        actual: String,
-    },
+    #[error("oxlint tarball SHA-256 mismatch: expected {expected}, got {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
+    #[error("oxlint extract failed: {0}")]
     ExtractFailure(String),
 }
 
@@ -95,31 +97,6 @@ impl OxlintError {
                 ErrorCode::IoError,
                 "Set XDG_CACHE_HOME or HOME environment variable",
             ),
-        }
-    }
-}
-
-impl fmt::Display for OxlintError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::CacheDirUnavailable => {
-                write!(
-                    f,
-                    "no cache directory available (set XDG_CACHE_HOME or HOME)"
-                )
-            }
-            Self::UnsupportedPlatform { os, arch } => {
-                write!(
-                    f,
-                    "unsupported platform for oxlint download (os={os}, arch={arch})"
-                )
-            }
-            Self::NetworkFailure(e) => write!(f, "oxlint download failed: {e}"),
-            Self::ChecksumMismatch { expected, actual } => write!(
-                f,
-                "oxlint tarball SHA-256 mismatch: expected {expected}, got {actual}"
-            ),
-            Self::ExtractFailure(e) => write!(f, "oxlint extract failed: {e}"),
         }
     }
 }
