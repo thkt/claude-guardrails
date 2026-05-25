@@ -505,61 +505,74 @@ fn partition_violations<'a>(
         .partition(|v| config.severity.block_on.contains(&v.severity))
 }
 
-fn fail(json_mode: bool, code: ErrorCode, message: String, next_step: &str, exit: i32) -> i32 {
-    eprintln!("guardrails: {message}");
-    emit_error_envelope_if_enabled(
-        json_mode,
-        ErrorPayload {
-            code,
-            message,
-            next_step: Some(String::from(next_step)),
-            candidates: vec![],
-            retryable: false,
-        },
-    );
-    exit
+fn build_payload(code: ErrorCode, message: String, next_step: &str) -> ErrorPayload {
+    ErrorPayload {
+        code,
+        message,
+        next_step: Some(String::from(next_step)),
+        candidates: vec![],
+        retryable: false,
+    }
 }
 
-// Fail-closed: reject oversized input rather than silently truncating.
-fn parse_stdin(json_mode: bool) -> Result<ToolInput, i32> {
-    parse_stdin_from(&mut io::stdin().lock(), json_mode)
+// Side-effecting error render: a stderr line plus the JSON envelope when
+// enabled. Exit code is the caller's responsibility (hook input errors map to
+// 64 per ADR-0005; prefetch errors use `ErrorCode::exit_code`).
+fn render_error(json_mode: bool, payload: ErrorPayload) {
+    eprintln!("guardrails: {}", payload.message);
+    emit_error_envelope_if_enabled(json_mode, payload);
 }
 
-fn parse_stdin_from(reader: &mut dyn Read, json_mode: bool) -> Result<ToolInput, i32> {
-    let input_error_exit = i32::from(HookExitCode::InputError.code());
+// Fail-closed input parsing. Errors carry the cause as a typed variant; the
+// exit code (always 64, hook input contract per ADR-0005) and rendering are
+// the caller's responsibility.
+#[derive(Debug, thiserror::Error)]
+enum ParseStdinError {
+    #[error("failed to read stdin: {0}")]
+    Io(#[from] io::Error),
+    #[error("input too large (>{cap} bytes), blocking as precaution")]
+    Oversized { cap: u64 },
+    #[error("invalid JSON input: {0}")]
+    InvalidJson(#[from] serde_json::Error),
+}
+
+impl ParseStdinError {
+    fn into_payload(self) -> ErrorPayload {
+        let (code, next_step) = match &self {
+            Self::Io(_) => (
+                ErrorCode::IoError,
+                "Pass valid Claude Code hook JSON via stdin",
+            ),
+            Self::Oversized { .. } => (
+                ErrorCode::DataError,
+                "Reduce input size or split into smaller hook calls",
+            ),
+            Self::InvalidJson(_) => (
+                ErrorCode::DataError,
+                "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
+            ),
+        };
+        build_payload(code, self.to_string(), next_step)
+    }
+}
+
+fn parse_stdin() -> Result<ToolInput, ParseStdinError> {
+    parse_stdin_from(&mut io::stdin().lock())
+}
+
+fn parse_stdin_from(reader: &mut dyn Read) -> Result<ToolInput, ParseStdinError> {
     let mut input_str = String::new();
     reader
         .take(MAX_INPUT_SIZE + 1)
-        .read_to_string(&mut input_str)
-        .map_err(|e| {
-            fail(
-                json_mode,
-                ErrorCode::IoError,
-                format!("failed to read stdin: {e}"),
-                "Pass valid Claude Code hook JSON via stdin",
-                input_error_exit,
-            )
-        })?;
+        .read_to_string(&mut input_str)?;
 
     if !content_within_cap(&input_str, MAX_INPUT_SIZE) {
-        return Err(fail(
-            json_mode,
-            ErrorCode::DataError,
-            format!("input too large (>{MAX_INPUT_SIZE} bytes), blocking as precaution"),
-            "Reduce input size or split into smaller hook calls",
-            input_error_exit,
-        ));
+        return Err(ParseStdinError::Oversized {
+            cap: MAX_INPUT_SIZE,
+        });
     }
 
-    serde_json::from_str(&input_str).map_err(|e| {
-        fail(
-            json_mode,
-            ErrorCode::DataError,
-            format!("invalid JSON input: {e}"),
-            "Pass valid Claude Code hook JSON with tool_name and tool_input fields",
-            input_error_exit,
-        )
-    })
+    Ok(serde_json::from_str(&input_str)?)
 }
 
 const CONFIG_HINT_MESSAGE: &str =
@@ -648,13 +661,11 @@ fn run_prefetch(json_mode: bool) -> i32 {
         }
         Err(e) => {
             let (code, next_step) = e.classify();
-            fail(
+            render_error(
                 json_mode,
-                code,
-                format!("prefetch failed: {e}"),
-                next_step,
-                i32::from(code.exit_code()),
-            )
+                build_payload(code, format!("prefetch failed: {e}"), next_step),
+            );
+            i32::from(code.exit_code())
         }
     }
 }
@@ -691,9 +702,12 @@ fn load_config_or_note(result: Result<Config, String>, notes: &mut Vec<String>) 
 }
 
 fn run_hook(json_mode: bool) -> i32 {
-    let input = match parse_stdin(json_mode) {
+    let input = match parse_stdin() {
         Ok(v) => v,
-        Err(code) => return code,
+        Err(e) => {
+            render_error(json_mode, e.into_payload());
+            return i32::from(HookExitCode::InputError.code());
+        }
     };
     run_hook_with_input(
         &input,
@@ -1549,21 +1563,21 @@ mod tests {
         let json =
             r#"{"tool_name":"Write","tool_input":{"file_path":"/x.ts","content":"const x=1;"}}"#;
         let mut cursor = io::Cursor::new(json.as_bytes());
-        match parse_stdin_from(&mut cursor, false) {
+        match parse_stdin_from(&mut cursor) {
             Ok(parsed) => {
                 assert_eq!(parsed.tool_name, "Write");
                 assert_eq!(parsed.tool_input.file_path.as_deref(), Some("/x.ts"));
                 assert_eq!(parsed.tool_input.content.as_deref(), Some("const x=1;"));
             }
-            Err(exit) => panic!("expected Ok, got Err({exit})"),
+            Err(e) => panic!("expected Ok, got Err({e:?})"),
         }
     }
 
     #[test]
     fn parse_stdin_from_rejects_invalid_json() {
         let mut cursor = io::Cursor::new(&b"not json"[..]);
-        match parse_stdin_from(&mut cursor, false) {
-            Err(exit) => assert_eq!(exit, i32::from(HookExitCode::InputError.code())),
+        match parse_stdin_from(&mut cursor) {
+            Err(e) => assert!(matches!(e, ParseStdinError::InvalidJson(_)), "got {e:?}"),
             Ok(_) => panic!("expected Err for invalid JSON"),
         }
     }
@@ -1573,10 +1587,33 @@ mod tests {
         let size = usize::try_from(MAX_INPUT_SIZE + 1).unwrap();
         let payload = vec![b'a'; size];
         let mut cursor = io::Cursor::new(payload);
-        match parse_stdin_from(&mut cursor, false) {
-            Err(exit) => assert_eq!(exit, i32::from(HookExitCode::InputError.code())),
+        match parse_stdin_from(&mut cursor) {
+            Err(e) => assert!(matches!(e, ParseStdinError::Oversized { .. }), "got {e:?}"),
             Ok(_) => panic!("expected Err for oversized input"),
         }
+    }
+
+    #[test]
+    fn parse_stdin_error_into_payload_maps_error_codes() {
+        assert_eq!(
+            ParseStdinError::Io(io::Error::other("x"))
+                .into_payload()
+                .code,
+            ErrorCode::IoError
+        );
+        assert_eq!(
+            ParseStdinError::Oversized {
+                cap: MAX_INPUT_SIZE
+            }
+            .into_payload()
+            .code,
+            ErrorCode::DataError
+        );
+        let json_err = serde_json::from_str::<serde_json::Value>("nope").unwrap_err();
+        assert_eq!(
+            ParseStdinError::InvalidJson(json_err).into_payload().code,
+            ErrorCode::DataError
+        );
     }
 
     #[test]
