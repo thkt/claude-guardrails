@@ -23,6 +23,7 @@ use reporter::{build_json_report, format_violations, format_warnings};
 use rules::{non_comment_lines, Violation, RE_JS_FILE};
 use serde::Serialize;
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::panic;
@@ -71,15 +72,46 @@ enum Commands {
     Prefetch,
 }
 
-mod tool_name {
-    pub const WRITE: &str = "Write";
-    pub const EDIT: &str = "Edit";
-    pub const MULTI_EDIT: &str = "MultiEdit";
+#[derive(Debug)]
+enum ToolName {
+    Write,
+    Edit,
+    MultiEdit,
+    Other(String),
+}
+
+impl fmt::Display for ToolName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Write => "Write",
+            Self::Edit => "Edit",
+            Self::MultiEdit => "MultiEdit",
+            Self::Other(name) => name.as_str(),
+        })
+    }
+}
+
+// Deserialize from the raw JSON string, preserving the original name in
+// `Other` so diagnostics can report which unsupported tool carried content.
+// `#[serde(other)]` cannot capture the payload, so this is hand-written.
+impl<'de> serde::Deserialize<'de> for ToolName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "Write" => Self::Write,
+            "Edit" => Self::Edit,
+            "MultiEdit" => Self::MultiEdit,
+            _ => Self::Other(s),
+        })
+    }
 }
 
 #[derive(serde::Deserialize)]
 struct ToolInput {
-    tool_name: String,
+    tool_name: ToolName,
     tool_input: ToolInputData,
 }
 
@@ -169,9 +201,9 @@ fn get_file_and_content(input: &ToolInput, project_root: Option<&Path>) -> Optio
     let file_path = input.tool_input.file_path.clone()?;
     let is_js = RE_JS_FILE.is_match(&file_path);
 
-    let (content, degraded) = match input.tool_name.as_str() {
-        tool_name::WRITE => (input.tool_input.content.clone()?, None),
-        tool_name::EDIT => {
+    let (content, degraded) = match &input.tool_name {
+        ToolName::Write => (input.tool_input.content.clone()?, None),
+        ToolName::Edit => {
             let new_string = input.tool_input.new_string.clone()?;
             match resolve_edit_content(
                 &file_path,
@@ -186,7 +218,7 @@ fn get_file_and_content(input: &ToolInput, project_root: Option<&Path>) -> Optio
                 ContentResolution::NotApplicable => (new_string, None),
             }
         }
-        tool_name::MULTI_EDIT => {
+        ToolName::MultiEdit => {
             let edits = input.tool_input.edits.as_ref()?;
             match resolve_multi_edit_content(&file_path, edits, project_root, is_js) {
                 ContentResolution::Full(c) => (c, None),
@@ -194,11 +226,10 @@ fn get_file_and_content(input: &ToolInput, project_root: Option<&Path>) -> Optio
                 ContentResolution::NotApplicable => (join_new_strings(edits), None),
             }
         }
-        _ => {
+        ToolName::Other(name) => {
             if input.tool_input.content.is_some() || input.tool_input.new_string.is_some() {
                 eprintln!(
-                    "guardrails: unknown tool '{}' has content fields — add to get_file_and_content if it writes files",
-                    input.tool_name
+                    "guardrails: unknown tool '{name}' has content fields — add to get_file_and_content if it writes files"
                 );
             }
             return None;
@@ -752,8 +783,8 @@ where
     }) = get_file_and_content(input, project_root.as_deref())
     else {
         let is_write_tool = matches!(
-            input.tool_name.as_str(),
-            tool_name::WRITE | tool_name::EDIT | tool_name::MULTI_EDIT
+            input.tool_name,
+            ToolName::Write | ToolName::Edit | ToolName::MultiEdit
         );
         if is_write_tool {
             eprintln!(
@@ -843,7 +874,7 @@ mod tests {
 
     fn make_write_input(file_path: Option<&str>, content: Option<&str>) -> ToolInput {
         ToolInput {
-            tool_name: tool_name::WRITE.to_owned(),
+            tool_name: ToolName::Write,
             tool_input: ToolInputData {
                 file_path: file_path.map(String::from),
                 content: content.map(String::from),
@@ -854,7 +885,7 @@ mod tests {
 
     fn make_edit_input(file_path: Option<&str>, new_string: Option<&str>) -> ToolInput {
         ToolInput {
-            tool_name: tool_name::EDIT.to_owned(),
+            tool_name: ToolName::Edit,
             tool_input: ToolInputData {
                 file_path: file_path.map(String::from),
                 new_string: new_string.map(String::from),
@@ -901,7 +932,7 @@ mod tests {
     #[test]
     fn multi_edit_joins_edits() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_name: ToolName::MultiEdit,
             tool_input: ToolInputData {
                 file_path: Some("/src/app.ts".to_owned()),
                 edits: Some(vec![
@@ -927,7 +958,7 @@ mod tests {
         // separator when the first edit's new_string was empty, shifting
         // line offsets in downstream snippet analysis.
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_name: ToolName::MultiEdit,
             tool_input: ToolInputData {
                 file_path: Some("/nonexistent/path.ts".to_owned()),
                 edits: Some(vec![
@@ -952,7 +983,7 @@ mod tests {
     #[test]
     fn multi_edit_empty_edits_returns_none() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_name: ToolName::MultiEdit,
             tool_input: ToolInputData {
                 file_path: Some("/src/app.ts".to_owned()),
                 edits: Some(vec![]),
@@ -965,7 +996,7 @@ mod tests {
     #[test]
     fn multi_edit_all_none_returns_none() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_name: ToolName::MultiEdit,
             tool_input: ToolInputData {
                 file_path: Some("/src/app.ts".to_owned()),
                 edits: Some(vec![EditItem::default(), EditItem::default()]),
@@ -978,7 +1009,7 @@ mod tests {
     #[test]
     fn unsupported_tool_returns_none() {
         let input = ToolInput {
-            tool_name: "Bash".to_owned(),
+            tool_name: ToolName::Other("Bash".to_owned()),
             tool_input: ToolInputData {
                 file_path: Some("/tmp/x".to_owned()),
                 content: Some("echo hi".to_owned()),
@@ -986,6 +1017,12 @@ mod tests {
             },
         };
         assert!(get_file_and_content(&input, None).is_none());
+    }
+
+    #[test]
+    fn tool_name_deserializes_unknown_to_other_preserving_name() {
+        let parsed: ToolName = serde_json::from_str(r#""Bash""#).unwrap();
+        assert!(matches!(parsed, ToolName::Other(s) if s == "Bash"));
     }
 
     #[test]
@@ -1060,7 +1097,7 @@ mod tests {
         )
         .unwrap();
         let input = ToolInput {
-            tool_name: tool_name::EDIT.to_owned(),
+            tool_name: ToolName::Edit,
             tool_input: ToolInputData {
                 file_path: Some(path.to_string_lossy().into_owned()),
                 old_string: Some("const x = 1;".to_owned()),
@@ -1078,7 +1115,7 @@ mod tests {
     #[test]
     fn edit_falls_back_to_snippet_when_file_missing() {
         let input = ToolInput {
-            tool_name: tool_name::EDIT.to_owned(),
+            tool_name: ToolName::Edit,
             tool_input: ToolInputData {
                 file_path: Some("/nonexistent/path/that/does/not/exist.ts".to_owned()),
                 old_string: Some("const x = 1;".to_owned()),
@@ -1096,7 +1133,7 @@ mod tests {
         let path = tmp.path().join("file.ts");
         fs::write(&path, "const a = 1;\n").unwrap();
         let input = ToolInput {
-            tool_name: tool_name::EDIT.to_owned(),
+            tool_name: ToolName::Edit,
             tool_input: ToolInputData {
                 file_path: Some(path.to_string_lossy().into_owned()),
                 old_string: Some("not in file".to_owned()),
@@ -1114,7 +1151,7 @@ mod tests {
         let path = tmp.path().join("file.ts");
         fs::write(&path, "let a = 1;\nlet b = 2;\n").unwrap();
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_name: ToolName::MultiEdit,
             tool_input: ToolInputData {
                 file_path: Some(path.to_string_lossy().into_owned()),
                 edits: Some(vec![
@@ -1139,7 +1176,7 @@ mod tests {
     #[test]
     fn multi_edit_falls_back_when_file_missing() {
         let input = ToolInput {
-            tool_name: tool_name::MULTI_EDIT.to_owned(),
+            tool_name: ToolName::MultiEdit,
             tool_input: ToolInputData {
                 file_path: Some("/nonexistent/path.ts".to_owned()),
                 edits: Some(vec![EditItem {
@@ -1343,7 +1380,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = temp_ts_file(&tmp, "file.ts", "const a = 1;");
         let input = ToolInput {
-            tool_name: tool_name::EDIT.to_owned(),
+            tool_name: ToolName::Edit,
             tool_input: ToolInputData {
                 file_path: Some(path.to_string_lossy().into_owned()),
                 old_string: Some("missing pattern".to_owned()),
@@ -1584,7 +1621,7 @@ mod tests {
         let mut cursor = io::Cursor::new(json.as_bytes());
         match parse_stdin_from(&mut cursor) {
             Ok(parsed) => {
-                assert_eq!(parsed.tool_name, "Write");
+                assert!(matches!(parsed.tool_name, ToolName::Write));
                 assert_eq!(parsed.tool_input.file_path.as_deref(), Some("/x.ts"));
                 assert_eq!(parsed.tool_input.content.as_deref(), Some("const x=1;"));
             }
