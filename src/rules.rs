@@ -129,7 +129,7 @@ const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::NON_LITERAL_FS_PATH,        // ast_security::check_fs_path
     rule_id::NON_LITERAL_REQUIRE,        // ast_security::check_non_literal_require
     rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security::check_{postmessage,onmessage}_origin_missing
-    rule_id::PROTOTYPE_POLLUTION, // ast_security::check_{prototype_pollution,merge_pollution_sinks}
+    rule_id::PROTOTYPE_POLLUTION, // ast_security::prototype_pollution::check_{prototype_pollution,merge_pollution_sinks}
     rule_id::SSR_SECRET_BLEED,    // ast_security::check_ssr_secret_*
     rule_id::UNSAFE_HTML_INJECTION, // ast_security::check_{html_assignment,document_write}
     rule_id::UNSAFE_REGEX,        // ast_security::check_unsafe_regex
