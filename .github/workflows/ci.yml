@@ -52,6 +52,54 @@ jobs:
         env:
           NO_COLOR: "1"
 
+  coverage:
+    # Diff coverage gate: fail when coverage of the lines this PR adds or
+    # changes drops below the threshold, so new uncovered code (pub fn /
+    # branches) cannot merge untested. No overall-percent floor (which would
+    # flag existing unreachable code); no base-vs-PR double measurement.
+    # Rationale: ported from yomu (Issue #223), THRESHOLDS.md "Coverage".
+    # Runs on ubuntu like the test job (guardrails has no mlx dependency,
+    # so no Apple-silicon BLAS requirement).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 # v2.79.3
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Generate lcov coverage
+        run: cargo llvm-cov --lcov --output-path lcov.info
+
+      - name: Diff coverage gate (changed lines >= 95%)
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          # diff-cover is a Python tool; isolate it in a venv to avoid PEP 668
+          # (externally-managed environments) regardless of the runner's Python.
+          python3 -m venv /tmp/diff-cover-venv
+          /tmp/diff-cover-venv/bin/pip install --quiet diff-cover
+          /tmp/diff-cover-venv/bin/diff-cover lcov.info \
+            --compare-branch=origin/main \
+            --fail-under=95
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 10

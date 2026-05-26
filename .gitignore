@@ -6,3 +6,7 @@ docs/*
 !docs/decisions/
 target/
 workspace/
+
+# Coverage artifacts (cargo llvm-cov)
+*.profraw
+/lcov.info
