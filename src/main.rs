@@ -47,7 +47,7 @@ With --json: emits a structured JSON report on stdout, human-readable on stderr.
 Exit codes (hook mode):
   0   Pass — no violations
   1   Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI
-  2   Blocked — violations matching severity.blockOn (default: critical, high), tool halted
+  2   Blocked — violations at or above severity.blockThreshold (default: high), tool halted
   64  Hook input error — invalid JSON, oversized payload, or clap usage failure
   70  Internal error — panic / invariant violation, fail-closed
 
@@ -542,7 +542,7 @@ fn partition_violations<'a>(
 ) -> (Vec<&'a Violation>, Vec<&'a Violation>) {
     violations
         .iter()
-        .partition(|v| config.severity.block_on.contains(&v.severity))
+        .partition(|v| v.severity >= config.severity.block_threshold)
 }
 
 fn build_payload(code: ErrorCode, message: String, next_step: &str) -> ErrorPayload {
@@ -732,7 +732,7 @@ fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<Stri
         Ok(c) => c,
         Err(e) => {
             let note = format!(
-                "config error (using defaults: all rules enabled, block_on=[critical,high]): {e}"
+                "config error (using defaults: all rules enabled, block_threshold=high): {e}"
             );
             eprintln!("guardrails: {note}");
             notes.push(note);
@@ -1529,18 +1529,21 @@ mod tests {
     }
 
     #[test]
-    fn partition_custom_block_on() {
+    fn partition_custom_block_threshold() {
         let mut config = Config::default();
-        config.severity.block_on = vec![Severity::Medium];
+        config.severity.block_threshold = Severity::Medium;
         let violations = vec![
             make_violation("high-rule", Severity::High),
             make_violation("medium-rule", Severity::Medium),
+            make_violation("low-rule", Severity::Low),
         ];
         let (blocking, warnings) = partition_violations(&violations, &config);
-        assert_eq!(blocking.len(), 1);
-        assert_eq!(blocking[0].rule, "medium-rule");
+        // threshold Medium: Medium and above (High) block, Low warns.
+        assert_eq!(blocking.len(), 2);
+        assert!(blocking.iter().any(|v| v.rule == "high-rule"));
+        assert!(blocking.iter().any(|v| v.rule == "medium-rule"));
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].rule, "high-rule");
+        assert_eq!(warnings[0].rule, "low-rule");
     }
 
     #[test]

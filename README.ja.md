@@ -232,7 +232,7 @@ Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警
 | ------ | --------------------------------------------------------------------------------- |
 | 0      | 合格 — 違反なし                                                                              |
 | 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される          |
-| 2      | ブロック — `severity.blockOn` (デフォルト: `critical`, `high`) に該当する違反、tool を停止   |
+| 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、tool を停止   |
 | 64     | hook 入力エラー — JSON 不正、サイズ超過、または clap usage 失敗                              |
 | 70     | 内部エラー — panic / invariant 違反 (fail-closed)                                            |
 
@@ -245,7 +245,9 @@ Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警
 | 65     | データエラー (非対応プラットフォーム)                             |
 | 74     | I/O エラー (ネットワーク / 展開 / キャッシュ失敗)                 |
 
-> **BREAKING (v0.16+)**: 非 blocking severity 違反 (`severity.blockOn` に該当しないもの) は exit `1` を返すようになりました (旧 `0`)。hook stdin / JSON / サイズ超過 失敗は exit `64` (旧 `1` または `2`)。内部 panic は exit `70`。JSON の `decision` フィールド (`allow` / `block`) は変わりません — 引き続き blocking 違反のみを判定します。
+> **BREAKING (v0.16+)**: 非 blocking severity 違反 (`severity.blockThreshold` 未満) は exit `1` を返すようになりました (旧 `0`)。hook stdin / JSON / サイズ超過 失敗は exit `64` (旧 `1` または `2`)。内部 panic は exit `70`。JSON の `decision` フィールド (`allow` / `block`) は変わりません — 引き続き blocking 違反のみを判定します。
+
+> **BREAKING (v0.17+)**: `severity.blockOn` (配列) は `severity.blockThreshold` (単一の severity) に置き換わりました。閾値以上の違反が blocking、未満が警告になります。デフォルト `"high"` は旧 `["critical", "high"]` と等価です。未知の `blockOn` キーは silent に無視されるため、`medium` や `low` を列挙していた config は `"blockThreshold": "medium"` / `"low"` に移行してください。まれな `blockOn: []` (何もブロックしない) に代替はありません。
 
 ## JSON 出力モード
 
@@ -283,7 +285,7 @@ guardrails --json < tool-call.json
 | フィールド        | 型                                              | 補足                                                                  |
 | ----------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
 | `data.violations` | 配列                                            | ブロッキングと警告の両方を含む。`severity` で区別可能                 |
-| `data.decision`   | `"block"` / `"allow"`                           | `severity.blockOn` に一致するエントリが 1 件以上ある場合のみ `block`  |
+| `data.decision`   | `"block"` / `"allow"`                           | `severity.blockThreshold` 以上のエントリがある場合のみ `block`  |
 | `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | 小文字                                                                |
 | `line`            | 整数または `null`                               | 位置が不明な場合は `null`                                             |
 | `degraded`        | bool                                            | note が 1 件でもあれば `true`。環境系の note (project root canonicalize 失敗 / config load 失敗 / oxlint 不在) と post-edit content fallback の note を union する。原因は必ず `notes` を読む    |
@@ -372,7 +374,7 @@ guardrails --json < tool-call.json
     "allow": []
   },
   "severity": {
-    "blockOn": ["critical", "high"]
+    "blockThreshold": "high"
   }
 }
 ```
@@ -423,12 +425,12 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 }
 ```
 
-すべての重大度でブロックする構成。
+すべての重大度でブロックする構成（`low` が下限なので閾値が全てをブロック）。
 
 ```json
 {
   "severity": {
-    "blockOn": ["critical", "high", "medium", "low"]
+    "blockThreshold": "low"
   }
 }
 ```

@@ -221,13 +221,14 @@ pub fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32
         .map(|(line_num, _)| *line_num)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    Critical,
-    High,
-    Medium,
+    // `Ord` derives from declaration order: weakest first so `Critical` is the max.
     Low,
+    Medium,
+    High,
+    Critical,
 }
 
 impl Severity {
@@ -472,6 +473,17 @@ mod tests {
         assert_eq!(Severity::from_linter_str("warning"), Severity::Medium);
         assert_eq!(Severity::from_linter_str("info"), Severity::Low);
         assert_eq!(Severity::from_linter_str("unknown"), Severity::Low);
+    }
+
+    #[test]
+    fn severity_orders_low_to_critical() {
+        assert!(Severity::Low < Severity::Medium);
+        assert!(Severity::Medium < Severity::High);
+        assert!(Severity::High < Severity::Critical);
+        let max = [Severity::Low, Severity::Critical, Severity::Medium]
+            .into_iter()
+            .max();
+        assert_eq!(max, Some(Severity::Critical));
     }
 
     #[test]

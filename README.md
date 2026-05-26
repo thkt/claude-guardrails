@@ -230,7 +230,7 @@ Claude Code reads the exit code to decide whether to pass, surface a warning to 
 | ---- | ----------------------------------------------------------------------------- |
 | 0    | Pass — no violations                                                                          |
 | 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI            |
-| 2    | Blocked — violations matching `severity.blockOn` (default: `critical`, `high`), tool halted   |
+| 2    | Blocked — violations at or above `severity.blockThreshold` (default: `high`), tool halted   |
 | 64   | Hook input error — malformed JSON, oversized payload, or clap usage failure                   |
 | 70   | Internal error — panic or invariant violation (fail-closed)                                   |
 
@@ -243,7 +243,9 @@ Claude Code reads the exit code to decide whether to pass, surface a warning to 
 | 65   | Data error (unsupported platform)                                    |
 | 74   | I/O error (network / extract / cache failure)                        |
 
-> **BREAKING (v0.16+)**: Non-blocking severity violations (not matching `severity.blockOn`) now exit `1` (was `0`). Hook stdin / JSON / oversized input failures now exit `64` (was `1` or `2`). Internal panics now exit `70`. The JSON `decision` field (`allow` / `block`) is unchanged — it still tracks blocking violations only.
+> **BREAKING (v0.16+)**: Non-blocking severity violations (below `severity.blockThreshold`) now exit `1` (was `0`). Hook stdin / JSON / oversized input failures now exit `64` (was `1` or `2`). Internal panics now exit `70`. The JSON `decision` field (`allow` / `block`) is unchanged — it still tracks blocking violations only.
+
+> **BREAKING (v0.17+)**: `severity.blockOn` (an array) is replaced by `severity.blockThreshold` (a single severity). Violations at or above the threshold block; below it warn. The default `"high"` matches the old `["critical", "high"]`. Unknown `blockOn` keys are silently ignored, so a config that listed `medium` or `low` must switch to `"blockThreshold": "medium"` / `"low"`; the rare `blockOn: []` (block nothing) has no replacement.
 
 ## JSON Output Mode
 
@@ -281,7 +283,7 @@ guardrails --json < tool-call.json
 | Field             | Type                                            | Notes                                                            |
 | ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
 | `data.violations` | array                                           | Both blocking and warning entries; distinguish via `severity`    |
-| `data.decision`   | `"block"` / `"allow"`                           | `block` only when at least one entry matches `severity.blockOn`  |
+| `data.decision`   | `"block"` / `"allow"`                           | `block` only when an entry is at or above `severity.blockThreshold` |
 | `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | Lowercase                                                        |
 | `line`            | integer or `null`                               | `null` when location is unknown                                  |
 | `degraded`        | boolean                                         | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause |
@@ -370,7 +372,7 @@ Place a `.guardrails.json` at your project root. The format is the flat `Project
     "allow": []
   },
   "severity": {
-    "blockOn": ["critical", "high"]
+    "blockThreshold": "high"
   }
 }
 ```
@@ -423,12 +425,12 @@ All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
 }
 ```
 
-**Block all severities**:
+**Block all severities** (`low` is the floor, so the threshold blocks everything):
 
 ```json
 {
   "severity": {
-    "blockOn": ["critical", "high", "medium", "low"]
+    "blockThreshold": "low"
   }
 }
 ```

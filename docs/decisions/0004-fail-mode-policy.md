@@ -36,7 +36,7 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 | 環境失敗 | fail-open + degraded note | 0 / 1 / 2 (violation の有無で確定) | guardrails 不可用で AI 作業を止めると UX 悪化。残存ルールでカバーし、note で degradation を AI に伝える |
 | リソース境界 / DoS 防御 (敵対入力含む) | fail-closed | 64 (input error) | 上限超は legitimate でも処理しない。silent truncate は false negative を生む |
 | invariant 違反 | fail-closed | 70 (internal error) | コードの bug は速やかに通知。次の hook 起動でも同じ panic が出れば修正が必要 |
-| config エラー | fail-open with defaults | 0 / 1 / 2 (defaults で実行後の結果) | 壊れた config で security check を止めない。default で全 rule 有効・block_on=[Critical, High] |
+| config エラー | fail-open with defaults | 0 / 1 / 2 (defaults で実行後の結果) | 壊れた config で security check を止めない。default で全 rule 有効・block_threshold=High ([ADR-0018](0018-severity-ord-and-block-threshold.md)) |
 
 `degraded note` は `SuccessEnvelope.notes` に文字列で積み、stderr にも eprintln する。AI agent は note を読んで「何がスキップされたか」を把握できる。
 

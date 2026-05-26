@@ -86,13 +86,14 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct SeverityConfig {
-    pub block_on: Vec<Severity>,
+    /// Violations at or above this severity block the tool; below it warn.
+    pub block_threshold: Severity,
 }
 
 impl Default for SeverityConfig {
     fn default() -> Self {
         Self {
-            block_on: vec![Severity::Critical, Severity::High],
+            block_threshold: Severity::High,
         }
     }
 }
@@ -132,8 +133,8 @@ struct ProjectConfig {
 
 #[derive(Debug, Deserialize)]
 struct ProjectSeverityConfig {
-    #[serde(rename = "blockOn")]
-    block_on: Option<Vec<Severity>>,
+    #[serde(rename = "blockThreshold")]
+    block_threshold: Option<Severity>,
 }
 
 pub(crate) const GUARDRAILS_CONFIG_FILE: &str = ".guardrails.json";
@@ -255,8 +256,8 @@ impl Config {
             self.rules.apply_overrides(pr);
         }
         if let Some(ps) = project.severity {
-            if let Some(block_on) = ps.block_on {
-                self.severity.block_on = block_on;
+            if let Some(threshold) = ps.block_threshold {
+                self.severity.block_threshold = threshold;
             }
         }
         if let Some(oc) = project.oxlint {
@@ -307,11 +308,13 @@ mod tests {
     }
 
     #[test]
-    fn default_severity_blocks_critical_and_high() {
+    fn default_severity_threshold_is_high() {
         let config = Config::default();
-        assert!(config.severity.block_on.contains(&Severity::Critical));
-        assert!(config.severity.block_on.contains(&Severity::High));
-        assert!(!config.severity.block_on.contains(&Severity::Medium));
+        assert_eq!(config.severity.block_threshold, Severity::High);
+        // Critical and High block; Medium and below warn.
+        assert!(Severity::Critical >= config.severity.block_threshold);
+        assert!(Severity::High >= config.severity.block_threshold);
+        assert!(Severity::Medium < config.severity.block_threshold);
     }
 
     #[test]
@@ -364,10 +367,10 @@ mod tests {
     fn merge_severity_override() {
         let base = Config::default();
         let project: ProjectConfig =
-            serde_json::from_str(r#"{"severity": {"blockOn": ["critical"]}}"#).unwrap();
+            serde_json::from_str(r#"{"severity": {"blockThreshold": "critical"}}"#).unwrap();
 
         let merged = base.merge(project);
-        assert_eq!(merged.severity.block_on, vec![Severity::Critical]);
+        assert_eq!(merged.severity.block_threshold, Severity::Critical);
     }
 
     #[test]
@@ -379,7 +382,7 @@ mod tests {
         assert!(merged.enabled);
         assert!(merged.rules.biome);
         assert!(merged.rules.oxlint);
-        assert_eq!(merged.severity.block_on.len(), 2);
+        assert_eq!(merged.severity.block_threshold, Severity::High);
     }
 
     #[test]
