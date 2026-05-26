@@ -78,13 +78,13 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 
 ### Hook mode exit code (5 種)
 
-`HookExitCode` (`src/hook_exit.rs`) が定義する。`SUCCESS` 経路の violation 有無で 0/1/2 が決まる。
+`HookExitCode` (`src/hook_exit.rs`) が定義する。`SUCCESS` 経路の violation 有無で 0/1/2 が決まり、advisory (1) と blocking (2) の境界は `severity.blockThreshold` ([ADR-0018](0018-severity-ord-and-block-threshold.md)) で決まる。
 
 | Exit | Const (`HookExitCode`) | JSON `error.code` | 意味 | Claude Code hook 挙動 |
 | --- | --- | --- | --- | --- |
 | 0 | `Pass` | (none) | pass — violation なし | allow |
-| 1 | `Advisory` | (none) | advisory — `severity.blockOn` 外の violation | warn (AI に stderr 表示、tool 続行) |
-| 2 | `Blocking` | (none) | blocking — `severity.blockOn` 内の violation | block (AI に stderr 表示、tool 停止) |
+| 1 | `Advisory` | (none) | advisory — `severity.blockThreshold` 未満の violation | warn (AI に stderr 表示、tool 続行) |
+| 2 | `Blocking` | (none) | blocking — `severity.blockThreshold` 以上の violation | block (AI に stderr 表示、tool 停止) |
 | 64 | `InputError` | `USAGE_ERROR` / `DATA_ERROR` / `IO_ERROR` | hook 入力契約違反 (malformed JSON / oversized payload / stdin read failure / clap parse failure) | block |
 | 70 | `Internal` | (envelope なし、stderr のみ) | panic / invariant violation (fail-closed) | block |
 

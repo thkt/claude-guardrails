@@ -8,9 +8,9 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-guardrails は AI エージェント向け hook として、AST 解析で検出した violation を `Severity` で分類し、`config.severity.block_on` メンバーシップで exit code (blocking=2 / advisory=1) を決定する (`src/hook_exit.rs`, `src/main.rs` の `partition_violations`)。default `block_on = [Critical, High]` (`src/config.rs` の `SeverityConfig::default()`)。
+guardrails は AI エージェント向け hook として、AST 解析で検出した violation を `Severity` で分類し、`config.severity.block_threshold` 以上かで exit code (blocking=2 / advisory=1) を決定する (`src/hook_exit.rs`, `src/main.rs` の `partition_violations`)。default `block_threshold = High` (`src/config.rs` の `SeverityConfig::default()`、[ADR-0018](0018-severity-ord-and-block-threshold.md) で `block_on` 集合から置換)。
 
-既存 `Math.random().toString(36)` (`src/ast_security.rs` の `check_math_random_insecure` / `check_math_random_crypto_sink`) は `Severity::Medium` で実装されており、default block_on 外、つまり default では Advisory (exit 1) しか出さない。これは OUTCOME.md Behavior B1「禁止パターン → blocking signal → 同サイクル修正」と齟齬する。Issue #80 で検出範囲を拡張する際、各検出パターンを blocking と advisory のどちらに振るかの判断基準が必要になった。
+既存 `Math.random().toString(36)` (`src/ast_security.rs` の `check_math_random_insecure` / `check_math_random_crypto_sink`) は `Severity::Medium` で実装されており、default block_threshold (High) 未満、つまり default では Advisory (exit 1) しか出さない。これは OUTCOME.md Behavior B1「禁止パターン → blocking signal → 同サイクル修正」と齟齬する。Issue #80 で検出範囲を拡張する際、各検出パターンを blocking と advisory のどちらに振るかの判断基準が必要になった。
 
 ## Decision Drivers
 
