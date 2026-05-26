@@ -4,7 +4,8 @@
 
 use crate::content::{content_within_cap, ToolInput};
 use crate::envelope::{ErrorCode, ErrorPayload};
-use crate::{build_payload, MAX_INPUT_SIZE};
+use crate::output::build_payload;
+use crate::MAX_INPUT_SIZE;
 use std::io::{self, Read};
 
 // Fail-closed input parsing. Errors carry the cause as a typed variant; the
