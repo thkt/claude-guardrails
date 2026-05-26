@@ -4,8 +4,6 @@
 //! and recovery candidates. Shape and exit code mapping are fixed in
 //! ADR-0005 (`docs/decisions/0005-json-envelope-and-sysexits-adoption.md`).
 
-#![allow(dead_code)]
-
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -41,6 +39,11 @@ impl<T: Serialize> SuccessEnvelope<T> {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[allow(clippy::enum_variant_names)]
 pub enum ErrorCode {
+    // ADR-0005 lists USAGE_ERROR as a valid error.code for exit 64 and the
+    // serialization / exit_code tests pin it, but no runtime path constructs it:
+    // hook input errors map to Data/IoError and clap usage errors exit 64
+    // without a JSON envelope. Kept for contract and test completeness.
+    #[allow(dead_code)]
     UsageError,
     DataError,
     IoError,
