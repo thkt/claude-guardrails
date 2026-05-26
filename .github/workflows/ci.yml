@@ -53,11 +53,19 @@ jobs:
           NO_COLOR: "1"
 
   coverage:
-    # Diff coverage gate: fail when coverage of the lines this PR adds or
-    # changes drops below the threshold, so new uncovered code (pub fn /
-    # branches) cannot merge untested. No overall-percent floor (which would
-    # flag existing unreachable code); no base-vs-PR double measurement.
-    # Rationale: ported from yomu (Issue #223), THRESHOLDS.md "Coverage".
+    # Coverage delta gate: fail when project line coverage (C0) drops vs main.
+    # Move-only refactors relocate already-tested lines; to a changed-lines gate
+    # (diff-cover) the added side looks "new and uncovered" even though total
+    # coverage is unchanged. Measuring base-vs-head total C0 is move-immune:
+    # relocated lines cancel out, while genuinely new untested code still lowers
+    # the total and fails. This is the literal reading of THRESHOLDS.md
+    # "Coverage" (C0/C1 must not drop), so existing unreachable code is never
+    # flagged (no absolute floor).
+    # History: began as a diff-cover changed-lines gate ported from yomu
+    # (Issue #223); switched to base-vs-head total C0 when that proxy
+    # false-failed the move-only PR #232 (Issue #227 ast_security split).
+    # The second cargo llvm-cov run (~+1-2 min) is the accepted cost of removing
+    # the move false-positive.
     # Runs on ubuntu like the test job (guardrails has no mlx dependency,
     # so no Apple-silicon BLAS requirement).
     runs-on: ubuntu-latest
@@ -86,19 +94,30 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Generate lcov coverage
-        run: cargo llvm-cov --lcov --output-path lcov.info
-
-      - name: Diff coverage gate (changed lines >= 95%)
+      - name: Coverage delta gate (project C0 must not drop vs main)
         run: |
+          set -euo pipefail
+          # Sum LH (lines hit) / LF (lines found) across an lcov report -> C0 %.
+          c0() { awk -F: '/^LF:/{f+=$2} /^LH:/{h+=$2} END{ if (f==0) print "100.0"; else printf "%.4f", h*100/f }' "$1"; }
+          # HEAD = PR merged into main (the checked-out pull_request ref).
+          # cargo llvm-cov cleans stale profraw at the start of each run, so the
+          # two measurements below do not mix.
+          cargo llvm-cov --lcov --output-path head.info
+          head_c0=$(c0 head.info)
+          # BASE = main (fetch-depth:0 already has the history).
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          # diff-cover is a Python tool; isolate it in a venv to avoid PEP 668
-          # (externally-managed environments) regardless of the runner's Python.
-          python3 -m venv /tmp/diff-cover-venv
-          /tmp/diff-cover-venv/bin/pip install --quiet diff-cover
-          /tmp/diff-cover-venv/bin/diff-cover lcov.info \
-            --compare-branch=origin/main \
-            --fail-under=95
+          git checkout --quiet --force origin/main
+          cargo llvm-cov --lcov --output-path base.info
+          base_c0=$(c0 base.info)
+          # 0.1pp tolerance absorbs instrumentation rounding / total line drift.
+          awk -v b="$base_c0" -v h="$head_c0" 'BEGIN {
+            printf "C0 coverage: main %.2f%% -> PR %.2f%%\n", b, h
+            if (h + 0.1 < b) {
+              printf "::error::C0 coverage dropped %.2f%% -> %.2f%% (tolerance 0.1pp)\n", b, h
+              exit 1
+            }
+            print "OK: coverage did not drop"
+          }'
 
   security:
     runs-on: ubuntu-latest
