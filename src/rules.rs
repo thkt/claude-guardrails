@@ -125,7 +125,7 @@ const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::CLIENT_ENV_PUBLIC_LEAK,     // ast_security::check_client_env_public_leak
     rule_id::ENV_VAR_FALLBACK,           // ast_security::check_env_var_fallback
     rule_id::ERR_STACK_EXPOSURE,         // ast_security::check_err_stack
-    rule_id::MATH_RANDOM_INSECURE,       // ast_security::check_math_random_*
+    rule_id::MATH_RANDOM_INSECURE,       // ast_security::math_random::check_math_random_*
     rule_id::NON_LITERAL_FS_PATH,        // ast_security::check_fs_path
     rule_id::NON_LITERAL_REQUIRE,        // ast_security::check_non_literal_require
     rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security::postmessage::check_{postmessage,onmessage}_origin_missing
