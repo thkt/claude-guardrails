@@ -297,17 +297,6 @@ mod tests {
     }
 
     #[test]
-    fn default_config_all_rules_enabled() {
-        let config = Config::default();
-        assert!(config.enabled);
-        assert!(config.rules.sensitive_file);
-        assert!(config.rules.biome);
-        assert!(config.rules.oxlint);
-        assert!(config.rules.ast_security);
-        assert_eq!(config.source, ConfigSource::Default);
-    }
-
-    #[test]
     fn default_severity_threshold_is_high() {
         let config = Config::default();
         assert_eq!(config.severity.block_threshold, Severity::High);

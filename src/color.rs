@@ -60,12 +60,17 @@ mod tests {
 
     #[test]
     fn wrap_applies_ansi_codes() {
-        for (ansi_code, label) in [("31", "red"), ("33", "yellow"), ("1;31", "bold_red")] {
-            let result = wrap_with(true, ansi_code, "text");
-            let expected = format!("\x1b[{ansi_code}mtext\x1b[0m");
+        // Expected values are literal ANSI SGR sequences, not re-derived from the
+        // impl's format string, so a change to the escape format is caught.
+        for (ansi_code, expected) in [
+            ("31", "\x1b[31mtext\x1b[0m"),
+            ("33", "\x1b[33mtext\x1b[0m"),
+            ("1;31", "\x1b[1;31mtext\x1b[0m"),
+        ] {
             assert_eq!(
-                result, expected,
-                "{label} should wrap with code {ansi_code}"
+                wrap_with(true, ansi_code, "text"),
+                expected,
+                "code={ansi_code}"
             );
         }
     }
