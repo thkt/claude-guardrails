@@ -121,13 +121,13 @@ const REGISTERED_RULE_IDS: &[&str] = &[
 #[cfg(test)]
 const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::BIDI_CHARACTERS,            // ast_security::check_bidi
-    rule_id::CHILD_PROCESS_INJECTION,    // ast_security::check_child_process
+    rule_id::CHILD_PROCESS_INJECTION,    // ast_security::server_io::check_child_process
     rule_id::CLIENT_ENV_PUBLIC_LEAK,     // ast_security::ssr_env::check_client_env_public_leak
     rule_id::ENV_VAR_FALLBACK,           // ast_security::ssr_env::check_env_var_fallback
-    rule_id::ERR_STACK_EXPOSURE,         // ast_security::check_err_stack
+    rule_id::ERR_STACK_EXPOSURE,         // ast_security::server_io::check_err_stack
     rule_id::MATH_RANDOM_INSECURE,       // ast_security::math_random::check_math_random_*
-    rule_id::NON_LITERAL_FS_PATH,        // ast_security::check_fs_path
-    rule_id::NON_LITERAL_REQUIRE,        // ast_security::check_non_literal_require
+    rule_id::NON_LITERAL_FS_PATH,        // ast_security::server_io::check_fs_path
+    rule_id::NON_LITERAL_REQUIRE,        // ast_security::server_io::check_non_literal_require
     rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security::postmessage::check_{postmessage,onmessage}_origin_missing
     rule_id::PROTOTYPE_POLLUTION, // ast_security::prototype_pollution::check_{prototype_pollution,merge_pollution_sinks}
     rule_id::SSR_SECRET_BLEED,    // ast_security::ssr_env::check_ssr_secret_*
