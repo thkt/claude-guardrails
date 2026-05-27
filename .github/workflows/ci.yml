@@ -66,6 +66,13 @@ jobs:
     # false-failed the move-only PR #232 (Issue #227 ast_security split).
     # The second cargo llvm-cov run (~+1-2 min) is the accepted cost of removing
     # the move false-positive.
+    # download.rs is excluded (--ignore-filename-regex): its network-IO paths
+    # (fetch_url / extract / write_atomic) are covered non-deterministically by
+    # the integration tests, which spawn the real binary and download oxlint, so
+    # cache/network/test-order state flips ~15 lines run-to-run (confirmed in CI
+    # via debug PR #234: same-commit runs differed only in download.rs). Its
+    # security-critical unit tests (validate_entry_path / verify_sha256 /
+    # decode_hex) still run under `cargo test`; only the coverage % is ungated.
     # Runs on ubuntu like the test job (guardrails has no mlx dependency,
     # so no Apple-silicon BLAS requirement).
     runs-on: ubuntu-latest
@@ -102,12 +109,12 @@ jobs:
           # HEAD = PR merged into main (the checked-out pull_request ref).
           # cargo llvm-cov cleans stale profraw at the start of each run, so the
           # two measurements below do not mix.
-          cargo llvm-cov --lcov --output-path head.info
+          cargo llvm-cov --ignore-filename-regex 'src/download\.rs' --lcov --output-path head.info
           head_c0=$(c0 head.info)
           # BASE = main (fetch-depth:0 already has the history).
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git checkout --quiet --force origin/main
-          cargo llvm-cov --lcov --output-path base.info
+          cargo llvm-cov --ignore-filename-regex 'src/download\.rs' --lcov --output-path base.info
           base_c0=$(c0 base.info)
           # 0.1pp tolerance absorbs instrumentation rounding / total line drift.
           awk -v b="$base_c0" -v h="$head_c0" 'BEGIN {
