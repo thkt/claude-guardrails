@@ -94,30 +94,32 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Coverage delta gate (project C0 must not drop vs main)
+      - name: DEBUG - coverage determinism (throwaway, never merge)
         run: |
-          set -euo pipefail
-          # Sum LH (lines hit) / LF (lines found) across an lcov report -> C0 %.
+          set -uo pipefail
           c0() { awk -F: '/^LF:/{f+=$2} /^LH:/{h+=$2} END{ if (f==0) print "100.0"; else printf "%.4f", h*100/f }' "$1"; }
-          # HEAD = PR merged into main (the checked-out pull_request ref).
-          # cargo llvm-cov cleans stale profraw at the start of each run, so the
-          # two measurements below do not mix.
-          cargo llvm-cov --lcov --output-path head.info
-          head_c0=$(c0 head.info)
-          # BASE = main (fetch-depth:0 already has the history).
+          pf() { awk -F: '/^SF:/{sf=$2} /^LH:/{print sf":"$2}' "$1" | sort; }
+          # Experiment A: 2x cargo llvm-cov on the SAME checkout (no git switch).
+          # Non-empty diff => coverage is non-deterministic within CI; the listed
+          # files are the noise source.
+          cargo llvm-cov --lcov --output-path a1.info
+          cargo llvm-cov --lcov --output-path a2.info
+          echo "A) same-HEAD: run1=$(c0 a1.info)%  run2=$(c0 a2.info)%"
+          echo "A) per-file LH diff (empty = deterministic within CI):"
+          paste -d'|' <(pf a1.info) <(pf a2.info) | awk -F'|' '{split($1,x,":"); split($2,y,":"); if (x[2]!=y[2]) print "  "x[1]": "x[2]" -> "y[2]}'
+          echo "A) --- end ---"
+          # Experiment B: the real gate flow (head vs checkout origin/main).
+          # head Rust == main Rust on this branch (only ci.yml differs), so a
+          # non-empty B diff while A is empty points at the checkout-between-runs
+          # job design (target/profraw carryover), not run-to-run noise.
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git checkout --quiet --force origin/main
           cargo llvm-cov --lcov --output-path base.info
-          base_c0=$(c0 base.info)
-          # 0.1pp tolerance absorbs instrumentation rounding / total line drift.
-          awk -v b="$base_c0" -v h="$head_c0" 'BEGIN {
-            printf "C0 coverage: main %.2f%% -> PR %.2f%%\n", b, h
-            if (h + 0.1 < b) {
-              printf "::error::C0 coverage dropped %.2f%% -> %.2f%% (tolerance 0.1pp)\n", b, h
-              exit 1
-            }
-            print "OK: coverage did not drop"
-          }'
+          echo "B) head(a1)=$(c0 a1.info)%  base(main)=$(c0 base.info)%"
+          echo "B) per-file LH diff (head a1 vs base main):"
+          paste -d'|' <(pf a1.info) <(pf base.info) | awk -F'|' '{split($1,x,":"); split($2,y,":"); if (x[2]!=y[2]) print "  "x[1]": "x[2]" -> "y[2]}'
+          echo "B) --- end ---"
+          echo "=== DEBUG END (this step never fails; informational only) ==="
 
   security:
     runs-on: ubuntu-latest
