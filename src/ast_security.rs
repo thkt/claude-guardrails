@@ -3,21 +3,22 @@ use crate::ast;
 use crate::rules::ast_fail_open_check;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
 use oxc_ast::ast::{
-    ArrowFunctionExpression, AssignmentExpression, AssignmentTarget, BinaryOperator,
-    BindingPattern, CallExpression, Expression, Function, LogicalExpression, MethodDefinition,
-    ObjectProperty, Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression,
-    VariableDeclarator,
+    ArrowFunctionExpression, AssignmentExpression, BindingPattern, CallExpression, Expression,
+    Function, LogicalExpression, MethodDefinition, ObjectProperty, Program, RegExpLiteral,
+    ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::Span;
 use oxc_syntax::scope::ScopeFlags;
 
+mod html;
 mod math_random;
 mod postmessage;
 mod prototype_pollution;
 mod server_io;
 mod ssr_env;
+mod unsafe_regex;
 
 const USE_SERVER_DIRECTIVE: &str = "use server";
 const USE_CLIENT_DIRECTIVE: &str = "use client";
@@ -210,65 +211,6 @@ impl SecurityVisitor<'_> {
             line: Some(self.span_to_line(span)),
         });
     }
-
-    fn check_unsafe_regex(&mut self, re: &RegExpLiteral) {
-        let pattern = re.regex.pattern.text.as_str();
-        if has_nested_quantifiers(pattern) {
-            self.push_violation(
-                rule_id::UNSAFE_REGEX,
-                Severity::Medium,
-                "Regex has nested quantifiers vulnerable to ReDoS. Simplify or use atomic groups.",
-                re.span,
-            );
-        }
-    }
-
-    fn check_html_assignment(&mut self, expr: &AssignmentExpression) {
-        let AssignmentTarget::StaticMemberExpression(sme) = &expr.left else {
-            return;
-        };
-        let (severity, fix) = match sme.property.name.as_str() {
-            "innerHTML" => (
-                Severity::High,
-                "Use el.textContent = x for plain text, or el.innerHTML = DOMPurify.sanitize(x) when HTML is required",
-            ),
-            "outerHTML" => (
-                Severity::Medium,
-                "Use el.replaceWith(node) or el.outerHTML = DOMPurify.sanitize(html) instead of raw outerHTML assignment",
-            ),
-            _ => return,
-        };
-        if is_safe_html_value(&expr.right) {
-            return;
-        }
-        self.push_violation(rule_id::UNSAFE_HTML_INJECTION, severity, fix, expr.span);
-    }
-
-    fn check_document_write(&mut self, call: &CallExpression) {
-        let Expression::StaticMemberExpression(sme) = &call.callee else {
-            return;
-        };
-        if !matches!(sme.property.name.as_str(), "write" | "writeln") {
-            return;
-        }
-        if !ast::is_ident(&sme.object, "document") {
-            return;
-        }
-        if call
-            .arguments
-            .first()
-            .and_then(|a| a.as_expression())
-            .is_some_and(is_safe_html_value)
-        {
-            return;
-        }
-        self.push_violation(
-            rule_id::UNSAFE_HTML_INJECTION,
-            Severity::High,
-            "Use document.createElement(tag) + parent.appendChild(el) instead of document.write()",
-            call.span,
-        );
-    }
 }
 
 impl<'a> Visit<'a> for SecurityVisitor<'_> {
@@ -433,88 +375,6 @@ fn binds_security_named_function(decl: &VariableDeclarator) -> bool {
         init,
         Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
     )
-}
-
-fn is_safe_html_value(expr: &Expression) -> bool {
-    match expr {
-        Expression::StringLiteral(_) => true,
-        _ if ast::is_static_template_literal(expr) => true,
-        Expression::BinaryExpression(be) => {
-            matches!(be.operator, BinaryOperator::Addition)
-                && is_safe_html_value(&be.left)
-                && is_safe_html_value(&be.right)
-        }
-        _ => false,
-    }
-}
-
-/// Skip past `[...]` in a regex pattern. `start` is the byte after `[`.
-fn skip_char_class(bytes: &[u8], start: usize) -> Option<usize> {
-    let mut i = start;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2;
-        } else if bytes[i] == b']' {
-            return Some(i);
-        } else {
-            i += 1;
-        }
-    }
-    None
-}
-
-// Group-depth bookkeeping uses a fixed 16-slot stack. Patterns nested
-// deeper than 16 groups silently skip the inner-quantifier check (false
-// negative); real-world ReDoS patterns rarely exceed that depth, and
-// growing to a `Vec` only matters once a concrete pattern shows up.
-fn has_nested_quantifiers(pattern: &str) -> bool {
-    let bytes = pattern.as_bytes();
-    let mut group_has_quantifier = [false; 16];
-    let mut depth: usize = 0;
-    let mut i = 0;
-
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => {
-                i += 2;
-                continue;
-            }
-            b'[' => {
-                let Some(close) = skip_char_class(bytes, i + 1) else {
-                    break;
-                };
-                i = close;
-            }
-            b'(' => {
-                if depth < group_has_quantifier.len() {
-                    group_has_quantifier[depth] = false;
-                    depth += 1;
-                }
-                // Skip non-capturing/lookaround modifiers (?:, ?=, ?!, ?<)
-                if i + 2 < bytes.len()
-                    && bytes[i + 1] == b'?'
-                    && matches!(bytes[i + 2], b':' | b'=' | b'!' | b'<')
-                {
-                    i += 2;
-                }
-            }
-            b')' if depth > 0 => {
-                depth -= 1;
-                if group_has_quantifier[depth]
-                    && i + 1 < bytes.len()
-                    && matches!(bytes[i + 1], b'+' | b'*' | b'?' | b'{')
-                {
-                    return true;
-                }
-            }
-            b'+' | b'*' | b'?' | b'{' if depth > 0 => {
-                group_has_quantifier[depth - 1] = true;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    false
 }
 
 #[cfg(test)]
