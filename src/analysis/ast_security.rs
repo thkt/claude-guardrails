@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::analysis::ast;
 #[cfg(test)]
 use crate::rules::ast_fail_open_check;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};

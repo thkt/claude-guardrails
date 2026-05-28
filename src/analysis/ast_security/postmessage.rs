@@ -1,5 +1,5 @@
 use super::SecurityVisitor;
-use crate::ast;
+use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,

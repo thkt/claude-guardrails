@@ -1,8 +1,8 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
-use crate::regex_compile::regex_or_die;
-use crate::scanner::{
+use crate::analysis::scanner::{
     build_line_offsets, build_source_masks, extract_delimited_range, offset_to_line,
 };
+use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use std::collections::HashSet;
 use std::str;

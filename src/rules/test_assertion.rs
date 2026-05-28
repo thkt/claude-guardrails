@@ -1,6 +1,6 @@
 use super::{Rule, Severity, Violation, RE_TEST_FILE};
+use crate::analysis::scanner::{build_line_offsets, extract_delimited_content, offset_to_line};
 use crate::regex_compile::regex_or_die;
-use crate::scanner::{build_line_offsets, extract_delimited_content, offset_to_line};
 use regex::Regex;
 use std::sync::LazyLock;
 

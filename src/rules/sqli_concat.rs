@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::analysis::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_JS_FILE};
 use oxc_ast::ast::{BinaryOperator, CallExpression, Expression, Program, TemplateLiteral};
 use oxc_ast_visit::{walk, Visit};
