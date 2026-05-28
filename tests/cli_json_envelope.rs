@@ -1,0 +1,228 @@
+mod common;
+
+use common::{run_guardrails_json, run_guardrails_with_args};
+
+#[test]
+fn json_mode_violation_emits_block_decision() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(output.status.code(), Some(2));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert_eq!(parsed["data"]["decision"], "block");
+    assert!(
+        parsed["exit_code"].is_null(),
+        "envelope drops top-level exit_code"
+    );
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    let violations = parsed["data"]["violations"].as_array().unwrap();
+    assert!(
+        violations.iter().any(|v| v["rule"] == "eval"),
+        "expected eval violation in: {parsed}"
+    );
+    assert!(
+        !violations
+            .iter()
+            .any(|v| v["rule"] == "oxlint/eslint(no-eval)"),
+        "oxlint must not also report eslint(no-eval) for the same file:line; custom `eval` rule owns the detection: {parsed}"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("BLOCKED"),
+        "stderr must keep human-readable BLOCKED in: {stderr}"
+    );
+}
+
+#[test]
+fn json_mode_clean_emits_allow_decision() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "export function main() {}\n"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    assert!(parsed["data"]["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn json_mode_warning_only_keeps_allow_decision() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/App.tsx",
+            "content": "const el = document.getElementById('foo');\nexport default el;\n"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "expected 1 (warning only) — the JSON decision field still tracks blocking violations only, so it stays 'allow'"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    let violations = parsed["data"]["violations"]
+        .as_array()
+        .expect("violations array");
+    assert!(
+        !violations.is_empty(),
+        "expected at least one warning-level violation in: {parsed}"
+    );
+    assert!(
+        violations
+            .iter()
+            .all(|v| v["severity"] != "critical" && v["severity"] != "high"),
+        "expected only non-blocking severities in: {parsed}"
+    );
+    assert!(
+        violations.iter().any(|v| v["rule"] == "dom-access"),
+        "expected dom-access rule to fire for document.getElementById in .tsx: {parsed}"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("warning") || stderr.contains("⚠"),
+        "stderr must keep warning text in: {stderr}"
+    );
+}
+
+#[test]
+fn json_mode_unsupported_tool_emits_allow() {
+    let json = serde_json::json!({
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hi"}
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+    assert!(parsed["data"]["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn json_mode_missing_content_emits_allow() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/src/app.ts"}
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(output.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON for allow paths");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["degraded"].is_boolean(),
+        "envelope must carry a boolean degraded field; got: {parsed}"
+    );
+}
+
+#[test]
+fn json_mode_invalid_json_emits_error_envelope() {
+    let output = run_guardrails_with_args(b"not json", &["--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(64),
+        "expected 64 for invalid hook JSON"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(
+        parsed["error"]["code"], "DATA_ERROR",
+        "envelope should classify invalid JSON as DATA_ERROR; got: {parsed}"
+    );
+    assert!(
+        parsed["error"]["next_step"].is_string(),
+        "envelope should carry next_step hint; got: {parsed}"
+    );
+    assert_eq!(parsed["error"]["retryable"], false);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid JSON"),
+        "stderr must keep human-readable message in: {stderr}"
+    );
+}
+
+#[test]
+fn json_mode_oversized_input_emits_error_envelope() {
+    let huge = vec![b'a'; 10_000_001];
+    let output = run_guardrails_with_args(&huge, &["--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(64),
+        "expected 64 for oversized hook input"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(parsed["error"]["code"], "DATA_ERROR");
+    assert!(
+        parsed["error"]["next_step"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Reduce input size"),
+        "envelope should suggest size reduction; got: {parsed}"
+    );
+    assert_eq!(parsed["error"]["retryable"], false);
+}
+
+#[test]
+fn json_mode_disabled_without_flag() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);"
+        }
+    });
+    let output = run_guardrails_json(&json.to_string());
+    assert_eq!(output.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.is_empty(),
+        "stdout must remain empty without --json flag, got: {stdout}"
+    );
+}
