@@ -1,0 +1,217 @@
+mod common;
+
+use common::{
+    clean_write_json, run_guardrails_in_dir, run_guardrails_with, tmp_repo, tmp_repo_with_claude,
+};
+use std::fs;
+
+#[test]
+fn hint_shown_when_claude_dir_exists_without_tools_json() {
+    let tmp = tmp_repo_with_claude();
+
+    let output = run_guardrails_in_dir(&clean_write_json(), tmp.path());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("using defaults"),
+        "expected config hint in: {stderr}"
+    );
+    assert!(
+        !tmp.path().join(".claude/tools.json").exists(),
+        "hook must not create tools.json"
+    );
+}
+
+#[test]
+fn hint_shown_repeatedly_when_tools_json_absent() {
+    let tmp = tmp_repo_with_claude();
+
+    let stderr1 =
+        String::from_utf8_lossy(&run_guardrails_in_dir(&clean_write_json(), tmp.path()).stderr)
+            .into_owned();
+    assert!(
+        stderr1.contains("using defaults"),
+        "first run hint missing: {stderr1}"
+    );
+
+    let stderr2 =
+        String::from_utf8_lossy(&run_guardrails_in_dir(&clean_write_json(), tmp.path()).stderr)
+            .into_owned();
+    assert!(
+        stderr2.contains("using defaults"),
+        "hint must keep appearing each run while tools.json is absent: {stderr2}"
+    );
+}
+
+#[test]
+fn hint_shown_when_tools_json_without_guardrails_key() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(tmp.path().join(".claude/tools.json"), r#"{"reviews": {}}"#).unwrap();
+
+    let output = run_guardrails_in_dir(&clean_write_json(), tmp.path());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("using defaults"),
+        "expected config hint in: {stderr}"
+    );
+}
+
+#[test]
+fn no_hint_when_guardrails_configured() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(".claude/tools.json"),
+        r#"{"guardrails": {}}"#,
+    )
+    .unwrap();
+
+    let output = run_guardrails_in_dir(&clean_write_json(), tmp.path());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("using defaults"),
+        "unexpected config hint in: {stderr}"
+    );
+}
+
+#[test]
+fn no_hint_when_no_claude_dir() {
+    let tmp = tmp_repo();
+
+    let output = run_guardrails_in_dir(&clean_write_json(), tmp.path());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("using defaults"),
+        "unexpected config hint without .claude/ dir: {stderr}"
+    );
+}
+
+// Malformed `.claude/tools.json` silently falls back to default config; the
+// JSON envelope must mark this as degraded so AI consumers notice they are
+// not running the project's rule set.
+#[test]
+fn malformed_tools_json_marks_json_envelope_degraded() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(tmp.path().join(".claude/tools.json"), "{not json}").unwrap();
+
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(
+        parsed["degraded"], true,
+        "expected degraded:true when tools.json is malformed; got: {parsed}"
+    );
+    let notes = parsed["notes"].as_array().expect("notes must be an array");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.as_str().unwrap_or("").contains("invalid config")),
+        "expected a config-error note in envelope; got: {notes:?}"
+    );
+}
+
+// F-008 gap 1: enabled:false at top level skips all rule evaluation.
+#[test]
+fn disabled_config_skips_rule_evaluation() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(".claude/tools.json"),
+        r#"{"guardrails": {"enabled": false}}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "enabled:false must skip eval rule; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// F-008 gap 2: enabled:false + --json emits an allow decision with zero violations.
+#[test]
+fn disabled_config_with_json_emits_allow_decision() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(".claude/tools.json"),
+        r#"{"guardrails": {"enabled": false}}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert!(
+        parsed["data"]["violations"]
+            .as_array()
+            .expect("violations array")
+            .is_empty(),
+        "enabled:false must yield zero violations: {parsed}"
+    );
+}
+
+// F-008 gap 4: a malformed `.claude/tools.json` must fall back to default
+// config so violation detection keeps running (binary-level, non-JSON path).
+// The existing `malformed_tools_json_marks_json_envelope_degraded` covers the
+// --json envelope side; this covers the stderr / exit-code side.
+#[test]
+fn malformed_config_falls_back_to_defaults_and_keeps_detecting() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(tmp.path().join(".claude/tools.json"), "{not json}").unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "malformed config must fall back to defaults and still block eval; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("BLOCKED") || stderr.contains("eval"),
+        "expected eval violation despite config error: {stderr}"
+    );
+}
