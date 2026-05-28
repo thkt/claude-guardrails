@@ -1,6 +1,4 @@
-mod common;
-
-use common::{run_guardrails_with, run_guardrails_with_args, tmp_repo, OXLINT_VERSION};
+use crate::common::{run_guardrails_with, run_guardrails_with_args, tmp_repo, OXLINT_VERSION};
 use std::fs;
 use std::process::Command;
 

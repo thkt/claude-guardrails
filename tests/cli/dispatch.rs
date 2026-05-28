@@ -1,6 +1,4 @@
-mod common;
-
-use common::{run_guardrails, run_guardrails_json};
+use crate::common::{run_guardrails, run_guardrails_json};
 
 #[test]
 fn clean_code_exits_zero() {

@@ -1,6 +1,4 @@
-mod common;
-
-use common::{run_guardrails_json, run_guardrails_with, run_guardrails_with_args, tmp_repo};
+use crate::common::{run_guardrails_json, run_guardrails_with, run_guardrails_with_args, tmp_repo};
 use std::fs;
 
 #[test]

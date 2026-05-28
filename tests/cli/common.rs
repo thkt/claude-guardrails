@@ -1,7 +1,5 @@
-// Shared helpers for the CLI integration tests. Each `tests/cli_*.rs` file is a
-// separate test crate that pulls this in via `mod common;` and uses a subset of
-// the helpers, so unused-in-one-crate items are expected.
-#![allow(dead_code)]
+// Shared helpers for the CLI integration tests. Sibling submodules of the `cli`
+// test crate reach these via `crate::common::*`.
 
 use std::fs;
 use std::io::Write;

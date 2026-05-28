@@ -1,6 +1,4 @@
-mod common;
-
-use common::{
+use crate::common::{
     clean_write_json, run_guardrails_in_dir, run_guardrails_with, tmp_repo, tmp_repo_with_claude,
 };
 use std::fs;

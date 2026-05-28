@@ -1,6 +1,4 @@
-mod common;
-
-use common::{run_guardrails_json, run_guardrails_with_args};
+use crate::common::{run_guardrails_json, run_guardrails_with_args};
 
 #[test]
 fn json_mode_violation_emits_block_decision() {
