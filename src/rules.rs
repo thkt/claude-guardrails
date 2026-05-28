@@ -25,7 +25,7 @@ mod test_location;
 mod transaction;
 
 use crate::config::Config;
-use crate::regex_util::regex_or_die;
+use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt;

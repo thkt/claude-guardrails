@@ -2,6 +2,7 @@
 .yomu/
 .claude/
 .playwright-cli/
+.antigravitycli/
 docs/*
 !docs/decisions/
 target/

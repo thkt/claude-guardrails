@@ -1,5 +1,5 @@
 use super::{find_match_in_lines, Rule, Severity, Violation, RE_REACT_FILE};
-use crate::regex_util::regex_or_die;
+use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 

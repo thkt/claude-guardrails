@@ -1,5 +1,5 @@
 use super::{Rule, Severity, Violation, RE_JS_FILE};
-use crate::regex_util::regex_or_die;
+use crate::regex_compile::regex_or_die;
 use crate::scanner::{
     build_line_offsets, build_source_masks, extract_delimited_range, offset_to_line,
 };

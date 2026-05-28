@@ -1,5 +1,5 @@
 use crate::parse_json::parse_linter_json;
-use crate::tempfile_util::write_temp;
+use crate::temp_file::write_temp;
 use serde::de::DeserializeOwned;
 use std::any::Any;
 use std::fs;
