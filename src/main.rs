@@ -11,13 +11,13 @@ mod import_map;
 mod output;
 mod oxlint;
 mod parse_json;
-mod regex_util;
+mod regex_compile;
 mod reporter;
 mod resolve;
 mod rules;
 mod scanner;
 mod stdin;
-mod tempfile_util;
+mod temp_file;
 
 use clap::{Parser, Subcommand};
 use envelope::SuccessEnvelope;

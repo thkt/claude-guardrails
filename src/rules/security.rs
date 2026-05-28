@@ -1,5 +1,5 @@
 use super::{rule_id, Rule, Severity, Violation, RE_ALL_FILES, RE_JS_FILE, RE_REACT_FILE};
-use crate::regex_util::regex_or_die;
+use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
 
