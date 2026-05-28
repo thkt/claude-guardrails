@@ -7,9 +7,11 @@ use crate::config::{Config, ConfigError};
 use crate::content::{get_file_and_content, ResolvedTarget, ToolInput, ToolName};
 use crate::hook_exit::HookExitCode;
 use crate::import_map;
-use crate::output::{emit_human_violations, emit_json_if_enabled, render_error, show_config_hint};
+use crate::io::output::{
+    emit_human_violations, emit_json_if_enabled, render_error, show_config_hint,
+};
+use crate::io::stdin::parse_stdin;
 use crate::rules::{self, non_comment_lines, Violation};
-use crate::stdin::parse_stdin;
 use std::env;
 use std::fs;
 use std::io;

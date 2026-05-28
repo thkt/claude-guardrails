@@ -1,26 +1,21 @@
 mod analysis;
-mod color;
 mod config;
 mod content;
 mod download;
-mod envelope;
 mod hook;
 mod hook_exit;
 mod import_map;
-mod output;
-mod parse_json;
+mod io;
 mod regex_compile;
-mod reporter;
 mod resolve;
 mod rules;
-mod stdin;
 mod temp_file;
 
+use crate::io::envelope::SuccessEnvelope;
+use crate::io::output::{build_payload, print_json_line, render_error};
 use clap::{Parser, Subcommand};
-use envelope::SuccessEnvelope;
 use hook::run_hook;
 use hook_exit::HookExitCode;
-use output::{build_payload, print_json_line, render_error};
 use serde::Serialize;
 use std::panic;
 use std::process;
@@ -126,7 +121,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::envelope::ErrorCode;
+    use crate::io::envelope::ErrorCode;
 
     #[test]
     fn classify_unsupported_platform_maps_to_data_error() {
