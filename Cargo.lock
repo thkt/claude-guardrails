@@ -350,7 +350,6 @@ dependencies = [
  "clap",
  "constant_time_eq",
  "flate2",
- "libc",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
