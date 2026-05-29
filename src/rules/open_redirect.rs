@@ -1,5 +1,5 @@
 use super::{rule_id, Severity, Violation, RE_JS_FILE};
-use crate::ast;
+use crate::analysis::ast;
 use oxc_ast::ast::{AssignmentExpression, AssignmentTarget, CallExpression, Expression, Program};
 use oxc_ast_visit::{walk, Visit};
 use oxc_span::Span;

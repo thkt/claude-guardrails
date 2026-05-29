@@ -3,8 +3,8 @@
 //! `ParseStdinError` variants the caller renders.
 
 use crate::content::{content_within_cap, ToolInput};
-use crate::envelope::{ErrorCode, ErrorPayload};
-use crate::output::build_payload;
+use crate::io::envelope::{ErrorCode, ErrorPayload};
+use crate::io::output::build_payload;
 use crate::MAX_INPUT_SIZE;
 use std::io::{self, Read};
 

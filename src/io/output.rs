@@ -2,10 +2,10 @@
 //! stderr lines, and emits the `SuccessEnvelope` / `ErrorEnvelope` JSON when
 //! `--json` is enabled.
 
-use crate::color;
 use crate::config::{Config, ConfigSource, TOOLS_CONFIG_FILE};
-use crate::envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelope};
-use crate::reporter::{build_json_report, format_violations, format_warnings};
+use crate::io::color;
+use crate::io::envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelope};
+use crate::io::reporter::{build_json_report, format_violations, format_warnings};
 use crate::rules::Violation;
 use serde::Serialize;
 use std::io::{self, Write};

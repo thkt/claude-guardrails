@@ -1,5 +1,5 @@
 use super::{unwrap_parenthesized, SecurityVisitor};
-use crate::ast;
+use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Expression, LogicalExpression, LogicalOperator, ObjectPropertyKind, ReturnStatement,

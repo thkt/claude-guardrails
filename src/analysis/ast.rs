@@ -1,4 +1,4 @@
-use crate::scanner;
+use crate::analysis::scanner;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{Expression, Program};
 use oxc_parser::Parser;

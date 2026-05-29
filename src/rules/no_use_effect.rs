@@ -1,5 +1,5 @@
 use super::{rule_id, Severity, Violation, RE_REACT_FILE};
-use crate::ast;
+use crate::analysis::ast;
 use oxc_ast::ast::{CallExpression, Expression, Program, Span};
 use oxc_ast_visit::{walk, Visit};
 

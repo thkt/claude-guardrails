@@ -1,4 +1,4 @@
-use crate::envelope::ErrorCode;
+use crate::io::envelope::ErrorCode;
 use constant_time_eq::constant_time_eq;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};

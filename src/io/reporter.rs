@@ -1,4 +1,4 @@
-use crate::color;
+use crate::io::color;
 use crate::rules::Violation;
 use serde::Serialize;
 
@@ -112,7 +112,7 @@ pub fn format_warnings(violations: &[&Violation]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::color::strip_ansi;
+    use crate::io::color::strip_ansi;
     use crate::rules::Severity;
 
     fn make_violation(rule: &str, severity: Severity, fix: &str) -> Violation {

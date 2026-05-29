@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::analysis::ast;
 use crate::rules::{rule_id, Severity, Violation, RE_API_OR_MIDDLEWARE_FILE};
 use oxc_ast::ast::{
     Argument, CallExpression, Expression, ObjectExpression, ObjectPropertyKind, Program,

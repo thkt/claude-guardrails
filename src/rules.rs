@@ -311,7 +311,7 @@ pub fn load_rules(config: &Config) -> Vec<&'static Rule> {
 }
 
 #[cfg(test)]
-use crate::ast::with_parsed_program;
+use crate::analysis::ast::with_parsed_program;
 #[cfg(test)]
 use oxc_ast::ast::Program;
 #[cfg(test)]

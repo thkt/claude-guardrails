@@ -145,7 +145,7 @@ fn require_source<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast;
+    use crate::analysis::ast;
 
     fn build(content: &str) -> ImportMap {
         ast::with_parsed_program(content, "/src/app.ts", |program, _| {

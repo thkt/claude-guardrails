@@ -2,13 +2,16 @@
 //! runs the lint/AST/rule passes, partitions violations by severity, and maps
 //! the outcome to a sysexits exit code.
 
+use crate::analysis::{ast, ast_security, oxlint};
 use crate::config::{Config, ConfigError};
 use crate::content::{get_file_and_content, ResolvedTarget, ToolInput, ToolName};
 use crate::hook_exit::HookExitCode;
-use crate::output::{emit_human_violations, emit_json_if_enabled, render_error, show_config_hint};
+use crate::import_map;
+use crate::io::output::{
+    emit_human_violations, emit_json_if_enabled, render_error, show_config_hint,
+};
+use crate::io::stdin::parse_stdin;
 use crate::rules::{self, non_comment_lines, Violation};
-use crate::stdin::parse_stdin;
-use crate::{ast, ast_security, import_map, oxlint};
 use std::env;
 use std::fs;
 use std::io;
