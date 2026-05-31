@@ -392,4 +392,6 @@ where
 }
 
 #[cfg(test)]
+mod doc_catalog;
+#[cfg(test)]
 mod tests;

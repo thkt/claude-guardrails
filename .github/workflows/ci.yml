@@ -80,6 +80,12 @@ jobs:
     # layout) deterministically dropped C0 by removing 100%-hit test lines from the
     # denominator (PR #237: 96.50 -> 96.38). Excluding tests.rs makes coverage
     # production-only, so test relocation is neutral and the metric is meaningful.
+    # src/rules/doc_catalog/ is excluded for the same production-only reason: it
+    # is a #[cfg(test)] module (README drift gates + an #[ignore]d bless generator
+    # that regenerates the README rule tables). The bless generator and its
+    # bootstrap path never run under llvm-cov (ignored + writes source files), so
+    # they are permanently uncovered test tooling; counting them dropped C0
+    # 96.25 -> 95.58 (Issue #257 / PR #261).
     # Runs on ubuntu like the test job (guardrails has no mlx dependency,
     # so no Apple-silicon BLAS requirement).
     runs-on: ubuntu-latest
@@ -116,12 +122,12 @@ jobs:
           # HEAD = PR merged into main (the checked-out pull_request ref).
           # cargo llvm-cov cleans stale profraw at the start of each run, so the
           # two measurements below do not mix.
-          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$' --lcov --output-path head.info
+          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$|src/rules/doc_catalog' --lcov --output-path head.info
           head_c0=$(c0 head.info)
           # BASE = main (fetch-depth:0 already has the history).
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git checkout --quiet --force origin/main
-          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$' --lcov --output-path base.info
+          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$|src/rules/doc_catalog' --lcov --output-path base.info
           base_c0=$(c0 base.info)
           # 0.1pp tolerance absorbs instrumentation rounding / total line drift.
           awk -v b="$base_c0" -v h="$head_c0" 'BEGIN {
