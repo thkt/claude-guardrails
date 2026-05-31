@@ -147,22 +147,28 @@ fn render_table(table: Table, lang: Lang) -> String {
     out
 }
 
-/// Byte range between a marker pair, panicking if either marker is absent.
-fn marked_bounds(readme: &str, name: &str) -> (usize, usize) {
+/// Byte range between a `name` marker pair, or `None` when the BEGIN marker is
+/// absent (the bless bootstrap signal). Panics if BEGIN is present but END is
+/// missing — a half-marked region is never valid. The sole reader of the marker
+/// format strings.
+fn try_marked_bounds(readme: &str, name: &str) -> Option<(usize, usize)> {
     let begin = format!("<!-- BEGIN GENERATED: {name} -->");
+    let start = readme.find(&begin)? + begin.len();
     let end = format!("<!-- END GENERATED: {name} -->");
-    let after_begin = readme
-        .find(&begin)
-        .unwrap_or_else(|| panic!("README missing marker: {begin}"))
-        + begin.len();
-    let end_at = readme[after_begin..]
+    let end_at = readme[start..]
         .find(&end)
         .unwrap_or_else(|| panic!("README missing marker: {end}"))
-        + after_begin;
-    (after_begin, end_at)
+        + start;
+    Some((start, end_at))
 }
 
-// T-257: every documented rule_id matches the rule_id catalog (presence drift gate).
+/// Byte range between a marker pair, panicking if the BEGIN marker is absent.
+fn marked_bounds(readme: &str, name: &str) -> (usize, usize) {
+    try_marked_bounds(readme, name)
+        .unwrap_or_else(|| panic!("README missing marker: <!-- BEGIN GENERATED: {name} -->"))
+}
+
+// T-257: rule_docs_cover_catalog
 #[test]
 fn rule_docs_cover_catalog() {
     let documented: HashSet<&str> = data::RULE_DOCS.iter().filter_map(|d| d.rule_id).collect();
@@ -181,7 +187,7 @@ fn rule_docs_cover_catalog() {
     );
 }
 
-// T-258: when_to_disable (both languages) is set iff the row is in the Rules table.
+// T-258: when_to_disable_matches_table
 #[test]
 fn when_to_disable_matches_table() {
     for doc in data::RULE_DOCS {
@@ -201,8 +207,7 @@ fn when_to_disable_matches_table() {
     }
 }
 
-// T-259: committed README rule tables match the generated output (content drift
-// gate), for both README.md and README.ja.md.
+// T-259: readme_rule_tables_match_catalog
 #[test]
 fn readme_rule_tables_match_catalog() {
     for lang in LANGS {
@@ -228,15 +233,8 @@ fn readme_rule_tables_match_catalog() {
 /// section heading, not the header row, because README headers carry alignment
 /// padding that the canonical [`header`] output does not reproduce.
 fn bless_region(readme: &str, table: Table, lang: Lang) -> (usize, usize, bool) {
-    let begin = format!("<!-- BEGIN GENERATED: {} -->", marker_name(table));
-    if let Some(b) = readme.find(&begin) {
-        let after = b + begin.len();
-        let end = format!("<!-- END GENERATED: {} -->", marker_name(table));
-        let end_at = readme[after..]
-            .find(&end)
-            .unwrap_or_else(|| panic!("README missing marker: {end}"))
-            + after;
-        return (after, end_at, true);
+    if let Some((start, end)) = try_marked_bounds(readme, marker_name(table)) {
+        return (start, end, true);
     }
     let head = heading(table, lang);
     let after_head = readme
