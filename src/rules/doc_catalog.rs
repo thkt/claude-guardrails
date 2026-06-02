@@ -6,7 +6,9 @@
 //! -->` markers; [`readme_rule_tables_match_catalog`] fails when a committed
 //! README drifts from `RULE_DOCS`, and [`rule_docs_cover_catalog`] fails when a
 //! `rule_id` gains or loses a documented row (the drift that recurred in
-//! Issue #98 and Issue #156).
+//! Issue #98 and Issue #156). [`readme_config_example_lists_all_toggles`] fails
+//! when the default config example's `rules` block stops enumerating exactly the
+//! toggle set (Issue #260, the third drift face of Issue #156 F-011).
 //!
 //! After editing `RULE_DOCS`, regenerate both READMEs with:
 //!
@@ -15,7 +17,7 @@
 //! ```
 
 use super::rule_id;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 
 mod data;
@@ -224,6 +226,130 @@ fn readme_rule_tables_match_catalog() {
             );
         }
     }
+}
+
+/// Heading that anchors the default config example (the full-toggle `rules`
+/// block) in each README. Anchoring on the heading keeps the partial-override
+/// examples under later headings (`### Examples` etc.) out of the parsed region.
+fn config_example_heading(lang: Lang) -> &'static str {
+    match lang {
+        Lang::En => "\n### Schema\n",
+        Lang::Ja => "\n### スキーマ\n",
+    }
+}
+
+/// Body of the default config example: the first fenced code block after the
+/// schema heading, with the language tag skipped (so a json to jsonc retag still
+/// resolves this block instead of drifting to a later fence). The block body must
+/// stay strict JSON. `serde_json` rejects jsonc comments and trailing commas, so
+/// only the fence tag may differ. Returns a borrowed slice so callers parse
+/// without allocating. Panics if the heading or block is absent (a fixed part of
+/// both READMEs).
+fn schema_config_json(readme: &str, lang: Lang) -> &str {
+    let head = config_example_heading(lang);
+    let after_head = readme
+        .find(head)
+        .unwrap_or_else(|| panic!("README missing heading: {head:?}"))
+        + head.len();
+    let rel_fence = readme[after_head..]
+        .find("```")
+        .unwrap_or_else(|| panic!("README has no fenced block after heading: {head:?}"));
+    let tag_line = after_head + rel_fence + "```".len();
+    let body_start = tag_line
+        + readme[tag_line..]
+            .find('\n')
+            .unwrap_or_else(|| panic!("README fence not terminated after heading: {head:?}"))
+        + 1;
+    let rel_close = readme[body_start..]
+        .find("\n```")
+        .unwrap_or_else(|| panic!("README fenced block not closed after heading: {head:?}"));
+    &readme[body_start..body_start + rel_close]
+}
+
+/// Toggle set the default config example must enumerate: every [`Table::Rules`]
+/// key plus `oxlint` (the external-linter toggle, which has no [`RuleDoc`] row).
+/// The single source for both READMEs (Issue #260).
+fn expected_config_toggles() -> BTreeSet<String> {
+    let mut set: BTreeSet<String> = data::RULE_DOCS
+        .iter()
+        .filter(|d| d.table == Table::Rules)
+        .map(|d| d.key.to_owned())
+        .collect();
+    set.insert("oxlint".to_owned());
+    set
+}
+
+/// Toggle keys in `readme`'s default config example for `lang`. Takes the README
+/// text (not a path) so a negative test can feed a synthetic document with
+/// planted drift through the same anchor and parse path the gate uses on the
+/// committed READMEs.
+fn config_example_toggles(readme: &str, lang: Lang) -> BTreeSet<String> {
+    let json = schema_config_json(readme, lang);
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).unwrap_or_else(|e| panic!("schema json parse: {e}"));
+    let rules = parsed
+        .get("rules")
+        .and_then(serde_json::Value::as_object)
+        .unwrap_or_else(|| panic!("schema example missing `rules` object"));
+    rules.keys().cloned().collect()
+}
+
+// T-260: readme_config_example_lists_all_toggles
+#[test]
+fn readme_config_example_lists_all_toggles() {
+    let expected = expected_config_toggles();
+    for lang in LANGS {
+        let path = readme_path(lang);
+        let readme = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let actual = config_example_toggles(&readme, lang);
+        let missing: Vec<&String> = expected.difference(&actual).collect();
+        let extra: Vec<&String> = actual.difference(&expected).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "{path} の config 例 `rules` が toggle 集合とドリフト。未掲載={missing:?} 余分={extra:?} (single source: RULE_DOCS の Table::Rules ∪ oxlint)"
+        );
+    }
+}
+
+// T-261: config_example_gate_detects_planted_drift
+#[test]
+fn config_example_gate_detects_planted_drift() {
+    // Synthetic README whose example drops most toggles and adds a bogus one.
+    // The gate (same anchor + parse + diff path as T-260) must flag both
+    // directions; a positive-only test stays green here and proves nothing.
+    let synthetic =
+        "\n### Schema\n\n```json\n{ \"rules\": { \"oxlint\": true, \"sensitiveFile\": true, \"notARealToggle\": true } }\n```\n";
+    let expected = expected_config_toggles();
+    let actual = config_example_toggles(synthetic, Lang::En);
+    let missing: Vec<&String> = expected.difference(&actual).collect();
+    let extra: Vec<&String> = actual.difference(&expected).collect();
+    assert!(
+        missing.iter().any(|s| s.as_str() == "cryptoWeak"),
+        "dropped toggle must surface as missing, got missing={missing:?}"
+    );
+    assert!(
+        extra.iter().any(|s| s.as_str() == "notARealToggle"),
+        "unknown toggle must surface as extra, got extra={extra:?}"
+    );
+}
+
+// T-262: config_example_anchor_ignores_fence_language_tag
+#[test]
+fn config_example_anchor_ignores_fence_language_tag() {
+    // The first fence after the heading wins regardless of its language tag: a
+    // jsonc-tagged default block resolves, and a later json fence is not selected
+    // (finding fence-tag-retag-misdirects). Mirrors the production README's
+    // multi-fence layout under the schema heading.
+    let synthetic = "\n### Schema\n\n```jsonc\n{ \"rules\": { \"oxlint\": true } }\n```\n\n```json\n{ \"rules\": { \"naming\": true } }\n```\n";
+    let toggles = config_example_toggles(synthetic, Lang::En);
+    assert!(
+        toggles.contains("oxlint"),
+        "tag-agnostic anchor must read the first (jsonc) block, got {toggles:?}"
+    );
+    assert!(
+        !toggles.contains("naming"),
+        "anchor must not drift to the later json fence, got {toggles:?}"
+    );
 }
 
 /// Region to (re)generate for `table` in `lang`: the bytes between an existing
