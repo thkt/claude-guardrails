@@ -9,6 +9,11 @@
 //! Issue #98 and Issue #156). [`readme_config_example_lists_all_toggles`] fails
 //! when the default config example's `rules` block stops enumerating exactly the
 //! toggle set (Issue #260, the third drift face of Issue #156 F-011).
+//! [`config_toggles_match_rule_docs`] fails when `define_rule_config!`'s public
+//! toggle set (minus the deprecated `biome`) drifts from the documented `Rules`
+//! toggles — catching a `rule_id`-less umbrella toggle added to the config
+//! contract without a matching `RULE_DOCS` row, which would otherwise slip every
+//! other gate here.
 //!
 //! After editing `RULE_DOCS`, regenerate both READMEs with:
 //!
@@ -17,6 +22,7 @@
 //! ```
 
 use super::rule_id;
+use crate::config::RULE_TOGGLE_NAMES;
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
 
@@ -279,6 +285,19 @@ fn expected_config_toggles() -> BTreeSet<String> {
     set
 }
 
+/// Toggles the config contract declares, minus the deprecated `biome`. `biome` is
+/// warned-on and ignored by `Config::merge`, so it is intentionally absent from
+/// `RULE_DOCS` and the README default; every other toggle must appear as a
+/// `Table::Rules` row. The single source is `define_rule_config!`.
+fn config_contract_toggles() -> BTreeSet<String> {
+    RULE_TOGGLE_NAMES
+        .iter()
+        // biome: deprecated, warned + ignored in Config::merge, not a documented toggle
+        .filter(|&&name| name != "biome")
+        .map(|&name| name.to_owned())
+        .collect()
+}
+
 /// Toggle keys in `readme`'s default config example for `lang`. Takes the README
 /// text (not a path) so a negative test can feed a synthetic document with
 /// planted drift through the same anchor and parse path the gate uses on the
@@ -349,6 +368,19 @@ fn config_example_anchor_ignores_fence_language_tag() {
     assert!(
         !toggles.contains("naming"),
         "anchor must not drift to the later json fence, got {toggles:?}"
+    );
+}
+
+// T-263: config_toggles_match_rule_docs
+#[test]
+fn config_toggles_match_rule_docs() {
+    let contract = config_contract_toggles();
+    let documented = expected_config_toggles();
+    let missing: Vec<&String> = contract.difference(&documented).collect();
+    let extra: Vec<&String> = documented.difference(&contract).collect();
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "config.rs の toggle 契約と RULE_DOCS がドリフト。RULE_DOCS 未掲載={missing:?} config 未定義={extra:?} (single source: define_rule_config! の serde 名 − biome)"
     );
 }
 
