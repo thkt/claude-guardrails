@@ -285,10 +285,11 @@ fn expected_config_toggles() -> BTreeSet<String> {
     set
 }
 
-/// Toggles the config contract declares, minus the deprecated `biome`. `biome` is
-/// warned-on and ignored by `Config::merge`, so it is intentionally absent from
-/// `RULE_DOCS` and the README default; every other toggle must appear as a
-/// `Table::Rules` row. The single source is `define_rule_config!`.
+/// Toggles the config contract declares, minus the deprecated `biome` (warned-on
+/// and ignored by `Config::merge`, so intentionally absent from `RULE_DOCS` and the
+/// README default). Every remaining toggle is matched by [`expected_config_toggles`]
+/// as either a `Table::Rules` row or the `oxlint` external-linter toggle it inserts
+/// manually (no `RuleDoc` row). The single source is `define_rule_config!`.
 fn config_contract_toggles() -> BTreeSet<String> {
     RULE_TOGGLE_NAMES
         .iter()
@@ -296,6 +297,22 @@ fn config_contract_toggles() -> BTreeSet<String> {
         .filter(|&&name| name != "biome")
         .map(|&name| name.to_owned())
         .collect()
+}
+
+/// Bidirectional drift between the config contract and the documented toggle set.
+/// `missing` = in the contract but absent from the docs (a toggle added to
+/// `define_rule_config!` without a `RULE_DOCS` row); `extra` = documented but not in
+/// the contract. Pure over its inputs so [`config_toggles_gate_detects_planted_drift`]
+/// can feed synthetic sets and prove the gate fires, rather than only confirming the
+/// current state matches.
+fn toggles_diff<'a>(
+    contract: &'a BTreeSet<String>,
+    documented: &'a BTreeSet<String>,
+) -> (Vec<&'a String>, Vec<&'a String>) {
+    (
+        contract.difference(documented).collect(),
+        documented.difference(contract).collect(),
+    )
 }
 
 /// Toggle keys in `readme`'s default config example for `lang`. Takes the README
@@ -376,11 +393,41 @@ fn config_example_anchor_ignores_fence_language_tag() {
 fn config_toggles_match_rule_docs() {
     let contract = config_contract_toggles();
     let documented = expected_config_toggles();
-    let missing: Vec<&String> = contract.difference(&documented).collect();
-    let extra: Vec<&String> = documented.difference(&contract).collect();
+    let (missing, extra) = toggles_diff(&contract, &documented);
     assert!(
         missing.is_empty() && extra.is_empty(),
         "config.rs の toggle 契約と RULE_DOCS がドリフト。RULE_DOCS 未掲載={missing:?} config 未定義={extra:?} (single source: define_rule_config! の serde 名 − biome)"
+    );
+}
+
+// T-264: config_toggles_gate_detects_planted_drift
+#[test]
+fn config_toggles_gate_detects_planted_drift() {
+    // 合成 contract（実 toggle を全て落とし架空 toggle を 1 つ混入）で両方向の drift が
+    // surface することを確認。positive のみでは && の取り違えや difference の方向誤りを
+    // 捕まえられない（T-261 が T-260 に対して持つ negative の対）。
+    let planted: BTreeSet<String> = ["notARealToggle".to_owned()].into_iter().collect();
+    let documented = expected_config_toggles();
+    let (missing, extra) = toggles_diff(&planted, &documented);
+    assert!(
+        missing.iter().any(|s| s.as_str() == "notARealToggle"),
+        "contract のみの toggle は missing に出る必要がある: {missing:?}"
+    );
+    assert!(
+        extra.iter().any(|s| s.as_str() == "sensitiveFile"),
+        "documented のみの toggle は extra に出る必要がある: {extra:?}"
+    );
+}
+
+// T-265: config_contract_excludes_deprecated_biome
+#[test]
+fn config_contract_excludes_deprecated_biome() {
+    // biome 除外フィルタの pin。biome の serde 名 rename やフィルタ破損を、T-263 の
+    // drift メッセージ経由でなく除外契約そのものとして直接捕捉する。
+    let contract = config_contract_toggles();
+    assert!(
+        !contract.contains("biome"),
+        "deprecated 'biome' は contract から除外される必要がある: {contract:?}"
     );
 }
 
