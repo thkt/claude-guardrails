@@ -34,6 +34,12 @@ macro_rules! define_rule_config {
                 $(if let Some(v) = project.$field { self.$field = v; })*
             }
         }
+
+        /// Every public toggle name (the `.guardrails.json` `rules` keys). Test-only
+        /// registry that lets `doc_catalog::config_toggles_match_rule_docs` pin this
+        /// config contract against `RULE_DOCS`, mirroring `rule_id::RULE_ID_CATALOG`.
+        #[cfg(test)]
+        pub(crate) const RULE_TOGGLE_NAMES: &[&str] = &[ $( $serde_name ),* ];
     };
 }
 
