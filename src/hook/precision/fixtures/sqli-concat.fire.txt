@@ -1,0 +1,1 @@
+db.execute(`SELECT * FROM users WHERE id = ${userId}`);

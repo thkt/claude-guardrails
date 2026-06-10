@@ -1,0 +1,1 @@
+el.innerHTML = '<p>safe</p>';

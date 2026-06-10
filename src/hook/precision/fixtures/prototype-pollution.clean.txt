@@ -1,0 +1,3 @@
+function setName(target) {
+  target.name = 'x';
+}

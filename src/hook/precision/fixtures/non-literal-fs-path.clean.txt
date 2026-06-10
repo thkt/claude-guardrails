@@ -1,0 +1,2 @@
+import fs from 'fs';
+fs.readFile('/etc/config.json', callback);

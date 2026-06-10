@@ -1,0 +1,4 @@
+export const App = () => {
+  const x = 1;
+  return <div>{x}</div>;
+};

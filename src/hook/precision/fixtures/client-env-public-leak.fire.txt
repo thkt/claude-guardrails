@@ -1,0 +1,2 @@
+"use client";
+const apiKey = process.env.SECRET_API_KEY;

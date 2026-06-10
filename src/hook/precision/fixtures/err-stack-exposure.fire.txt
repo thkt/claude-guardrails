@@ -1,0 +1,5 @@
+export function GET(req, res) {
+  try { doX(); } catch (err) {
+    res.json({ error: err.stack });
+  }
+}

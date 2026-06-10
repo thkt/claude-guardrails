@@ -1,0 +1,1 @@
+export const Post = () => <div>safe content</div>;

@@ -1,0 +1,2 @@
+import { readFile } from 'fs/promises';
+const data = await readFile('config.json');
