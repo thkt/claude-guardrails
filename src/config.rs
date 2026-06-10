@@ -33,6 +33,13 @@ macro_rules! define_rule_config {
             fn apply_overrides(&mut self, project: ProjectRulesConfig) {
                 $(if let Some(v) = project.$field { self.$field = v; })*
             }
+
+            /// All toggles off: test-only base for single-toggle isolation
+            /// (per-toggle latency diagnostics in the precision harness).
+            #[cfg(test)]
+            pub(crate) fn all_off() -> Self {
+                Self { $($field: false,)* }
+            }
         }
 
         /// Every public toggle name (the `.guardrails.json` `rules` keys). Test-only

@@ -298,4 +298,6 @@ where
 }
 
 #[cfg(test)]
+mod precision;
+#[cfg(test)]
 mod tests;

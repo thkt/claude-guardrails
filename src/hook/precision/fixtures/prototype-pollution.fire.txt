@@ -1,0 +1,3 @@
+function setProto(target) {
+  target.__proto__ = source;
+}

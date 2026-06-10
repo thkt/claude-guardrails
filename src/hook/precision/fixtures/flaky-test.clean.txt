@@ -1,0 +1,4 @@
+it('waits', () => {
+  jest.useFakeTimers();
+  expect(1).toBe(1);
+});

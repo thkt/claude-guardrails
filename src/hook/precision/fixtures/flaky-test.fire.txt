@@ -1,0 +1,3 @@
+it('waits', () => {
+  setTimeout(() => done(), 100);
+});

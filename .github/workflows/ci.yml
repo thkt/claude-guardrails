@@ -86,6 +86,9 @@ jobs:
     # bootstrap path never run under llvm-cov (ignored + writes source files), so
     # they are permanently uncovered test tooling; counting them dropped C0
     # 96.25 -> 95.58 (Issue #257 / PR #261).
+    # src/hook/precision/ is excluded for the same production-only reason: it is
+    # a #[cfg(test)] corpus harness (Issue #255) split across non-tests.rs files,
+    # so llvm-cov would count its measurement code in the C0 denominator.
     # Runs on ubuntu like the test job (guardrails has no mlx dependency,
     # so no Apple-silicon BLAS requirement).
     runs-on: ubuntu-latest
@@ -122,12 +125,12 @@ jobs:
           # HEAD = PR merged into main (the checked-out pull_request ref).
           # cargo llvm-cov cleans stale profraw at the start of each run, so the
           # two measurements below do not mix.
-          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$|src/rules/doc_catalog' --lcov --output-path head.info
+          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$|src/rules/doc_catalog|src/hook/precision' --lcov --output-path head.info
           head_c0=$(c0 head.info)
           # BASE = main (fetch-depth:0 already has the history).
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git checkout --quiet --force origin/main
-          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$|src/rules/doc_catalog' --lcov --output-path base.info
+          cargo llvm-cov --ignore-filename-regex 'src/download\.rs|/tests\.rs$|src/rules/doc_catalog|src/hook/precision' --lcov --output-path base.info
           base_c0=$(c0 base.info)
           # 0.1pp tolerance absorbs instrumentation rounding / total line drift.
           awk -v b="$base_c0" -v h="$head_c0" 'BEGIN {
@@ -138,6 +141,83 @@ jobs:
             }
             print "OK: coverage did not drop"
           }'
+
+  precision:
+    # Precision delta gate: fail when any rule's false-positive rate on the
+    # should-not-fire corpus worsens vs main (Issue #255). The metrics test
+    # (src/hook/precision.rs) writes a per-rule JSON snapshot when
+    # GUARDRAILS_METRICS_OUT is set; this job runs it on head and base and
+    # compares per rule with integer cross-multiplication
+    # (head.fp * base.clean > base.fp * head.clean, clean = fp + tn), which
+    # avoids float rounding and normalizes for corpus growth. FP only: false
+    # negatives are deliberately not gated, so known-FN samples can be banked
+    # in the corpus first and fixed in later PRs with the improvement visible.
+    # Rules absent from base metrics (new rules) are skipped; a missing
+    # base.json (main predates the harness) skips the whole gate (bootstrap).
+    # Plain `cargo test` (not nextest): a single named test driven by an env
+    # var, run identically on both checkouts; the ci nextest profile adds
+    # nothing here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Precision delta gate (per-rule FP rate must not worsen vs main)
+        run: |
+          set -euo pipefail
+          # HEAD = PR merged into main (the checked-out pull_request ref).
+          GUARDRAILS_METRICS_OUT="$PWD/head.json" cargo test --quiet hook::precision::metrics_snapshot
+          if [ ! -f head.json ]; then
+            echo "::error::precision harness produced no head metrics (test filter matched nothing?)"
+            exit 1
+          fi
+          # BASE = main (fetch-depth:0 already has the history). When main
+          # predates the harness, the test filter matches nothing (exit 0)
+          # and no base.json is written -> bootstrap skip below. When main
+          # has the harness file but still produced no JSON, the filter or
+          # the env seam drifted -> fail instead of silently skipping.
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git checkout --quiet --force origin/main
+          GUARDRAILS_METRICS_OUT="$PWD/base.json" cargo test --quiet hook::precision::metrics_snapshot
+          if [ ! -f base.json ]; then
+            if [ -f src/hook/precision.rs ]; then
+              echo "::error::base has the precision harness but emitted no metrics (test filter drift?)"
+              exit 1
+            fi
+            echo "bootstrap: main has no precision metrics yet, skipping FP delta gate"
+            exit 0
+          fi
+          report=$(jq -rn --slurpfile base base.json --slurpfile head head.json '
+            ($base[0].rules // {}) as $b
+            | $head[0].rules | to_entries[]
+            | .key as $rule | .value as $h | $b[$rule] as $br
+            | if $br == null then
+                "SKIP \($rule): absent from base metrics (new rule)"
+              elif ($h.fp * ($br.fp + $br.tn)) > ($br.fp * ($h.fp + $h.tn)) then
+                "FAIL \($rule): FP rate worsened, base \($br.fp)/\($br.fp + $br.tn) -> head \($h.fp)/\($h.fp + $h.tn)"
+              else empty end
+          ')
+          if [ -n "$report" ]; then printf '%s\n' "$report"; fi
+          if printf '%s\n' "$report" | grep -q '^FAIL'; then
+            echo "::error::per-rule FP rate worsened vs main (see FAIL lines above)"
+            exit 1
+          fi
+          echo "OK: no per-rule FP rate regression"
 
   security:
     runs-on: ubuntu-latest

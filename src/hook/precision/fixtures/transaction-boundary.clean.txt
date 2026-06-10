@@ -1,0 +1,6 @@
+async function handle() {
+  await db.transaction(async () => {
+    await user.save();
+    await order.create();
+  });
+}

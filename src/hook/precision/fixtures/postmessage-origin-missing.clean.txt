@@ -1,0 +1,4 @@
+window.addEventListener('message', (event) => {
+  if (event.origin !== 'https://trusted.example.com') return;
+  processData(event.data);
+});

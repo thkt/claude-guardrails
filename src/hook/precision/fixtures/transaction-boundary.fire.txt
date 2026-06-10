@@ -1,0 +1,4 @@
+async function handle() {
+  await user.save();
+  await order.create();
+}
