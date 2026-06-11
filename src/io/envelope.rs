@@ -22,11 +22,15 @@ impl<T: Serialize> SuccessEnvelope<T> {
         }
     }
 
-    pub fn with_notes(data: T, notes: Vec<String>) -> Self {
+    /// Only degradation notes drive the `degraded` flag; `info` notes ride
+    /// along at the tail of `notes` without flagging the envelope.
+    pub fn with_notes_and_info(data: T, degradations: Vec<String>, info: Vec<String>) -> Self {
         // `degraded` is the union of environmental notes (project root / config /
         // linter) and `ContentResolution::Degraded` notes. See ADR-0007 §Degraded
         // derivation semantics for the per-source aggregation order.
-        let degraded = !notes.is_empty();
+        let degraded = !degradations.is_empty();
+        let mut notes = degradations;
+        notes.extend(info);
         Self {
             data,
             degraded,
@@ -165,9 +169,10 @@ mod tests {
 
     #[test]
     fn success_envelope_with_notes_sets_degraded() {
-        let env = SuccessEnvelope::with_notes(
+        let env = SuccessEnvelope::with_notes_and_info(
             serde_json::json!(null),
             vec![String::from("oxlint not found")],
+            Vec::new(),
         );
         assert!(env.degraded);
         let json = serde_json::to_string(&env).unwrap();
@@ -180,8 +185,38 @@ mod tests {
 
     #[test]
     fn success_envelope_with_empty_notes_is_not_degraded() {
-        let env = SuccessEnvelope::with_notes(serde_json::json!(null), Vec::new());
+        let env =
+            SuccessEnvelope::with_notes_and_info(serde_json::json!(null), Vec::new(), Vec::new());
         assert!(!env.degraded);
+    }
+
+    // T-294 / T-295 (envelope layer): info-only notes appear in `notes`
+    // without setting the degraded flag.
+    #[test]
+    fn success_envelope_with_info_only_is_not_degraded() {
+        let env = SuccessEnvelope::with_notes_and_info(
+            serde_json::json!(null),
+            Vec::new(),
+            vec![String::from("2 demoted")],
+        );
+        assert!(!env.degraded);
+        assert_eq!(env.notes, vec![String::from("2 demoted")]);
+    }
+
+    // T-294 / T-295 (envelope layer): degradations alone decide the flag and
+    // precede info notes in the merged `notes` order.
+    #[test]
+    fn success_envelope_orders_degradations_before_info() {
+        let env = SuccessEnvelope::with_notes_and_info(
+            serde_json::json!(null),
+            vec![String::from("oxlint not found")],
+            vec![String::from("2 demoted")],
+        );
+        assert!(env.degraded);
+        assert_eq!(
+            env.notes,
+            vec![String::from("oxlint not found"), String::from("2 demoted")]
+        );
     }
 
     #[test]

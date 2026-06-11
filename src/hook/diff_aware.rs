@@ -20,19 +20,39 @@ pub(crate) fn demotion_eligible(diff_aware: bool, blocking: &[Violation]) -> boo
     diff_aware && blocking.iter().any(|v| allowlist_entry(&v.rule).is_some())
 }
 
+pub(crate) struct DemotionOutcome {
+    pub(crate) blocking: Vec<Violation>,
+    pub(crate) demoted: Vec<Violation>,
+    /// Degradation note: demotion was skipped and why. Drives `degraded`.
+    pub(crate) skip_note: Option<String>,
+    /// Count report for a completed second pass (zero included). Never
+    /// drives `degraded`.
+    pub(crate) info_note: Option<String>,
+}
+
+impl DemotionOutcome {
+    fn unchanged(blocking: Vec<Violation>) -> Self {
+        Self {
+            blocking,
+            demoted: Vec::new(),
+            skip_note: None,
+            info_note: None,
+        }
+    }
+}
+
 /// Demotes blocking violations that already existed in the before-edit
-/// content. Returns (kept blocking, demoted, skip note). Fail-safe: any
-/// uncertainty about the before content keeps every violation blocking and
-/// says why in the note; a missing file is the legitimate new-file case and
-/// keeps all without a note.
+/// content. Fail-safe: any uncertainty about the before content keeps every
+/// violation blocking and says why in the skip note; a missing file is the
+/// legitimate new-file case and keeps all without a note.
 pub(crate) fn demote_preexisting(
     blocking: Vec<Violation>,
     target: ResolvedTarget,
     config: &Config,
     project_root: Option<&Path>,
-) -> (Vec<Violation>, Vec<Violation>, Option<String>) {
+) -> DemotionOutcome {
     if !demotion_eligible(config.diff_aware, &blocking) {
-        return (blocking, Vec::new(), None);
+        return DemotionOutcome::unchanged(blocking);
     }
     if target.degraded.is_some() {
         return keep_all(blocking, "content resolution degraded");
@@ -43,7 +63,7 @@ pub(crate) fn demote_preexisting(
             match read_file_capped(&target.file_path, project_root, target.is_js) {
                 ContentResolution::Full(c) => c,
                 ContentResolution::Degraded(DegradedReason::FileNotFound) => {
-                    return (blocking, Vec::new(), None);
+                    return DemotionOutcome::unchanged(blocking);
                 }
                 ContentResolution::Degraded(reason) => {
                     return keep_all(blocking, read_failure_phrase(reason));
@@ -75,20 +95,27 @@ pub(crate) fn demote_preexisting(
         &before_violations,
         &before_content,
     );
-    (result.blocking, result.demoted, None)
+    let info_note = format!(
+        "diff-aware: {} pre-existing violation(s) demoted to advisory",
+        result.demoted.len()
+    );
+    DemotionOutcome {
+        blocking: result.blocking,
+        demoted: result.demoted,
+        skip_note: None,
+        info_note: Some(info_note),
+    }
 }
 
-fn keep_all(
-    blocking: Vec<Violation>,
-    why: &str,
-) -> (Vec<Violation>, Vec<Violation>, Option<String>) {
-    (
+fn keep_all(blocking: Vec<Violation>, why: &str) -> DemotionOutcome {
+    DemotionOutcome {
         blocking,
-        Vec::new(),
-        Some(format!(
+        demoted: Vec::new(),
+        skip_note: Some(format!(
             "demotion skipped ({why}); pre-existing violations kept blocking"
         )),
-    )
+        info_note: None,
+    }
 }
 
 /// Exhaustive on purpose: a new `DegradedReason` variant must fail to compile

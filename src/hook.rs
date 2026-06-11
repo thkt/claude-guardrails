@@ -270,7 +270,7 @@ where
                 input.tool_name
             );
         }
-        emit_json_if_enabled(json_mode, &[], &[], notes);
+        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new());
         return 0;
     };
 
@@ -279,7 +279,7 @@ where
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(json_mode, &[], &[], notes);
+        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new());
         return 0;
     }
 
@@ -297,11 +297,13 @@ where
         notes.push(note);
     }
     let (blocking, mut warnings) = partition_violations(violations, &config);
-    let (mut blocking, mut demoted, skip_note) =
+    let outcome =
         diff_aware::demote_preexisting(blocking, target, &config, project_root.as_deref());
-    if let Some(n) = skip_note {
+    let (mut blocking, mut demoted) = (outcome.blocking, outcome.demoted);
+    if let Some(n) = outcome.skip_note {
         notes.push(n);
     }
+    let info_notes: Vec<String> = outcome.info_note.into_iter().collect();
     // Demoted violations pre-existed the edit; everything else the hook
     // reports (kept blocking and severity-routed warnings) charges to it.
     if config.diff_aware {
@@ -316,7 +318,7 @@ where
 
     let blocking_refs: Vec<&Violation> = blocking.iter().collect();
     let warning_refs: Vec<&Violation> = warnings.iter().collect();
-    emit_json_if_enabled(json_mode, &blocking_refs, &warning_refs, notes);
+    emit_json_if_enabled(json_mode, &blocking_refs, &warning_refs, notes, info_notes);
     emit_human_violations(&blocking_refs, &warning_refs);
     let outcome = if !blocking.is_empty() {
         HookExitCode::Blocking
