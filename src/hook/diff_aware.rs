@@ -91,10 +91,21 @@ fn keep_all(
     )
 }
 
+/// Exhaustive on purpose: a new `DegradedReason` variant must fail to compile
+/// here so it gets a deliberate phrase instead of a silent catch-all.
 fn read_failure_phrase(reason: DegradedReason) -> &'static str {
     match reason {
+        DegradedReason::OversizedFile => "before-edit file exceeds size limit",
+        DegradedReason::NonUtf8Content => "before-edit file is not valid UTF-8",
+        DegradedReason::FileNotFound => "before-edit file not found",
         DegradedReason::PermissionDenied => "permission denied reading before-edit file",
-        _ => "cannot read before-edit file",
+        DegradedReason::IoError => "i/o error reading before-edit file",
+        DegradedReason::PathOutsideProject => "before-edit file resolves outside the project root",
+        // Edit-resolution failures cannot reach the on-disk read, but the
+        // fail-safe answer is still a phrase rather than a panic.
+        DegradedReason::OldStringNotFound | DegradedReason::MultiEditMidFailure(_) => {
+            "cannot read before-edit file"
+        }
     }
 }
 

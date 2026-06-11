@@ -1,5 +1,6 @@
-use super::{classify, demotion_eligible, DEMOTABLE_RULES};
+use super::{classify, demotion_eligible, read_failure_phrase, DEMOTABLE_RULES};
 use crate::config::Config;
+use crate::content::DegradedReason;
 use crate::hook::collect_violations;
 use crate::rules::{Severity, Violation};
 use std::collections::BTreeSet;
@@ -87,6 +88,26 @@ fn second_pass_requires_toggle_and_allowlisted_blocking() {
     assert!(!demotion_eligible(true, &[]));
     assert!(!demotion_eligible(true, &foreign));
     assert!(demotion_eligible(true, &allowlisted));
+}
+
+// T-293: each before-edit read failure resolves to its own skip-note phrase,
+// so the note names the actual failure instead of one catch-all wording.
+#[test]
+fn read_failure_phrases_are_distinct_per_reason() {
+    let phrases = [
+        read_failure_phrase(DegradedReason::OversizedFile),
+        read_failure_phrase(DegradedReason::NonUtf8Content),
+        read_failure_phrase(DegradedReason::FileNotFound),
+        read_failure_phrase(DegradedReason::PermissionDenied),
+        read_failure_phrase(DegradedReason::IoError),
+        read_failure_phrase(DegradedReason::PathOutsideProject),
+    ];
+    let distinct: BTreeSet<&str> = phrases.iter().copied().collect();
+    assert_eq!(
+        distinct.len(),
+        phrases.len(),
+        "each read-failure reason needs its own phrase"
+    );
 }
 
 // T-287: every allowlisted rule reports each occurrence on its own line (two
