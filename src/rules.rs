@@ -176,6 +176,13 @@ fn is_line_comment(line: &str) -> bool {
     trimmed.starts_with("//") || trimmed.starts_with("* ") || trimmed == "*"
 }
 
+/// 1-based line number for a 0-based iteration index. Hook input is capped
+/// at `MAX_INPUT_SIZE` bytes far below `u32::MAX` lines, so overflow means the
+/// cap broke upstream; fail loudly instead of silently reporting `u32::MAX`.
+fn line_number(idx: usize) -> u32 {
+    u32::try_from(idx + 1).expect("line count exceeds u32::MAX despite input size cap")
+}
+
 /// Known limitation: `/*`/`*/` inside string literals are treated as comment markers.
 pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
     let mut result = Vec::new();
@@ -187,7 +194,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
                 in_block = false;
                 let after = trimmed[pos + 2..].trim();
                 if !after.is_empty() && !is_line_comment(after) {
-                    result.push((u32::try_from(idx + 1).unwrap_or(u32::MAX), line));
+                    result.push((line_number(idx), line));
                 }
             }
             continue;
@@ -197,7 +204,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
             if !trimmed[pos..].contains("*/") {
                 in_block = true;
                 if !before.is_empty() {
-                    result.push((u32::try_from(idx + 1).unwrap_or(u32::MAX), line));
+                    result.push((line_number(idx), line));
                 }
                 continue;
             }
@@ -209,7 +216,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
         if is_line_comment(line) {
             continue;
         }
-        result.push((u32::try_from(idx + 1).unwrap_or(u32::MAX), line));
+        result.push((line_number(idx), line));
     }
     result
 }
