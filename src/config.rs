@@ -93,6 +93,7 @@ pub struct Config {
     pub rules: RulesConfig,
     pub severity: SeverityConfig,
     pub oxlint_config: OxlintConfig,
+    pub diff_aware: bool,
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
 }
@@ -124,6 +125,7 @@ impl Default for Config {
             rules: RulesConfig::default(),
             severity: SeverityConfig::default(),
             oxlint_config: OxlintConfig::default(),
+            diff_aware: false,
             source: ConfigSource::Default,
             git_root: None,
         }
@@ -142,6 +144,8 @@ struct ProjectConfig {
     rules: Option<ProjectRulesConfig>,
     severity: Option<ProjectSeverityConfig>,
     oxlint: Option<ProjectOxlintConfig>,
+    #[serde(rename = "diffAware")]
+    diff_aware: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,6 +284,9 @@ impl Config {
             if let Some(allow) = oc.allow {
                 self.oxlint_config.allow = allow;
             }
+        }
+        if let Some(diff_aware) = project.diff_aware {
+            self.diff_aware = diff_aware;
         }
         self
     }

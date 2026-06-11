@@ -21,6 +21,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                 fix: "Narrow Service Worker scope to a specific path (e.g. { scope: '/app/' }) instead of root '/'.".to_owned(),
                 file: file_path.to_owned(),
                 line: Some(line_num),
+                origin: None,
             });
         }
         violations

@@ -6,13 +6,13 @@ Claude CodeのPreToolUse hook用コード品質チェッカー。外部リンタ
 
 ## 特徴
 
-| 機能                          | 説明                                                                                                    |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
-| oxlint自動確保                | [oxlint](https://oxc.rs)を自動検出・ダウンロード（手動インストール不要）                                |
+| 機能                          | 説明                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| oxlint自動確保                | [oxlint](https://oxc.rs)を自動検出・ダウンロード（手動インストール不要）                                     |
 | AI向けdenyルール              | `no-explicit-any`、`ban-ts-comment`、`no-non-null-assertion`、`no-console`、`no-new-func` をデフォルト有効化 |
-| カスタムルール                | 外部リンターがカバーしないセキュリティパターン（JS/TS）                                                 |
-| ASTベースセキュリティチェック | [oxc](https://oxc.rs)パーサーによる深層解析（コマンドインジェクション、スタック露出、パストラバーサル） |
-| Claude最適化出力              | stderrに修正提案を出力                                                                                  |
+| カスタムルール                | 外部リンターがカバーしないセキュリティパターン（JS/TS）                                                      |
+| ASTベースセキュリティチェック | [oxc](https://oxc.rs)パーサーによる深層解析（コマンドインジェクション、スタック露出、パストラバーサル）      |
+| Claude最適化出力              | stderrに修正提案を出力                                                                                       |
 
 ## インストール
 
@@ -115,13 +115,13 @@ guardrails prefetch
 - CI でテスト実行前にキャッシュを温める
 - エアギャップ環境向けの事前ステージング（接続環境で実行 → `~/.cache/guardrails/bin/` をコピー）
 
-| 結果                                                              | Exit | `error.code`     |
-| ----------------------------------------------------------------- | ---- | ---------------- |
-| キャッシュ済み or ダウンロード成功                                | 0    | (なし)           |
-| 非対応プラットフォーム (Windows / 非 amd64 等)                    | 65   | `DATA_ERROR`     |
-| ネットワーク失敗 (ダウンロード / read エラー)                     | 74   | `IO_ERROR`       |
-| 展開失敗 (tar / cache 書き込み / rename)                          | 74   | `IO_ERROR`       |
-| キャッシュディレクトリ未利用可 (`XDG_CACHE_HOME` / `HOME` 不在)   | 74   | `IO_ERROR`       |
+| 結果                                                            | Exit | `error.code` |
+| --------------------------------------------------------------- | ---- | ------------ |
+| キャッシュ済み or ダウンロード成功                              | 0    | (なし)       |
+| 非対応プラットフォーム (Windows / 非 amd64 等)                  | 65   | `DATA_ERROR` |
+| ネットワーク失敗 (ダウンロード / read エラー)                   | 74   | `IO_ERROR`   |
+| 展開失敗 (tar / cache 書き込み / rename)                        | 74   | `IO_ERROR`   |
+| キャッシュディレクトリ未利用可 (`XDG_CACHE_HOME` / `HOME` 不在) | 74   | `IO_ERROR`   |
 
 > **BREAKING (v0.15+)**: `prefetch` の終了コードが `0` / `1` から sysexits.h 値 (`0` / `65` / `74`) に変更されました。`--json` を渡すと失敗時に構造化 `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) が返されます。
 
@@ -234,22 +234,22 @@ Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警
 
 ### hook モード (サブコマンドなし)
 
-| コード | 意味                                                                              |
-| ------ | --------------------------------------------------------------------------------- |
-| 0      | 合格 — 違反なし                                                                              |
-| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される          |
+| コード | 意味                                                                                |
+| ------ | ----------------------------------------------------------------------------------- |
+| 0      | 合格 — 違反なし                                                                     |
+| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される |
 | 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、tool を停止   |
-| 64     | hook 入力エラー — JSON 不正、サイズ超過、または clap usage 失敗                              |
-| 70     | 内部エラー — panic / invariant 違反 (fail-closed)                                            |
+| 64     | hook 入力エラー — JSON 不正、サイズ超過、または clap usage 失敗                     |
+| 70     | 内部エラー — panic / invariant 違反 (fail-closed)                                   |
 
 ### サブコマンド (`prefetch`)
 
-| コード | 意味                                                              |
-| ------ | ----------------------------------------------------------------- |
-| 0      | 成功                                                              |
-| 64     | 使用方法エラー (clap parse 失敗)                                  |
-| 65     | データエラー (非対応プラットフォーム)                             |
-| 74     | I/O エラー (ネットワーク / 展開 / キャッシュ失敗)                 |
+| コード | 意味                                              |
+| ------ | ------------------------------------------------- |
+| 0      | 成功                                              |
+| 64     | 使用方法エラー (clap parse 失敗)                  |
+| 65     | データエラー (非対応プラットフォーム)             |
+| 74     | I/O エラー (ネットワーク / 展開 / キャッシュ失敗) |
 
 > **BREAKING (v0.16+)**: 非 blocking severity 違反 (`severity.blockThreshold` 未満) は exit `1` を返すようになりました (旧 `0`)。hook stdin / JSON / サイズ超過 失敗は exit `64` (旧 `1` または `2`)。内部 panic は exit `70`。JSON の `decision` フィールド (`allow` / `block`) は変わりません — 引き続き blocking 違反のみを判定します。
 
@@ -288,14 +288,15 @@ guardrails --json < tool-call.json
 }
 ```
 
-| フィールド        | 型                                              | 補足                                                                  |
-| ----------------- | ----------------------------------------------- | --------------------------------------------------------------------- |
-| `data.violations` | 配列                                            | ブロッキングと警告の両方を含む。`severity` で区別可能                 |
-| `data.decision`   | `"block"` / `"allow"`                           | `severity.blockThreshold` 以上のエントリがある場合のみ `block`  |
-| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | 小文字                                                                |
-| `line`            | 整数または `null`                               | 位置が不明な場合は `null`                                             |
-| `degraded`        | bool                                            | note が 1 件でもあれば `true`。環境系の note (project root canonicalize 失敗 / config load 失敗 / oxlint 不在) と post-edit content fallback の note を union する。原因は必ず `notes` を読む    |
-| `notes`           | 文字列の配列                                    | degrade の理由。source 順 (project root → config → linter → content fallback) で並び、dedup しない。non-empty なら `degraded: true` |
+| フィールド        | 型                                             | 補足                                                                                                                                                                                          |
+| ----------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data.violations` | 配列                                           | ブロッキングと警告の両方を含む。`severity` で区別可能                                                                                                                                         |
+| `data.decision`   | `"block"` / `"allow"`                          | `severity.blockThreshold` 以上のエントリがある場合のみ `block`                                                                                                                                |
+| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"` | 小文字                                                                                                                                                                                        |
+| `line`            | 整数または `null`                              | 位置が不明な場合は `null`                                                                                                                                                                     |
+| `origin`          | `"introduced"` / `"preexisting"` (optional)    | `diffAware` on のときのみ付く。`preexisting` は編集前から存在して降格された違反、それ以外の報告は `introduced`。toggle off ではフィールド自体が省略される ([diffAware](#diffaware) 参照)      |
+| `degraded`        | bool                                           | note が 1 件でもあれば `true`。環境系の note (project root canonicalize 失敗 / config load 失敗 / oxlint 不在) と post-edit content fallback の note を union する。原因は必ず `notes` を読む |
+| `notes`           | 文字列の配列                                   | degrade の理由。source 順 (project root → config → linter → content fallback) で並び、dedup しない。non-empty なら `degraded: true`                                                           |
 
 ### Error envelope
 
@@ -312,13 +313,13 @@ guardrails --json < tool-call.json
 }
 ```
 
-| フィールド          | 型                                                                                | 補足                                       |
-| ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------ |
-| `error.code`        | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"IO_ERROR"` | [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) 準拠の SCREAMING_SNAKE_CASE |
-| `error.message`     | string                                                                            | 人間向けの詳細 (stderr にも出力される)     |
-| `error.next_step`   | string (optional)                                                                 | 復旧のための具体的なアクション             |
-| `error.candidates`  | 文字列の配列 (optional)                                                           | 復旧候補 (空なら省略)                      |
-| `error.retryable`   | bool                                                                              | 一時的な失敗の場合のみ `true`              |
+| フィールド         | 型                                              | 補足                                                                                               |
+| ------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `error.code`       | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"IO_ERROR"` | [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) 準拠の SCREAMING_SNAKE_CASE |
+| `error.message`    | string                                          | 人間向けの詳細 (stderr にも出力される)                                                             |
+| `error.next_step`  | string (optional)                               | 復旧のための具体的なアクション                                                                     |
+| `error.candidates` | 文字列の配列 (optional)                         | 復旧候補 (空なら省略)                                                                              |
+| `error.retryable`  | bool                                            | 一時的な失敗の場合のみ `true`                                                                      |
 
 > **ケース混在**: `severity` は小文字 (v0.14 からの継承) で `error.code` は SCREAMING_SNAKE_CASE ([ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md))。意図的な混在で、両 shape は安定しています。
 
@@ -329,6 +330,7 @@ guardrails --json < tool-call.json
 プロジェクトルートに `.guardrails.json` を配置します。フォーマットは flat な `ProjectConfig` スキーマ（`guardrails` キーで包まない）。すべてのフィールドはオプションで、オーバーライドしたいもののみ指定してください。これは agent-neutral な path で、Claude Code、codex CLI、その他の AI agent から guardrails を hook として実行する場合のいずれでも同じように動作します。
 
 > **その他の対応 path**:
+>
 > - `.claude/tools.json`（`guardrails` キー配下に設定）— Claude Code の 4-tool pipeline 規約。`.guardrails.json` 不在時に使われる
 > - `.claude-guardrails.json` — レガシーフォールバック。上記いずれも見つからない場合に使われる
 >
@@ -346,6 +348,7 @@ guardrails --json < tool-call.json
 ```json
 {
   "enabled": true,
+  "diffAware": false,
   "rules": {
     "oxlint": true,
     "sensitiveFile": true,
@@ -402,6 +405,21 @@ denyリストにルールを追加、またはデフォルトdenyから除外で
 
 - `deny`: `--deny` で追加有効化するルール（デフォルトとマージ）
 - `allow`: denyリストから除外するルール（例: CLIプロジェクトで `console.log` を許可）
+
+#### `diffAware`
+
+デフォルト off。有効にすると、すでにブロッキング違反を含むファイルへの編集では、その編集が新規に持ち込んだ違反だけをブロックします。編集前から存在した違反は警告 (exit 1) に降格するため、無関係な修正が過去の違反に塞がれません。
+
+```json
+{
+  "diffAware": true
+}
+```
+
+- 降格の対象は、報告された 1 行だけで違反が完全に決まるルールに限定されます (現在は `eval` のみ)。それ以外のルールと oxlint 移譲の違反は、編集前から存在してもブロックを維持します。
+- 照合は (ルール, trim 済み行テキスト) の個数で行うため、既存の違反行をもう 1 つ複製した場合、増えた分はブロックされます。
+- フェイルセーフ: 編集前の状態を信頼できない場合 (読み取り不能、編集解決の degrade、編集前 content の parse 失敗) は降格全体を中止し、すべての違反がブロックを維持、`demotion skipped (...)` の note が原因を示します。新規ファイルの Write は失敗ではなく、含まれる違反はすべて新規としてブロックされ、note は付きません。
+- toggle on のとき、JSON 出力の各違反に `"origin": "introduced"` / `"origin": "preexisting"` が付き、降格された警告は stderr で `(preexisting)` と表示されます。toggle off では `origin` フィールド自体が出力されず、従来とバイト互換です。
 
 ### 設定例
 

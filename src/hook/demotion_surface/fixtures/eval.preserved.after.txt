@@ -1,0 +1,3 @@
+const config = 1;
+const extra = 2;
+eval(userInput);

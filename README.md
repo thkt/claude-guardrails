@@ -113,13 +113,13 @@ Use it to:
 - Warm the cache in CI before tests run
 - Pre-stage on a connected machine for air-gap deployment (then copy `~/.cache/guardrails/bin/`)
 
-| Outcome                                              | Exit | `error.code`     |
-| ---------------------------------------------------- | ---- | ---------------- |
-| Already cached or downloaded successfully            | 0    | (none)           |
-| Unsupported platform (e.g. Windows / non-amd64)      | 65   | `DATA_ERROR`     |
-| Network failure (download / read error)              | 74   | `IO_ERROR`       |
-| Extract failure (tar / cache write / rename)         | 74   | `IO_ERROR`       |
-| Cache directory unavailable (no `XDG_CACHE_HOME` / `HOME`) | 74   | `IO_ERROR`       |
+| Outcome                                                    | Exit | `error.code` |
+| ---------------------------------------------------------- | ---- | ------------ |
+| Already cached or downloaded successfully                  | 0    | (none)       |
+| Unsupported platform (e.g. Windows / non-amd64)            | 65   | `DATA_ERROR` |
+| Network failure (download / read error)                    | 74   | `IO_ERROR`   |
+| Extract failure (tar / cache write / rename)               | 74   | `IO_ERROR`   |
+| Cache directory unavailable (no `XDG_CACHE_HOME` / `HOME`) | 74   | `IO_ERROR`   |
 
 > **BREAKING (v0.15+)**: `prefetch` exit codes changed from `0` / `1` to sysexits.h values (`0` / `65` / `74`). Pass `--json` to receive a structured `ErrorEnvelope` (`{ error: { code, message, next_step, retryable } }`) on failure.
 
@@ -232,22 +232,22 @@ Claude Code reads the exit code to decide whether to pass, surface a warning to 
 
 ### Hook mode (no subcommand)
 
-| Code | Meaning                                                                       |
-| ---- | ----------------------------------------------------------------------------- |
-| 0    | Pass — no violations                                                                          |
-| 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI            |
-| 2    | Blocked — violations at or above `severity.blockThreshold` (default: `high`), tool halted   |
-| 64   | Hook input error — malformed JSON, oversized payload, or clap usage failure                   |
-| 70   | Internal error — panic or invariant violation (fail-closed)                                   |
+| Code | Meaning                                                                                   |
+| ---- | ----------------------------------------------------------------------------------------- |
+| 0    | Pass — no violations                                                                      |
+| 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI        |
+| 2    | Blocked — violations at or above `severity.blockThreshold` (default: `high`), tool halted |
+| 64   | Hook input error — malformed JSON, oversized payload, or clap usage failure               |
+| 70   | Internal error — panic or invariant violation (fail-closed)                               |
 
 ### Subcommands (`prefetch`)
 
-| Code | Meaning                                                              |
-| ---- | -------------------------------------------------------------------- |
-| 0    | Success                                                              |
-| 64   | Usage error (clap parse failure)                                     |
-| 65   | Data error (unsupported platform)                                    |
-| 74   | I/O error (network / extract / cache failure)                        |
+| Code | Meaning                                       |
+| ---- | --------------------------------------------- |
+| 0    | Success                                       |
+| 64   | Usage error (clap parse failure)              |
+| 65   | Data error (unsupported platform)             |
+| 74   | I/O error (network / extract / cache failure) |
 
 > **BREAKING (v0.16+)**: Non-blocking severity violations (below `severity.blockThreshold`) now exit `1` (was `0`). Hook stdin / JSON / oversized input failures now exit `64` (was `1` or `2`). Internal panics now exit `70`. The JSON `decision` field (`allow` / `block`) is unchanged — it still tracks blocking violations only.
 
@@ -286,14 +286,15 @@ guardrails --json < tool-call.json
 }
 ```
 
-| Field             | Type                                            | Notes                                                            |
-| ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| `data.violations` | array                                           | Both blocking and warning entries; distinguish via `severity`    |
-| `data.decision`   | `"block"` / `"allow"`                           | `block` only when an entry is at or above `severity.blockThreshold` |
-| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"`  | Lowercase                                                        |
-| `line`            | integer or `null`                               | `null` when location is unknown                                  |
-| `degraded`        | boolean                                         | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause |
-| `notes`           | array of strings                                | Reasons for degradation in order of source (project root → config → linter → content fallback). Not deduplicated. Non-empty implies `degraded: true` |
+| Field             | Type                                           | Notes                                                                                                                                                                                                              |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data.violations` | array                                          | Both blocking and warning entries; distinguish via `severity`                                                                                                                                                      |
+| `data.decision`   | `"block"` / `"allow"`                          | `block` only when an entry is at or above `severity.blockThreshold`                                                                                                                                                |
+| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"` | Lowercase                                                                                                                                                                                                          |
+| `line`            | integer or `null`                              | `null` when location is unknown                                                                                                                                                                                    |
+| `origin`          | `"introduced"` / `"preexisting"` (optional)    | Present only when `diffAware` is on: `preexisting` marks violations demoted because they existed before the edit; everything else is `introduced`. Absent when the toggle is off (see [diffAware](#diffaware))     |
+| `degraded`        | boolean                                        | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause |
+| `notes`           | array of strings                               | Reasons for degradation in order of source (project root → config → linter → content fallback). Not deduplicated. Non-empty implies `degraded: true`                                                               |
 
 ### Error envelope
 
@@ -310,13 +311,13 @@ When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO
 }
 ```
 
-| Field             | Type                                            | Notes                                                            |
-| ----------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| `error.code`      | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"IO_ERROR"` | SCREAMING_SNAKE_CASE per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) |
-| `error.message`   | string                                          | Human-readable detail (also printed on stderr)                   |
-| `error.next_step` | string (optional)                               | Concrete action to recover                                       |
-| `error.candidates`| array of strings (optional)                     | Recovery candidates (omitted when empty)                         |
-| `error.retryable` | boolean                                         | `true` only when the cause is a transient failure                |
+| Field              | Type                                            | Notes                                                                                           |
+| ------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `error.code`       | `"USAGE_ERROR"` / `"DATA_ERROR"` / `"IO_ERROR"` | SCREAMING_SNAKE_CASE per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md) |
+| `error.message`    | string                                          | Human-readable detail (also printed on stderr)                                                  |
+| `error.next_step`  | string (optional)                               | Concrete action to recover                                                                      |
+| `error.candidates` | array of strings (optional)                     | Recovery candidates (omitted when empty)                                                        |
+| `error.retryable`  | boolean                                         | `true` only when the cause is a transient failure                                               |
 
 > **Case mixing**: `severity` is lowercase (legacy from v0.14) and `error.code` is SCREAMING_SNAKE_CASE ([ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md)). The mix is intentional — both shapes are stable.
 
@@ -327,6 +328,7 @@ Without `--json`, output is byte-for-byte identical to the human-readable defaul
 Place a `.guardrails.json` at your project root. The format is the flat `ProjectConfig` schema (no `guardrails` key wrapper). All fields are optional — only specify what you want to override. This is the agent-neutral path that works the same from Claude Code, codex CLI, or any other AI agent that runs guardrails as a hook.
 
 > **Other supported paths**:
+>
 > - `.claude/tools.json` (`guardrails` key configured) — Claude Code's 4-tool pipeline convention. Used when `.guardrails.json` is absent.
 > - `.claude-guardrails.json` — legacy fallback. Used when neither of the above is found.
 >
@@ -344,6 +346,7 @@ Place a `.guardrails.json` at your project root. The format is the flat `Project
 ```json
 {
   "enabled": true,
+  "diffAware": false,
   "rules": {
     "oxlint": true,
     "sensitiveFile": true,
@@ -400,6 +403,21 @@ Add extra rules to enforce or suppress the default deny list:
 
 - `deny`: additional rules to enable via `--deny` (merged with defaults)
 - `allow`: rules to exclude from the deny list (e.g., allow `console.log` for CLI projects)
+
+#### `diffAware`
+
+Off by default. When enabled, an edit to a file that already contains blocking violations blocks only the violations the edit introduces; violations that existed before the edit demote to warnings (exit 1), so the edit is not gated on legacy issues it did not create.
+
+```json
+{
+  "diffAware": true
+}
+```
+
+- Demotion is limited to rules whose violations are fully determined by a single reported line (currently `eval`). Violations of every other rule, and all oxlint-delegated violations, keep blocking even when they pre-existed.
+- Matching counts (rule, trimmed line text) pairs, so pasting an extra copy of an existing violating line still blocks the surplus copy.
+- Fail-safe: when the before-edit state cannot be trusted (unreadable file, degraded edit resolution, before-edit parse failure), demotion is skipped entirely, every violation keeps blocking, and a `demotion skipped (...)` note names the cause. Writing a brand-new file is not a failure: every violation in it is introduced and blocks, with no note.
+- With the toggle on, each violation in the JSON output carries `"origin": "introduced"` or `"origin": "preexisting"`, and demoted warnings are marked `(preexisting)` on stderr. With the toggle off, the `origin` field is absent and output is byte-identical to previous versions.
 
 ### Examples
 

@@ -67,6 +67,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                     fix: format!("{} can cause flaky tests. {}", pattern.name, pattern.reason),
                     file: file_path.to_owned(),
                     line: Some(line_num),
+                    origin: None,
                 });
             }
         }

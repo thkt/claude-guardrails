@@ -1,5 +1,5 @@
 use crate::io::color;
-use crate::rules::Violation;
+use crate::rules::{Violation, ViolationOrigin};
 use serde::Serialize;
 
 const HEADER_SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
@@ -96,12 +96,18 @@ pub fn format_warnings(violations: &[&Violation]) -> String {
 
     for v in violations {
         let (rule_name, source) = format_rule_name(&v.rule);
+        let origin_mark = if v.origin == Some(ViolationOrigin::Preexisting) {
+            " (preexisting)"
+        } else {
+            ""
+        };
         lines.push(format!(
-            "  - {} ({}) [{}] at {}",
+            "  - {} ({}) [{}] at {}{}",
             rule_name,
             source,
             v.severity,
-            format_location(v)
+            format_location(v),
+            origin_mark
         ));
         lines.push(format!("    fix: {}", v.fix));
     }
@@ -122,6 +128,7 @@ mod tests {
             fix: fix.to_owned(),
             file: "/src/app.ts".to_owned(),
             line: Some(1),
+            origin: None,
         }
     }
 
@@ -230,10 +237,63 @@ mod tests {
             fix: "fix it".to_owned(),
             file: "/src/app.ts".to_owned(),
             line: None,
+            origin: None,
         };
         let report = build_json_report(&[&v], &[]);
         let json: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&report).unwrap()).expect("valid JSON");
         assert!(json["violations"][0]["line"].is_null());
+    }
+
+    // T-282: a violation without an origin keeps the field out of the wire
+    // format entirely, so the diff-aware-off JSON stays byte-compatible.
+    #[test]
+    fn format_json_report_omits_origin_when_absent() {
+        let v = make_violation("eval", Severity::High, "Use JSON.parse()");
+        let report = build_json_report(&[&v], &[]);
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&report).unwrap()).expect("valid JSON");
+        assert!(
+            json["violations"][0].get("origin").is_none(),
+            "origin must be omitted when None: {json}"
+        );
+    }
+
+    // T-282: origins serialize as lowercase strings so a JSON consumer can
+    // tell introduced violations from pre-existing ones.
+    #[test]
+    fn format_json_report_emits_origin_when_present() {
+        let mut introduced = make_violation("eval", Severity::High, "fix");
+        introduced.origin = Some(ViolationOrigin::Introduced);
+        let mut preexisting = make_violation("eval", Severity::High, "fix");
+        preexisting.origin = Some(ViolationOrigin::Preexisting);
+        let report = build_json_report(&[&introduced], &[&preexisting]);
+        let json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&report).unwrap()).expect("valid JSON");
+        assert_eq!(json["violations"][0]["origin"], "introduced");
+        assert_eq!(json["violations"][1]["origin"], "preexisting");
+    }
+
+    // T-285: a demoted violation is marked preexisting on its warning line;
+    // violations without an origin stay unmarked.
+    #[test]
+    fn format_warnings_marks_preexisting_origin() {
+        let plain = make_violation("eval", Severity::High, "fix");
+        let mut demoted = make_violation("eval", Severity::High, "fix");
+        demoted.origin = Some(ViolationOrigin::Preexisting);
+        let output = strip_ansi(&format_warnings(&[&plain, &demoted]));
+        let marked: Vec<&str> = output
+            .lines()
+            .filter(|l| l.contains("preexisting"))
+            .collect();
+        assert_eq!(
+            marked.len(),
+            1,
+            "exactly the demoted violation is marked: {output}"
+        );
+        assert!(
+            marked[0].contains("eval"),
+            "the mark sits on the violation line itself: {output}"
+        );
     }
 }

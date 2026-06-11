@@ -123,10 +123,22 @@ impl DegradedReason {
 /// - `Degraded`: caller wanted full context, failed for a documented reason.
 /// - `NotApplicable`: full-file analysis not attempted (non-JS file, missing
 ///   `old_string`, etc.). Silent fallback to snippet is correct here.
-enum ContentResolution {
+pub(crate) enum ContentResolution {
     Full(String),
     Degraded(DegradedReason),
     NotApplicable,
+}
+
+/// Where the before-edit content for the diff-aware pass comes from.
+/// - `Retained`: Edit/MultiEdit resolution already read the file; reuse it.
+/// - `OnDisk`: Write never reads the target; read lazily only when needed.
+/// - `Unavailable`: resolution was degraded or snippet-mode, so no
+///   trustworthy before content exists.
+#[derive(Debug, PartialEq)]
+pub(crate) enum BeforeSource {
+    Retained(String),
+    OnDisk,
+    Unavailable,
 }
 
 pub(crate) struct ResolvedTarget {
@@ -134,6 +146,7 @@ pub(crate) struct ResolvedTarget {
     pub(crate) content: String,
     pub(crate) is_js: bool,
     pub(crate) degraded: Option<DegradedReason>,
+    pub(crate) before: BeforeSource,
 }
 
 pub(crate) fn get_file_and_content(
@@ -143,29 +156,38 @@ pub(crate) fn get_file_and_content(
     let file_path = input.tool_input.file_path.clone()?;
     let is_js = RE_JS_FILE.is_match(&file_path);
 
-    let (content, degraded) = match &input.tool_name {
-        ToolName::Write => (input.tool_input.content.clone()?, None),
+    let (content, degraded, before) = match &input.tool_name {
+        ToolName::Write => (
+            input.tool_input.content.clone()?,
+            None,
+            BeforeSource::OnDisk,
+        ),
         ToolName::Edit => {
             let new_string = input.tool_input.new_string.clone()?;
-            match resolve_edit_content(
+            let (resolution, before) = resolve_edit_content(
                 &file_path,
                 input.tool_input.old_string.as_deref(),
                 &new_string,
                 input.tool_input.replace_all,
                 project_root,
                 is_js,
-            ) {
-                ContentResolution::Full(c) => (c, None),
-                ContentResolution::Degraded(reason) => (new_string, Some(reason)),
-                ContentResolution::NotApplicable => (new_string, None),
+            );
+            match resolution {
+                ContentResolution::Full(c) => (c, None, before),
+                ContentResolution::Degraded(reason) => (new_string, Some(reason), before),
+                ContentResolution::NotApplicable => (new_string, None, before),
             }
         }
         ToolName::MultiEdit => {
             let edits = input.tool_input.edits.as_ref()?;
-            match resolve_multi_edit_content(&file_path, edits, project_root, is_js) {
-                ContentResolution::Full(c) => (c, None),
-                ContentResolution::Degraded(reason) => (join_new_strings(edits), Some(reason)),
-                ContentResolution::NotApplicable => (join_new_strings(edits), None),
+            let (resolution, before) =
+                resolve_multi_edit_content(&file_path, edits, project_root, is_js);
+            match resolution {
+                ContentResolution::Full(c) => (c, None, before),
+                ContentResolution::Degraded(reason) => {
+                    (join_new_strings(edits), Some(reason), before)
+                }
+                ContentResolution::NotApplicable => (join_new_strings(edits), None, before),
             }
         }
         ToolName::Other(name) => {
@@ -187,6 +209,7 @@ pub(crate) fn get_file_and_content(
         content,
         is_js,
         degraded,
+        before,
     })
 }
 
@@ -242,7 +265,7 @@ fn apply_edit(
 /// `is_js` is taken as input to avoid re-running `RE_JS_FILE.is_match` on
 /// an already-classified path. Pass `RE_JS_FILE.is_match(file_path)` when
 /// no classification has been done yet.
-fn read_file_capped(
+pub(crate) fn read_file_capped(
     file_path: &str,
     project_root: Option<&Path>,
     is_js: bool,
@@ -295,17 +318,23 @@ fn resolve_edit_content(
     replace_all: bool,
     project_root: Option<&Path>,
     is_js: bool,
-) -> ContentResolution {
+) -> (ContentResolution, BeforeSource) {
     let Some(old) = old_string else {
-        return ContentResolution::NotApplicable;
+        return (ContentResolution::NotApplicable, BeforeSource::Unavailable);
     };
     let content = match read_file_capped(file_path, project_root, is_js) {
         ContentResolution::Full(c) => c,
-        other => return other,
+        other => return (other, BeforeSource::Unavailable),
     };
     match apply_edit(&content, old, new_string, replace_all) {
-        Some(applied) => ContentResolution::Full(applied),
-        None => ContentResolution::Degraded(DegradedReason::OldStringNotFound),
+        Some(applied) => (
+            ContentResolution::Full(applied),
+            BeforeSource::Retained(content),
+        ),
+        None => (
+            ContentResolution::Degraded(DegradedReason::OldStringNotFound),
+            BeforeSource::Unavailable,
+        ),
     }
 }
 
@@ -314,24 +343,33 @@ fn resolve_multi_edit_content(
     edits: &[EditItem],
     project_root: Option<&Path>,
     is_js: bool,
-) -> ContentResolution {
-    let mut current = match read_file_capped(file_path, project_root, is_js) {
+) -> (ContentResolution, BeforeSource) {
+    let before = match read_file_capped(file_path, project_root, is_js) {
         ContentResolution::Full(c) => c,
-        other => return other,
+        other => return (other, BeforeSource::Unavailable),
     };
+    let mut current = before.clone();
     for (idx, edit) in edits.iter().enumerate() {
         let Some(old) = edit.old_string.as_deref() else {
-            return ContentResolution::NotApplicable;
+            return (ContentResolution::NotApplicable, BeforeSource::Unavailable);
         };
         let Some(new) = edit.new_string.as_deref() else {
-            return ContentResolution::NotApplicable;
+            return (ContentResolution::NotApplicable, BeforeSource::Unavailable);
         };
         match apply_edit(&current, old, new, edit.replace_all) {
             Some(applied) => current = applied,
-            None => return ContentResolution::Degraded(DegradedReason::MultiEditMidFailure(idx)),
+            None => {
+                return (
+                    ContentResolution::Degraded(DegradedReason::MultiEditMidFailure(idx)),
+                    BeforeSource::Unavailable,
+                )
+            }
         }
     }
-    ContentResolution::Full(current)
+    (
+        ContentResolution::Full(current),
+        BeforeSource::Retained(before),
+    )
 }
 
 #[cfg(test)]

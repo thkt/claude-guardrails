@@ -8,6 +8,7 @@ fn make_violation(rule: &str, severity: Severity) -> Violation {
         fix: "fix".to_owned(),
         file: "/test.ts".to_owned(),
         line: Some(1),
+        origin: None,
     }
 }
 
@@ -119,7 +120,7 @@ fn partition_default_severity_routing() {
         (Severity::Medium, false),
     ] {
         let violations = vec![make_violation("test", severity)];
-        let (blocking, warnings) = partition_violations(&violations, &config);
+        let (blocking, warnings) = partition_violations(violations, &config);
         assert_eq!(
             !blocking.is_empty(),
             expect_block,
@@ -144,7 +145,7 @@ fn partition_custom_block_threshold() {
         make_violation("medium-rule", Severity::Medium),
         make_violation("low-rule", Severity::Low),
     ];
-    let (blocking, warnings) = partition_violations(&violations, &config);
+    let (blocking, warnings) = partition_violations(violations, &config);
     // threshold Medium: Medium and above (High) block, Low warns.
     assert_eq!(blocking.len(), 2);
     assert!(blocking.iter().any(|v| v.rule == "high-rule"));
@@ -157,7 +158,7 @@ fn partition_custom_block_threshold() {
 fn partition_empty_violations() {
     let config = Config::default();
     let violations: Vec<Violation> = vec![];
-    let (blocking, warnings) = partition_violations(&violations, &config);
+    let (blocking, warnings) = partition_violations(violations, &config);
     assert!(blocking.is_empty());
     assert!(warnings.is_empty());
 }

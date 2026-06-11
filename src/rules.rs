@@ -255,6 +255,16 @@ impl fmt::Display for Severity {
     }
 }
 
+/// Whether a violation pre-existed the edit or was introduced by it. Attached
+/// only while the diff-aware toggle is on; None keeps the field out of the
+/// JSON wire format, so toggle-off output is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViolationOrigin {
+    Introduced,
+    Preexisting,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Violation {
     pub rule: String,
@@ -262,6 +272,8 @@ pub struct Violation {
     pub fix: String,
     pub file: String,
     pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ViolationOrigin>,
 }
 
 type Checker = Box<dyn Fn(&str, &str, &[(u32, &str)]) -> Vec<Violation> + Send + Sync>;

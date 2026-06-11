@@ -27,6 +27,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                 fix: "Do not write to sensitive files. Use environment variables or secret management.".to_owned(),
                 file: file_path.to_owned(),
                 line: None,
+                origin: None,
             }];
         }
         Vec::new()

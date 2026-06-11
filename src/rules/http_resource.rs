@@ -24,6 +24,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                         fix: "Use HTTPS for external resources.".to_owned(),
                         file: file_path.to_owned(),
                         line: Some(line_num),
+                        origin: None,
                     });
                     break;
                 }

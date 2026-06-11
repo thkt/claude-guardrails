@@ -65,6 +65,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                     fix: v.fix.to_owned(),
                     file: file_path.to_owned(),
                     line: Some(line_num),
+                    origin: None,
                 });
             }
         }

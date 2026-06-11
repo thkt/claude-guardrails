@@ -32,6 +32,7 @@ fn make_violation(file_path: &str, line_num: u32) -> Violation {
             .to_owned(),
         file: file_path.to_owned(),
         line: Some(line_num),
+        origin: None,
     }
 }
 
