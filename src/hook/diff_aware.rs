@@ -115,12 +115,14 @@ pub(crate) fn classify(
     before_violations: &[Violation],
     before_content: &str,
 ) -> Classification {
+    let before_lines: Vec<&str> = before_content.lines().collect();
+    let after_lines: Vec<&str> = after_content.lines().collect();
     let mut budget: HashMap<(&str, &str), usize> = HashMap::new();
     for v in before_violations {
         let Some(rule) = allowlist_entry(&v.rule) else {
             continue;
         };
-        let Some(text) = v.line.and_then(|line| line_text(before_content, line)) else {
+        let Some(text) = v.line.and_then(|line| line_text(&before_lines, line)) else {
             continue;
         };
         *budget.entry((rule, text)).or_insert(0) += 1;
@@ -131,7 +133,7 @@ pub(crate) fn classify(
     for v in blocking {
         let preexisting = allowlist_entry(&v.rule).is_some_and(|rule| {
             v.line
-                .and_then(|line| line_text(after_content, line))
+                .and_then(|line| line_text(&after_lines, line))
                 .is_some_and(|text| match budget.get_mut(&(rule, text)) {
                     Some(count) if *count > 0 => {
                         *count -= 1;
@@ -157,9 +159,9 @@ fn allowlist_entry(rule: &str) -> Option<&'static str> {
     DEMOTABLE_RULES.iter().find(|r| **r == rule).copied()
 }
 
-fn line_text(content: &str, line: u32) -> Option<&str> {
+fn line_text<'a>(lines: &[&'a str], line: u32) -> Option<&'a str> {
     let idx = (line as usize).checked_sub(1)?;
-    content.lines().nth(idx).map(str::trim)
+    lines.get(idx).map(|text| text.trim())
 }
 
 #[cfg(test)]
