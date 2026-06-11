@@ -55,7 +55,7 @@ Chosen: **Option A**, gated behind a `diffAware` project-config toggle that ship
 
 ### Confirmation
 
-Spec scenarios T-274 through T-292 (`.claude/workspace/planning/2026-06-10-diff-aware/spec.md`) pin the contract. Key invariants and their tests:
+Spec scenarios T-274 through T-296 (`.claude/workspace/planning/2026-06-10-diff-aware/spec.md`) pin the contract. Key invariants and their tests:
 
 | Invariant                                                | Test                                                                  |
 | -------------------------------------------------------- | --------------------------------------------------------------------- |
@@ -64,6 +64,7 @@ Spec scenarios T-274 through T-292 (`.claude/workspace/planning/2026-06-10-diff-
 | Demotion capped at before-count (pasted surplus blocks)  | T-278 (classifier unit)                                               |
 | Non-allowlisted rule never demotes                       | T-279 (transaction-boundary unit)                                     |
 | Before-pass parse failure cancels demotion with a note   | T-280 (integration)                                                   |
+| Unresolved project root skips the on-disk before read    | T-296 (`keeps_all_when_project_root_is_unresolved`, unit)             |
 | Exit advisory when every blocking violation demotes      | T-277 (integration)                                                   |
 | All-occurrence enrollment pin per allowlisted rule       | T-287 (unit)                                                          |
 | Zero bypass across the demotion-surface corpus           | T-291 (corpus measurement)                                            |

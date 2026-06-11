@@ -1,9 +1,12 @@
-use super::{classify, demotion_eligible, read_failure_phrase, DEMOTABLE_RULES};
+use super::{
+    classify, demote_preexisting, demotion_eligible, read_failure_phrase, DEMOTABLE_RULES,
+};
 use crate::config::Config;
-use crate::content::DegradedReason;
+use crate::content::{BeforeSource, DegradedReason, ResolvedTarget};
 use crate::hook::collect_violations;
 use crate::rules::{Severity, Violation};
 use std::collections::BTreeSet;
+use std::fs;
 
 fn violation(rule: &str, line: Option<u32>) -> Violation {
     Violation {
@@ -108,6 +111,40 @@ fn read_failure_phrases_are_distinct_per_reason() {
         phrases.len(),
         "each read-failure reason needs its own phrase"
     );
+}
+
+// T-296: with the project root unresolved, the path-boundary check cannot
+// run, so the on-disk before read must not happen at all; otherwise a file
+// outside the (unknown) project could drive demotion. Everything keeps
+// blocking and the skip note says the boundary cannot be verified.
+#[test]
+fn keeps_all_when_project_root_is_unresolved() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("app.ts");
+    fs::write(&path, "eval(userInput);\n").unwrap();
+
+    let config = Config {
+        diff_aware: true,
+        ..Config::default()
+    };
+    let target = ResolvedTarget {
+        file_path: path.to_string_lossy().into_owned(),
+        content: String::from("eval(userInput);\nconst a = 1;\n"),
+        is_js: true,
+        degraded: None,
+        before: BeforeSource::OnDisk,
+    };
+
+    let outcome = demote_preexisting(vec![violation("eval", Some(1))], target, &config, None);
+
+    assert_eq!(outcome.blocking.len(), 1, "must keep blocking, not demote");
+    assert!(outcome.demoted.is_empty());
+    let note = outcome.skip_note.expect("skip note must explain the skip");
+    assert!(
+        note.contains("cannot verify before-edit file is inside the project"),
+        "got: {note}"
+    );
+    assert!(outcome.info_note.is_none());
 }
 
 // T-287: every allowlisted rule reports each occurrence on its own line (two

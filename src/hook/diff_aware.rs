@@ -60,7 +60,17 @@ pub(crate) fn demote_preexisting(
     let before_content = match target.before {
         BeforeSource::Retained(s) => s,
         BeforeSource::OnDisk => {
-            match read_file_capped(&target.file_path, project_root, target.is_js) {
+            // Without a resolved project root the path-boundary check inside
+            // `read_file_capped` is disabled, so reading at all would let a
+            // file outside the (unknown) project drive demotion. Skip the
+            // read entirely; fail-safe direction is over-blocking.
+            let Some(root) = project_root else {
+                return keep_all(
+                    blocking,
+                    "cannot verify before-edit file is inside the project",
+                );
+            };
+            match read_file_capped(&target.file_path, Some(root), target.is_js) {
                 ContentResolution::Full(c) => c,
                 ContentResolution::Degraded(DegradedReason::FileNotFound) => {
                     return DemotionOutcome::unchanged(blocking);
