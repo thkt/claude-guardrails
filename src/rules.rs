@@ -264,7 +264,10 @@ impl fmt::Display for Severity {
 
 /// Whether a violation pre-existed the edit or was introduced by it. Attached
 /// only while the diff-aware toggle is on; None keeps the field out of the
-/// JSON wire format, so toggle-off output is unchanged.
+/// JSON wire format, so toggle-off output is unchanged. Surfacing is
+/// asymmetric on purpose: JSON carries both variants, while human stderr
+/// marks only `Preexisting` (introduced is the default reading of a
+/// blocking line, so marking it would add noise without signal).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViolationOrigin {

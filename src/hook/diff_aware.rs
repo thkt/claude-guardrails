@@ -11,7 +11,10 @@ use std::path::Path;
 
 /// Rules eligible for demotion. Enrollment requires all three: the rule
 /// reports every occurrence, decides each violation from a single line, and
-/// reports the line whose text alone reproduces the violation.
+/// reports the line whose text alone reproduces the violation. Those
+/// properties are pinned per enrolled rule by
+/// `allowlisted_rules_report_every_occurrence` and the demotion-surface
+/// corpus tests, which fail when a rule enrolls without matching entries.
 pub(crate) const DEMOTABLE_RULES: &[&str] = &["eval"];
 
 /// Gate for the second pass: lint the before-edit content only when the
@@ -44,7 +47,9 @@ impl DemotionOutcome {
 /// Demotes blocking violations that already existed in the before-edit
 /// content. Fail-safe: any uncertainty about the before content keeps every
 /// violation blocking and says why in the skip note; a missing file is the
-/// legitimate new-file case and keeps all without a note.
+/// legitimate new-file case and keeps all without a note. The before pass
+/// reuses the same `Config` as the after pass, so both sides lint with an
+/// identical rule set and the (rule, line text) match stays symmetric.
 pub(crate) fn demote_preexisting(
     blocking: Vec<Violation>,
     target: ResolvedTarget,
