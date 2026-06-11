@@ -93,6 +93,7 @@ pub struct Config {
     pub rules: RulesConfig,
     pub severity: SeverityConfig,
     pub oxlint_config: OxlintConfig,
+    pub diff_aware: bool,
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
 }
@@ -124,6 +125,7 @@ impl Default for Config {
             rules: RulesConfig::default(),
             severity: SeverityConfig::default(),
             oxlint_config: OxlintConfig::default(),
+            diff_aware: false,
             source: ConfigSource::Default,
             git_root: None,
         }
@@ -142,6 +144,8 @@ struct ProjectConfig {
     rules: Option<ProjectRulesConfig>,
     severity: Option<ProjectSeverityConfig>,
     oxlint: Option<ProjectOxlintConfig>,
+    #[serde(rename = "diffAware")]
+    diff_aware: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +182,19 @@ pub enum ConfigError {
     },
 }
 
+/// Reads a config file that may legitimately be absent: missing file is
+/// `None`, any other I/O failure is an error.
+fn read_optional_config(path: &Path) -> Result<Option<String>, ConfigError> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() != ErrorKind::NotFound => Err(ConfigError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        }),
+        Err(_) => Ok(None),
+    }
+}
+
 impl Config {
     // Uses CWD (not file_path) as trust boundary to prevent
     // LLM-controlled paths from influencing config discovery.
@@ -193,63 +210,36 @@ impl Config {
         self.git_root = Some(git_root.clone());
 
         let agent_neutral_path = git_root.join(GUARDRAILS_CONFIG_FILE);
-        match fs::read_to_string(&agent_neutral_path) {
-            Ok(content) => {
-                let project: ProjectConfig =
-                    serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
-                        path: agent_neutral_path.clone(),
-                        source: e,
-                    })?;
-                return Ok(self.merge(project));
-            }
-            Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(ConfigError::Io {
-                    path: agent_neutral_path.clone(),
+        if let Some(content) = read_optional_config(&agent_neutral_path)? {
+            let project: ProjectConfig =
+                serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
+                    path: agent_neutral_path,
                     source: e,
-                });
-            }
-            Err(_) => {}
+                })?;
+            return Ok(self.merge(project));
         }
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
-        match fs::read_to_string(&tools_path) {
-            Ok(content) => {
-                let tools: ToolsConfig =
-                    serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
-                        path: tools_path.clone(),
-                        source: e,
-                    })?;
-                if let Some(project) = tools.guardrails {
-                    return Ok(self.merge(project));
-                }
-                return Ok(self);
-            }
-            Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(ConfigError::Io {
-                    path: tools_path.clone(),
+        if let Some(content) = read_optional_config(&tools_path)? {
+            let tools: ToolsConfig =
+                serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
+                    path: tools_path,
                     source: e,
-                });
+                })?;
+            if let Some(project) = tools.guardrails {
+                return Ok(self.merge(project));
             }
-            Err(_) => {}
+            return Ok(self);
         }
 
         let legacy_path = git_root.join(LEGACY_CONFIG_FILE);
-        match fs::read_to_string(&legacy_path) {
-            Ok(content) => {
-                let project: ProjectConfig =
-                    serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
-                        path: legacy_path.clone(),
-                        source: e,
-                    })?;
-                return Ok(self.merge(project));
-            }
-            Err(e) if e.kind() != ErrorKind::NotFound => {
-                return Err(ConfigError::Io {
-                    path: legacy_path.clone(),
+        if let Some(content) = read_optional_config(&legacy_path)? {
+            let project: ProjectConfig =
+                serde_json::from_str(&content).map_err(|e| ConfigError::Parse {
+                    path: legacy_path,
                     source: e,
-                });
-            }
-            Err(_) => {}
+                })?;
+            return Ok(self.merge(project));
         }
 
         Ok(self)
@@ -280,6 +270,9 @@ impl Config {
             if let Some(allow) = oc.allow {
                 self.oxlint_config.allow = allow;
             }
+        }
+        if let Some(diff_aware) = project.diff_aware {
+            self.diff_aware = diff_aware;
         }
         self
     }

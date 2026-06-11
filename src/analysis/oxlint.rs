@@ -116,6 +116,7 @@ fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> 
                 fix: d.help.unwrap_or(d.message),
                 file: file_path.to_owned(),
                 line: d.labels.first().map(|l| l.span.line),
+                origin: None,
             }
         })
         .collect()

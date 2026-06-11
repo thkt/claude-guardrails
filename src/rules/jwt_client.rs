@@ -37,6 +37,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                     fix: "Verify JWT server-side. Client-side decode can be tampered with; use jwtVerify with a signature check.".to_owned(),
                     file: file_path.to_owned(),
                     line: Some(line_num),
+                    origin: None,
                 });
             }
         }

@@ -4,14 +4,14 @@
 
 use crate::analysis::{ast, ast_security, oxlint};
 use crate::config::{Config, ConfigError};
-use crate::content::{get_file_and_content, ResolvedTarget, ToolInput, ToolName};
+use crate::content::{get_file_and_content, ToolInput, ToolName};
 use crate::hook_exit::HookExitCode;
 use crate::import_map;
 use crate::io::output::{
     emit_human_violations, emit_json_if_enabled, render_error, show_config_hint,
 };
 use crate::io::stdin::parse_stdin;
-use crate::rules::{self, non_comment_lines, Violation};
+use crate::rules::{self, non_comment_lines, Violation, ViolationOrigin};
 use std::env;
 use std::fs;
 use std::io;
@@ -141,6 +141,25 @@ fn collect_violations(
         notes.extend(ns);
     }
 
+    let (vs, ns) = collect_first_party_violations(file_path, content, config, is_js);
+    violations.extend(vs);
+    notes.extend(ns);
+
+    (violations, notes)
+}
+
+/// First-party passes only (line rules + AST), no oxlint subprocess. The
+/// diff-aware before pass runs this directly so its sole note source is an
+/// AST parse failure, keeping the demotion-abort contract narrow.
+fn collect_first_party_violations(
+    file_path: &str,
+    content: &str,
+    config: &Config,
+    is_js: bool,
+) -> (Vec<Violation>, Vec<String>) {
+    let mut violations = Vec::new();
+    let mut notes = Vec::new();
+
     let lines = non_comment_lines(content);
     let rules = rules::load_rules(config);
     for rule in &rules {
@@ -161,12 +180,12 @@ fn collect_violations(
     (violations, notes)
 }
 
-fn partition_violations<'a>(
-    violations: &'a [Violation],
+fn partition_violations(
+    violations: Vec<Violation>,
     config: &Config,
-) -> (Vec<&'a Violation>, Vec<&'a Violation>) {
+) -> (Vec<Violation>, Vec<Violation>) {
     violations
-        .iter()
+        .into_iter()
         .partition(|v| v.severity >= config.severity.block_threshold)
 }
 
@@ -235,13 +254,7 @@ where
     let mut notes = Vec::new();
     let project_root = resolve_project_root_or_note(project_root_result, &mut notes);
 
-    let Some(ResolvedTarget {
-        file_path,
-        content,
-        is_js,
-        degraded,
-    }) = get_file_and_content(input, project_root.as_deref())
-    else {
+    let Some(target) = get_file_and_content(input, project_root.as_deref()) else {
         let is_write_tool = matches!(
             input.tool_name,
             ToolName::Write | ToolName::Edit | ToolName::MultiEdit
@@ -257,7 +270,7 @@ where
                 input.tool_name
             );
         }
-        emit_json_if_enabled(json_mode, &[], &[], notes);
+        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new());
         return 0;
     };
 
@@ -266,27 +279,47 @@ where
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(json_mode, &[], &[], notes);
+        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new());
         return 0;
     }
 
     let (violations, lint_notes) = collect_violations(
-        &file_path,
-        &content,
+        &target.file_path,
+        &target.content,
         &config,
         project_root.as_deref(),
-        is_js,
+        target.is_js,
     );
     notes.extend(lint_notes);
-    if let Some(reason) = degraded {
+    if let Some(reason) = target.degraded {
         let note = reason.note();
         eprintln!("guardrails: degraded: {note}");
         notes.push(note);
     }
-    let (blocking, warnings) = partition_violations(&violations, &config);
+    let (blocking, mut warnings) = partition_violations(violations, &config);
+    let outcome =
+        diff_aware::demote_preexisting(blocking, target, &config, project_root.as_deref());
+    let (mut blocking, mut demoted) = (outcome.blocking, outcome.demoted);
+    if let Some(n) = outcome.skip_note {
+        notes.push(n);
+    }
+    let info_notes: Vec<String> = outcome.info_note.into_iter().collect();
+    // Demoted violations pre-existed the edit; everything else the hook
+    // reports (kept blocking and severity-routed warnings) charges to it.
+    if config.diff_aware {
+        for v in blocking.iter_mut().chain(warnings.iter_mut()) {
+            v.origin = Some(ViolationOrigin::Introduced);
+        }
+        for v in &mut demoted {
+            v.origin = Some(ViolationOrigin::Preexisting);
+        }
+    }
+    warnings.extend(demoted);
 
-    emit_json_if_enabled(json_mode, &blocking, &warnings, notes);
-    emit_human_violations(&blocking, &warnings);
+    let blocking_refs: Vec<&Violation> = blocking.iter().collect();
+    let warning_refs: Vec<&Violation> = warnings.iter().collect();
+    emit_json_if_enabled(json_mode, &blocking_refs, &warning_refs, notes, info_notes);
+    emit_human_violations(&blocking_refs, &warning_refs);
     let outcome = if !blocking.is_empty() {
         HookExitCode::Blocking
     } else if !warnings.is_empty() {
@@ -297,6 +330,9 @@ where
     i32::from(outcome.code())
 }
 
+#[cfg(test)]
+mod demotion_surface;
+mod diff_aware;
 #[cfg(test)]
 mod precision;
 #[cfg(test)]

@@ -53,6 +53,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
             ),
             file: file_path.to_owned(),
             line: first_write_line,
+            origin: None,
         }]
     }),
 });

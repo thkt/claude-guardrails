@@ -33,6 +33,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                         ),
                         file: file_path.to_owned(),
                         line: Some(u32::try_from(idx + 1).unwrap_or(u32::MAX)),
+                        origin: None,
                     });
                 }
             }

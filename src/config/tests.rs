@@ -362,3 +362,22 @@ fn biome_false_normal_operation() {
         .unwrap();
     assert!(!config.rules.biome);
 }
+
+// T-275: top-level diffAware:true turns the diff_aware flag on.
+#[test]
+fn merge_diff_aware_true_enables_flag() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(r#"{"diffAware": true}"#).unwrap();
+    let merged = base.merge(project);
+    assert!(merged.diff_aware);
+}
+
+// T-275: absent diffAware key leaves diff_aware off (default).
+#[test]
+fn diff_aware_defaults_off_when_key_absent() {
+    assert!(!Config::default().diff_aware);
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(r"{}").unwrap();
+    let merged = base.merge(project);
+    assert!(!merged.diff_aware);
+}

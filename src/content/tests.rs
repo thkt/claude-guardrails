@@ -456,9 +456,10 @@ fn resolve_edit_content_degrades_on_old_string_not_found() {
         true,
     );
     assert!(matches!(
-        result,
+        result.0,
         ContentResolution::Degraded(DegradedReason::OldStringNotFound)
     ));
+    assert_eq!(result.1, BeforeSource::Unavailable);
 }
 
 #[test]
@@ -466,7 +467,8 @@ fn resolve_edit_content_not_applicable_without_old_string() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = temp_ts_file(&tmp, "file.ts", "const a = 1;");
     let result = resolve_edit_content(path.to_str().unwrap(), None, "x", false, None, true);
-    assert!(matches!(result, ContentResolution::NotApplicable));
+    assert!(matches!(result.0, ContentResolution::NotApplicable));
+    assert_eq!(result.1, BeforeSource::Unavailable);
 }
 
 #[test]
@@ -486,12 +488,73 @@ fn resolve_multi_edit_content_degrades_on_mid_failure() {
         },
     ];
     let result = resolve_multi_edit_content(path.to_str().unwrap(), &edits, None, true);
-    match result {
+    match result.0 {
         ContentResolution::Degraded(DegradedReason::MultiEditMidFailure(idx)) => {
             assert_eq!(idx, 1, "second edit (index 1) should be the failure point");
         }
         _ => panic!("expected MultiEditMidFailure(1)"),
     }
+    assert_eq!(result.1, BeforeSource::Unavailable);
+}
+
+// T-289: an Edit resolution retains the before-edit file content so the
+// diff-aware pass can lint what the file looked like before the change.
+#[test]
+fn edit_resolution_retains_before_content() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = temp_ts_file(&tmp, "file.ts", "const a = 1;\neval(x);\n");
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("const a = 1;".to_owned()),
+            new_string: Some("const a = 2;".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+    let ResolvedTarget {
+        content, before, ..
+    } = get_file_and_content(&input, None).unwrap();
+    assert_eq!(content, "const a = 2;\neval(x);\n");
+    assert_eq!(
+        before,
+        BeforeSource::Retained("const a = 1;\neval(x);\n".to_owned())
+    );
+}
+
+// T-289: a MultiEdit resolution retains the original file content from
+// before the first edit, not an intermediate state of the sequential apply.
+#[test]
+fn multi_edit_resolution_retains_original_before_content() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = temp_ts_file(&tmp, "file.ts", "let a = 1;\nlet b = 2;\n");
+    let input = ToolInput {
+        tool_name: ToolName::MultiEdit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            edits: Some(vec![
+                EditItem {
+                    old_string: Some("let a = 1;".to_owned()),
+                    new_string: Some("let a = 10;".to_owned()),
+                    ..EditItem::default()
+                },
+                EditItem {
+                    old_string: Some("let b = 2;".to_owned()),
+                    new_string: Some("let b = 20;".to_owned()),
+                    ..EditItem::default()
+                },
+            ]),
+            ..ToolInputData::default()
+        },
+    };
+    let ResolvedTarget {
+        content, before, ..
+    } = get_file_and_content(&input, None).unwrap();
+    assert_eq!(content, "let a = 10;\nlet b = 20;\n");
+    assert_eq!(
+        before,
+        BeforeSource::Retained("let a = 1;\nlet b = 2;\n".to_owned())
+    );
 }
 
 #[test]

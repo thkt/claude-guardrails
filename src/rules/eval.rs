@@ -84,6 +84,7 @@ impl EvalVisitor<'_> {
             fix: target.fix().to_owned(),
             file: self.file_path.to_owned(),
             line: Some(self.span_to_line(span)),
+            origin: None,
         });
     }
 

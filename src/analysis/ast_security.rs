@@ -148,6 +148,7 @@ pub fn check_bidi(content: &str, file_path: &str, line_offsets: &[usize]) -> Opt
                     .to_owned(),
                 file: file_path.to_owned(),
                 line: Some(line),
+                origin: None,
             });
         }
     }
@@ -209,6 +210,7 @@ impl SecurityVisitor<'_> {
             fix: fix.to_owned(),
             file: self.file_path.to_owned(),
             line: Some(self.span_to_line(span)),
+            origin: None,
         });
     }
 }

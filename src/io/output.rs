@@ -83,12 +83,15 @@ pub(crate) fn emit_json_if_enabled(
     blocking: &[&Violation],
     warnings: &[&Violation],
     notes: Vec<String>,
+    info_notes: Vec<String>,
 ) {
     if !json_mode {
         return;
     }
     let report = build_json_report(blocking, warnings);
-    print_json_line(&SuccessEnvelope::with_notes(report, notes));
+    print_json_line(&SuccessEnvelope::with_notes_and_info(
+        report, notes, info_notes,
+    ));
 }
 
 fn emit_error_envelope_if_enabled(json_mode: bool, payload: ErrorPayload) {
