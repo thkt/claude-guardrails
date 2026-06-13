@@ -33,4 +33,6 @@ pairs! {
     "eval" / "preserved" at "/src/app.ts" => demotes: 1, blocks: 0;
     "eval" / "added" at "/src/app.ts" => demotes: 1, blocks: 1;
     "eval" / "surplus-copy" at "/src/app.ts" => demotes: 1, blocks: 1;
+    "eval" / "swap" at "/src/app.ts" => demotes: 1, blocks: 0;
+    "eval" / "replaced" at "/src/app.ts" => demotes: 0, blocks: 1;
 }
