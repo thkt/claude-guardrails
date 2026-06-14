@@ -103,8 +103,13 @@ fn edit_adding_new_violation_blocks_it_and_demotes_preexisting_one() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains(r#""origin":"introduced""#),
-        "the new eval must carry origin introduced: {stdout}"
+        !stdout.contains(r#""origin":"introduced""#),
+        "the new eval is not before-compared, so it carries no origin claim: {stdout}"
+    );
+    assert_eq!(
+        stdout.matches(r#""origin""#).count(),
+        1,
+        "exactly one origin field, on the demoted violation: {stdout}"
     );
     assert!(
         stdout.contains(r#""origin":"preexisting""#),
@@ -185,11 +190,15 @@ fn write_to_new_file_blocks_all_without_skip_note() {
     assert_eq!(
         output.status.code(),
         Some(2),
-        "violations in a new file are all introduced; stdout: {stdout}"
+        "a new file has no before content, so nothing demotes; stdout: {stdout}"
     );
     assert!(
         !stdout.contains("demotion"),
         "file absence is not a failure, so no skip note: {stdout}"
+    );
+    assert!(
+        !stdout.contains(r#""origin""#),
+        "every violation here is a kept-blocking survivor, never before-compared, so none carries an origin claim: {stdout}"
     );
 }
 

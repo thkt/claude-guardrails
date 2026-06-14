@@ -259,19 +259,16 @@ mod tests {
         );
     }
 
-    // T-282: origins serialize as lowercase strings so a JSON consumer can
-    // tell introduced violations from pre-existing ones.
+    // T-282: a verified pre-existing origin serializes as the lowercase string
+    // "preexisting" so a JSON consumer can read the only claim the hook makes.
     #[test]
     fn format_json_report_emits_origin_when_present() {
-        let mut introduced = make_violation("eval", Severity::High, "fix");
-        introduced.origin = Some(ViolationOrigin::Introduced);
         let mut preexisting = make_violation("eval", Severity::High, "fix");
         preexisting.origin = Some(ViolationOrigin::Preexisting);
-        let report = build_json_report(&[&introduced], &[&preexisting]);
+        let report = build_json_report(&[], &[&preexisting]);
         let json: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&report).unwrap()).expect("valid JSON");
-        assert_eq!(json["violations"][0]["origin"], "introduced");
-        assert_eq!(json["violations"][1]["origin"], "preexisting");
+        assert_eq!(json["violations"][0]["origin"], "preexisting");
     }
 
     // T-285: a demoted violation is marked preexisting on its warning line;
