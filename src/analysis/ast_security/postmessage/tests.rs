@@ -288,6 +288,19 @@ fn postmessage_origin_missing_fires_on_var_clobber_of_param() {
     );
 }
 
+// #293: SemanticBuilder is built only when `requires_semantic` pre-scans an
+// identifier-param message handler. The pre-scan must walk the full tree, not
+// just top-level statements: a validating handler nested inside an IIFE still
+// needs `scoping` to resolve `event.origin`. If the pre-scan missed it, the
+// build would be skipped, `symbol_id` would be absent, and the handler would
+// over-fire as a false positive.
+#[test]
+fn postmessage_origin_missing_silent_on_validating_handler_nested_in_iife() {
+    assert_postmessage_silent(
+        "(function () { window.addEventListener('message', (event) => { if (event.origin !== 'https://x') return; handle(event.data); }); })();",
+    );
+}
+
 #[test]
 fn postmessage_origin_missing_fires_on_bare_onmessage_without_origin() {
     assert_postmessage_fires("onmessage = (event) => { handle(event.data); };");
