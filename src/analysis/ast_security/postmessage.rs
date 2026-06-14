@@ -4,7 +4,7 @@ use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,
     CallExpression, ComputedMemberExpression, Expression, FormalParameters, FunctionBody, Program,
-    StaticMemberExpression, VariableDeclarator,
+    Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::Scoping;
@@ -134,6 +134,18 @@ impl IdentifierHandlerFinder {
 }
 
 impl<'a> Visit<'a> for IdentifierHandlerFinder {
+    // Once a handler is found the build decision is settled, but oxc's default
+    // `walk_statements` iterates every remaining statement with no early exit.
+    // Guarding the statement entry point stops descent into sibling functions /
+    // class methods / blocks after the first match — bounding post-match work to
+    // O(depth) instead of O(remaining nodes) on handler-positive files (#293).
+    fn visit_statement(&mut self, stmt: &Statement<'a>) {
+        if self.found {
+            return;
+        }
+        walk::walk_statement(self, stmt);
+    }
+
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
         if self.found {
             return;
