@@ -41,7 +41,7 @@ const MATH_RANDOM_SECURITY_KEYWORDS: [&str; 12] = [
 ];
 
 fn is_bidi_char(ch: char) -> bool {
-    matches!(ch, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    matches!(ch, '\u{061C}' | '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 fn unwrap_parenthesized<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
@@ -81,12 +81,18 @@ fn ascii_fold_contains(haystack: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
-    ast_fail_open_check(content, file_path, |program, line_offsets| {
-        let mut found = Vec::new();
-        found.extend(check_bidi(content, file_path));
-        found.extend(check_program(program, line_offsets, file_path));
-        found
-    })
+    // Mirror production wiring (hook::lint_with_ast): check_bidi is a pure byte
+    // scan that runs independent of parse success, so it lives outside the
+    // parse closure. Keeping it here ensures unit tests exercise the same
+    // fail-open behavior as production (see #294).
+    let mut found = Vec::new();
+    found.extend(check_bidi(content, file_path));
+    found.extend(ast_fail_open_check(
+        content,
+        file_path,
+        |program, line_offsets| check_program(program, line_offsets, file_path),
+    ));
+    found
 }
 
 #[cfg(test)]
