@@ -63,6 +63,54 @@ fn env_var_fallback_multiline_logical_expression_blocked() {
     assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
 }
 
+// T-019: env_var_fallback_multistage_chain_sensitive_first_blocked
+// #295: `a || b || "lit"` は左結合で `(a||b) || "lit"`。最外 left が
+// LogicalExpression のため従来は検出漏れ (FN)。sensitive が先頭オペランド。
+#[test]
+fn env_var_fallback_multistage_chain_sensitive_first_blocked() {
+    let v = check_js(r#"const k = process.env.SECRET || process.env.ALT || "x";"#);
+    assert_eq!(v.len(), 1, "multi-stage chain must fire exactly once");
+    assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
+    assert_eq!(v[0].severity, Severity::High);
+}
+
+// T-020: env_var_fallback_multistage_chain_sensitive_in_middle_blocked
+// #295: sensitive な env access がチェーンの中間オペランドにあるケース。
+#[test]
+fn env_var_fallback_multistage_chain_sensitive_in_middle_blocked() {
+    let v = check_js(r#"const k = process.env.PUB || process.env.JWT_SECRET || "x";"#);
+    assert_eq!(v.len(), 1, "sensitive in middle operand must be detected");
+    assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
+}
+
+// T-021: env_var_fallback_multistage_chain_all_non_sensitive_allowed
+// #295 FP 回帰ガード: 多段チェーンでも全 env が non-sensitive なら不発火。
+#[test]
+fn env_var_fallback_multistage_chain_all_non_sensitive_allowed() {
+    let v = check_js(r#"const k = process.env.SORT_KEY || process.env.PUBLIC_KEY || "asc";"#);
+    assert_eq!(v.len(), 0, "all-non-sensitive chain must not fire");
+}
+
+// T-022: env_var_fallback_multistage_coalesce_chain_blocked
+// #295: `??` でも多段チェーンを検出する (Coalesce 再帰経路のカバレッジ)。
+#[test]
+fn env_var_fallback_multistage_coalesce_chain_blocked() {
+    let v = check_js(r#"const k = process.env.PUB ?? process.env.JWT_SECRET ?? "x";"#);
+    assert_eq!(v.len(), 1, "?? multi-stage chain must fire exactly once");
+    assert_eq!(v[0].rule, rule_id::ENV_VAR_FALLBACK);
+}
+
+// T-023: env_var_fallback_literal_mid_chain_fires_per_node
+// #295: `env || "x" || "y"` は両ノードとも right が literal のため各ノードで発火
+// する。ssr_env.rs の intentional コメント (literal mid-chain は node 毎に独立した
+// true positive) を pin し、将来の firing model 変更を検知する。
+#[test]
+fn env_var_fallback_literal_mid_chain_fires_per_node() {
+    let v = check_js(r#"const k = process.env.SECRET || "x" || "y";"#);
+    assert_eq!(v.len(), 2, "literal mid-chain fires once per node");
+    assert!(v.iter().all(|x| x.rule == rule_id::ENV_VAR_FALLBACK));
+}
+
 // T-016: env_var_fallback_fail_open_on_invalid_syntax
 #[test]
 fn env_var_fallback_fail_open_on_invalid_syntax() {
