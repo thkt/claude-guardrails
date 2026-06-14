@@ -3,8 +3,8 @@ use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,
-    CallExpression, ComputedMemberExpression, Expression, FormalParameters, FunctionBody,
-    StaticMemberExpression, VariableDeclarator,
+    CallExpression, ComputedMemberExpression, Expression, FormalParameters, FunctionBody, Program,
+    Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::Scoping;
@@ -12,27 +12,7 @@ use oxc_syntax::symbol::SymbolId;
 
 impl SecurityVisitor<'_> {
     pub(super) fn check_postmessage_origin_missing(&mut self, call: &CallExpression<'_>) {
-        let callee_ok = match &call.callee {
-            Expression::Identifier(id) => id.name == "addEventListener",
-            Expression::StaticMemberExpression(sme) => {
-                sme.property.name == "addEventListener"
-                    && matches!(
-                        &sme.object,
-                        Expression::Identifier(id) if matches!(id.name.as_str(), "window" | "self")
-                    )
-            }
-            _ => false,
-        };
-        if !callee_ok {
-            return;
-        }
-        let Some(Argument::StringLiteral(event_name)) = call.arguments.first() else {
-            return;
-        };
-        if event_name.value != "message" {
-            return;
-        }
-        let Some(handler) = call.arguments.get(1) else {
+        let Some(handler) = message_listener_handler(call) else {
             return;
         };
         let Some((params, body)) = handler_signature_from_argument(handler) else {
@@ -53,18 +33,10 @@ impl SecurityVisitor<'_> {
     }
 
     pub(super) fn check_onmessage_origin_missing(&mut self, expr: &AssignmentExpression<'_>) {
-        let receiver_ok = match &expr.left {
-            AssignmentTarget::StaticMemberExpression(sme) => {
-                sme.property.name == "onmessage"
-                    && (ast::is_ident(&sme.object, "window") || ast::is_ident(&sme.object, "self"))
-            }
-            AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "onmessage",
-            _ => false,
-        };
-        if !receiver_ok {
+        let Some(handler) = message_assignment_handler(expr) else {
             return;
-        }
-        let Some((params, body)) = handler_signature_from_expression(&expr.right) else {
+        };
+        let Some((params, body)) = handler_signature_from_expression(handler) else {
             return;
         };
         let Some(first_param) = params.items.first() else {
@@ -82,18 +54,140 @@ impl SecurityVisitor<'_> {
     }
 }
 
+/// `window.addEventListener("message", handler)` / `self.…` / bare
+/// `addEventListener("message", handler)` の handler 引数を返す。受信側 (window /
+/// self / bare global) と event 名 "message" が揃わなければ None。
+/// `check_postmessage_origin_missing` と `requires_semantic` の双方がこれを共有し、
+/// pre-scan と本検査の検出条件が乖離しないようにする。
+fn message_listener_handler<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Argument<'a>> {
+    let callee_ok = match &call.callee {
+        Expression::Identifier(id) => id.name == "addEventListener",
+        Expression::StaticMemberExpression(sme) => {
+            sme.property.name == "addEventListener"
+                && matches!(
+                    &sme.object,
+                    Expression::Identifier(id) if matches!(id.name.as_str(), "window" | "self")
+                )
+        }
+        _ => false,
+    };
+    if !callee_ok {
+        return None;
+    }
+    let Some(Argument::StringLiteral(event_name)) = call.arguments.first() else {
+        return None;
+    };
+    if event_name.value != "message" {
+        return None;
+    }
+    call.arguments.get(1)
+}
+
+/// `window.onmessage = handler` / `self.…` / bare `onmessage = handler` の RHS を
+/// 返す。受信側が一致しなければ None。`message_listener_handler` と同様、検出条件を
+/// pre-scan と共有するための抽出。
+fn message_assignment_handler<'a, 'b>(
+    expr: &'b AssignmentExpression<'a>,
+) -> Option<&'b Expression<'a>> {
+    let receiver_ok = match &expr.left {
+        AssignmentTarget::StaticMemberExpression(sme) => {
+            sme.property.name == "onmessage"
+                && (ast::is_ident(&sme.object, "window") || ast::is_ident(&sme.object, "self"))
+        }
+        AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "onmessage",
+        _ => false,
+    };
+    receiver_ok.then_some(&expr.right)
+}
+
+/// `check_program` が `SemanticBuilder` を構築すべきか判定する。`scoping` を読むのは
+/// identifier param を持つ message handler の origin チェックだけなので (#293)、
+/// object-pattern handler や handler の無いファイルでは構築を skip する。
+///
+/// 検出は `message_listener_handler` / `message_assignment_handler` /
+/// `handler_signature_*` を消費側と共有する。仮に乖離して under-detect しても
+/// `scoping == None` → `handler_validates_origin` が false → violation が発火する
+/// (安全な over-fire であり、抑制された finding にはならない)。
+pub(super) fn requires_semantic(program: &Program) -> bool {
+    let mut finder = IdentifierHandlerFinder { found: false };
+    finder.visit_program(program);
+    finder.found
+}
+
+struct IdentifierHandlerFinder {
+    found: bool,
+}
+
+impl IdentifierHandlerFinder {
+    /// handler の第1引数が `BindingIdentifier` (= scoping を読む唯一の形) なら
+    /// `found` を立てる。object/array pattern や引数なしは scoping 不要。
+    fn note_handler(&mut self, sig: Option<(&FormalParameters, &FunctionBody)>) {
+        if let Some((params, _)) = sig {
+            if matches!(
+                params.items.first().map(|p| &p.pattern),
+                Some(BindingPattern::BindingIdentifier(_))
+            ) {
+                self.found = true;
+            }
+        }
+    }
+}
+
+impl<'a> Visit<'a> for IdentifierHandlerFinder {
+    // Once a handler is found the build decision is settled, but oxc's default
+    // `walk_statements` iterates every remaining statement with no early exit.
+    // Guarding the statement entry point stops descent into sibling functions /
+    // class methods / blocks after the first match — bounding post-match work to
+    // O(depth) instead of O(remaining nodes) on handler-positive files (#293).
+    fn visit_statement(&mut self, stmt: &Statement<'a>) {
+        if self.found {
+            return;
+        }
+        walk::walk_statement(self, stmt);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.found {
+            return;
+        }
+        if let Some(handler) = message_listener_handler(call) {
+            self.note_handler(handler_signature_from_argument(handler));
+            if self.found {
+                return;
+            }
+        }
+        walk::walk_call_expression(self, call);
+    }
+
+    fn visit_assignment_expression(&mut self, expr: &AssignmentExpression<'a>) {
+        if self.found {
+            return;
+        }
+        if let Some(handler) = message_assignment_handler(expr) {
+            self.note_handler(handler_signature_from_expression(handler));
+            if self.found {
+                return;
+            }
+        }
+        walk::walk_assignment_expression(self, expr);
+    }
+}
+
 /// Identifier param は body 内で `event.origin` を参照しているか。
 /// `ObjectPattern` は param 段階で `origin` を取り出していれば検査経路ありとみなす。
 /// その他 (`ArrayPattern`, rest 等) は経路なし扱いで保守的に fire。
 fn handler_validates_origin<'a>(
     pat: &BindingPattern<'a>,
     body: &FunctionBody<'a>,
-    scoping: &Scoping,
+    scoping: Option<&Scoping>,
 ) -> bool {
     if let BindingPattern::BindingIdentifier(ident) = pat {
-        // `None` when semantic could not resolve the binding (parser failure
-        // etc.); treat as no reference to stay conservative.
-        let Some(symbol_id) = ident.symbol_id.get() else {
+        // `symbol_id` is populated only by SemanticBuilder. It is `None` when
+        // `check_program` skipped the build (no identifier-param handler
+        // pre-scanned, see `requires_semantic`) or semantic could not resolve
+        // the binding (parser failure etc.). Either way, treat as no reference
+        // to stay conservative — the caller then fires (safe over-fire).
+        let (Some(symbol_id), Some(scoping)) = (ident.symbol_id.get(), scoping) else {
             return false;
         };
         return has_origin_reference(body, symbol_id, scoping);

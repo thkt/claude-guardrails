@@ -108,7 +108,15 @@ pub fn check_program(
     let is_api_file = RE_API_FILE.is_match(file_path);
     let has_top_level_use_server = !is_api_file && has_use_server_directive(&program.directives);
     let has_use_client = !is_api_file && has_use_client_directive(&program.directives);
-    let semantic = SemanticBuilder::new().build(program).semantic;
+    // SemanticBuilder (scope / symbol / reference resolution) is the heaviest
+    // in-process step after parse, yet `scoping` feeds only the postMessage
+    // origin check — and only when a message handler has an identifier param.
+    // Pre-scan cheaply and build lazily so handler-less files (the majority)
+    // skip it (#293). No other rule reads the symbol_id / reference_id Cells
+    // this build populates, so skipping it is behavior-neutral elsewhere.
+    let semantic = postmessage::requires_semantic(program)
+        .then(|| SemanticBuilder::new().build(program).semantic);
+    let scoping = semantic.as_ref().map(oxc_semantic::Semantic::scoping);
     let mut visitor = SecurityVisitor {
         violations: Vec::new(),
         file_path,
@@ -122,7 +130,7 @@ pub fn check_program(
         function_depth: 0,
         in_security_named_fn: false,
         has_use_client,
-        scoping: semantic.scoping(),
+        scoping,
     };
     visitor.visit_program(program);
     visitor.violations
@@ -180,7 +188,9 @@ struct SecurityVisitor<'s> {
     in_security_named_fn: bool,
     // File-level only; re-declarations in nested modules/components are out of scope.
     has_use_client: bool,
-    scoping: &'s Scoping,
+    // `None` when `check_program` skipped the SemanticBuilder (no identifier-param
+    // message handler pre-scanned). Only the postMessage origin check reads it.
+    scoping: Option<&'s Scoping>,
 }
 
 impl SecurityVisitor<'_> {
