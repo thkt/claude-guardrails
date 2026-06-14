@@ -65,12 +65,18 @@ fn lint_with_ast(
     {
         return (Vec::new(), None);
     }
+    // check_bidi is a pure byte scan with no AST dependency. Run it before the
+    // parse so a parse failure (panic / unsupported type) cannot skip the most
+    // important security check — the fail-open fixed in #294.
+    let mut found = Vec::new();
+    if config.rules.ast_security {
+        if let Some(v) = ast_security::check_bidi(content, file_path) {
+            found.push(v);
+        }
+    }
     let result = ast::with_parsed_program(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
         if config.rules.ast_security {
-            if let Some(v) = ast_security::check_bidi(content, file_path, line_offsets) {
-                found.push(v);
-            }
             found.extend(ast_security::check_program(
                 program,
                 line_offsets,
@@ -117,9 +123,12 @@ fn lint_with_ast(
         found
     });
     match result {
-        Some(v) => (v, None),
+        Some(v) => {
+            found.extend(v);
+            (found, None)
+        }
         None => (
-            Vec::new(),
+            found,
             Some(String::from("AST parse failed, structural rules skipped")),
         ),
     }

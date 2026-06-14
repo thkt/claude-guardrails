@@ -179,6 +179,33 @@ fn warning_only_exits_advisory_with_stderr() {
     );
 }
 
+// #294 regression: check_bidi (Trojan-Source detection) is a pure byte scan
+// that must run independent of oxc parse success. An unterminated string makes
+// the parser panic, so `with_parsed_program` returns None; before the fix that
+// skipped check_bidi entirely, letting a bidi control char through (fail-open).
+#[test]
+fn bidi_char_blocked_even_when_parse_fails() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "const x = \"\u{202E}\nfoo"
+        }
+    });
+    let output = run_guardrails_json(&json.to_string());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected 2 (bidi must block despite parse failure); stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("bidi-characters"),
+        "expected bidi-characters in stderr: {stderr}"
+    );
+}
+
 // F-008 gap 3: a blocking violation (eval, High) and an advisory violation
 // (dom-access, Medium) emitted together must produce exit 2, not 1.
 #[test]

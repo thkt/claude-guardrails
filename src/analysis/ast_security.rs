@@ -1,4 +1,4 @@
-use crate::analysis::ast;
+use crate::analysis::{ast, scanner};
 #[cfg(test)]
 use crate::rules::ast_fail_open_check;
 use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
@@ -83,7 +83,7 @@ fn ascii_fold_contains(haystack: &[u8], needle: &[u8]) -> bool {
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
     ast_fail_open_check(content, file_path, |program, line_offsets| {
         let mut found = Vec::new();
-        found.extend(check_bidi(content, file_path, line_offsets));
+        found.extend(check_bidi(content, file_path));
         found.extend(check_program(program, line_offsets, file_path));
         found
     })
@@ -137,10 +137,15 @@ fn has_use_client_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
 // MAX_INPUT_SIZE (10 MB cap in main.rs) keeps `i` within u32::MAX, so the
 // `i as u32` casts below cannot truncate.
 #[allow(clippy::cast_possible_truncation)]
-pub fn check_bidi(content: &str, file_path: &str, line_offsets: &[usize]) -> Option<Violation> {
+pub fn check_bidi(content: &str, file_path: &str) -> Option<Violation> {
     for (i, ch) in content.char_indices() {
         if is_bidi_char(ch) {
-            let line = ast::span_to_line(line_offsets, Span::new(i as u32, i as u32));
+            // Build line offsets lazily: a bidi hit is rare (security
+            // violation), so the per-edit hot path stays free of the newline
+            // scan. check_bidi runs independent of parse success (see #294),
+            // so it cannot reuse the offsets built inside with_parsed_program.
+            let line_offsets = scanner::build_line_offsets(content);
+            let line = ast::span_to_line(&line_offsets, Span::new(i as u32, i as u32));
             return Some(Violation {
                 rule: rule_id::BIDI_CHARACTERS.to_owned(),
                 severity: Severity::High,
