@@ -19,11 +19,25 @@ use super::{collect_first_party_violations, partition_violations};
 use crate::config::Config;
 use crate::rules::{Violation, RE_JS_FILE};
 
-/// The three scenarios every enrolled rule must cover: `preserved` (the
-/// before violation survives the edit and demotes), `added` (a violation new
-/// in after blocks next to a demoted one), `surplus-copy` (a pasted extra
-/// copy of the same line exceeds the before count and blocks).
-const SCENARIOS: &[&str] = &["preserved", "added", "surplus-copy"];
+/// The scenarios every enrolled rule must cover: `preserved` (the before
+/// violation survives the edit and demotes), `added` (a violation new in after
+/// blocks next to a demoted one), `surplus-copy` (a pasted extra copy of the
+/// same line exceeds the before count and blocks), `swap` (the before
+/// violation line is removed and an identical-text violation is added
+/// elsewhere; the (rule, trimmed text) multiset is unchanged so it demotes,
+/// pinning that identity is position-independent), `replaced` (the before
+/// violation line is removed and a different-text violation takes its place;
+/// the after key is absent from the before multiset so it cannot borrow the
+/// deleted line's demotion budget and blocks, pinning that a delete+add of
+/// different text is not a free pass).
+//
+// The demotion budget is keyed on trimmed line text, so enrollment assumes
+// text identity equals violation identity for a rule: the same line means the
+// same severity wherever it sits. eval (a flat substring match) satisfies that.
+// A future context-dependent rule (same text, severity varying by surrounding
+// scope) would break the assumption and needs its own before/after pinning
+// before it joins DEMOTABLE_RULES.
+const SCENARIOS: &[&str] = &["preserved", "added", "surplus-copy", "swap", "replaced"];
 
 /// One before/after fixture pair pinned to the enrolled rule and scenario it
 /// measures, with the exact classification split the pair must produce.
