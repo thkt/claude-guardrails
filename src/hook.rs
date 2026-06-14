@@ -299,20 +299,17 @@ where
     let (blocking, mut warnings) = partition_violations(violations, &config);
     let outcome =
         diff_aware::demote_preexisting(blocking, target, &config, project_root.as_deref());
-    let (mut blocking, mut demoted) = (outcome.blocking, outcome.demoted);
+    let (blocking, mut demoted) = (outcome.blocking, outcome.demoted);
     if let Some(n) = outcome.skip_note {
         notes.push(n);
     }
     let info_notes: Vec<String> = outcome.info_note.into_iter().collect();
-    // Demoted violations pre-existed the edit; everything else the hook
-    // reports (kept blocking and severity-routed warnings) charges to it.
-    if config.diff_aware {
-        for v in blocking.iter_mut().chain(warnings.iter_mut()) {
-            v.origin = Some(ViolationOrigin::Introduced);
-        }
-        for v in &mut demoted {
-            v.origin = Some(ViolationOrigin::Preexisting);
-        }
+    // Demoted violations pre-existed the edit, verified by before-comparison.
+    // Everything else stays origin-less: the hook cannot prove a survivor was
+    // introduced (non-allowlisted rules are not before-compared), so it makes
+    // no claim. demoted is empty unless the diff-aware toggle is on.
+    for v in &mut demoted {
+        v.origin = Some(ViolationOrigin::Preexisting);
     }
     warnings.extend(demoted);
 

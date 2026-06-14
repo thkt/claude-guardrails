@@ -262,16 +262,15 @@ impl fmt::Display for Severity {
     }
 }
 
-/// Whether a violation pre-existed the edit or was introduced by it. Attached
-/// only while the diff-aware toggle is on; None keeps the field out of the
-/// JSON wire format, so toggle-off output is unchanged. Surfacing is
-/// asymmetric on purpose: JSON carries both variants, while human stderr
-/// marks only `Preexisting` (introduced is the default reading of a
-/// blocking line, so marking it would add noise without signal).
+/// Marks a violation the hook verified pre-existed the edit by comparing
+/// against before content. Attached only to demoted violations while the
+/// diff-aware toggle is on; None elsewhere keeps the field out of the JSON
+/// wire format, so toggle-off output is unchanged. The hook makes no positive
+/// claim that a survivor was introduced: non-allowlisted rules are never
+/// before-compared, so an "introduced" mark could not be verified.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViolationOrigin {
-    Introduced,
     Preexisting,
 }
 

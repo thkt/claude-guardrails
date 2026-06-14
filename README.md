@@ -292,7 +292,7 @@ guardrails --json < tool-call.json
 | `data.decision`   | `"block"` / `"allow"`                          | `block` only when an entry is at or above `severity.blockThreshold`                                                                                                                                                |
 | `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"` | Lowercase                                                                                                                                                                                                          |
 | `line`            | integer or `null`                              | `null` when location is unknown                                                                                                                                                                                    |
-| `origin`          | `"introduced"` / `"preexisting"` (optional)    | Present only when `diffAware` is on: `preexisting` marks violations demoted because they existed before the edit; everything else is `introduced`. Absent when the toggle is off (see [diffAware](#diffaware))     |
+| `origin`          | `"preexisting"` (optional)                     | Present only on violations demoted because they existed before the edit, and only when `diffAware` is on. Every other entry omits the field: the tool does not before-compare it, so it makes no origin claim (see [diffAware](#diffaware)) |
 | `degraded`        | boolean                                        | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause |
 | `notes`           | array of strings                               | Reasons for degradation in order of source (project root → config → linter → content fallback). Not deduplicated. Non-empty implies `degraded: true`                                                               |
 
@@ -416,8 +416,8 @@ Off by default. When enabled, an edit to a file that already contains blocking v
 
 - Demotion is limited to rules whose violations are fully determined by a single reported line (currently `eval`). Violations of every other rule, and all oxlint-delegated violations, keep blocking even when they pre-existed.
 - Matching counts (rule, trimmed line text) pairs, so pasting an extra copy of an existing violating line still blocks the surplus copy.
-- Fail-safe: when the before-edit state cannot be trusted (unreadable file, degraded edit resolution, before-edit parse failure), demotion is skipped entirely, every violation keeps blocking, and a `demotion skipped (...)` note names the cause. Writing a brand-new file is not a failure: every violation in it is introduced and blocks, with no note.
-- With the toggle on, each violation in the JSON output carries `"origin": "introduced"` or `"origin": "preexisting"`, and demoted warnings are marked `(preexisting)` on stderr. With the toggle off, the `origin` field is absent and output is byte-identical to previous versions.
+- Fail-safe: when the before-edit state cannot be trusted (unreadable file, degraded edit resolution, before-edit parse failure), demotion is skipped entirely, every violation keeps blocking, and a `demotion skipped (...)` note names the cause. Writing a brand-new file is not a failure: it has no before content, so nothing demotes and every violation blocks, with no note.
+- With the toggle on, each demoted violation in the JSON output carries `"origin": "preexisting"`, and demoted warnings are marked `(preexisting)` on stderr. Every other entry omits `origin`: the tool only before-compares the demoted ones, so it claims nothing about the rest. With the toggle off, the `origin` field is absent and output is byte-identical to previous versions.
 
 ### Examples
 
