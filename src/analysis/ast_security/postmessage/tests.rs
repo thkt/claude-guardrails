@@ -1,4 +1,5 @@
 use super::super::check;
+use crate::analysis::ast::with_parsed_program;
 use crate::rules::rule_id;
 
 fn assert_postmessage_fires(code: &str) {
@@ -304,6 +305,93 @@ fn postmessage_origin_missing_silent_on_validating_handler_nested_in_iife() {
 #[test]
 fn postmessage_origin_missing_fires_on_bare_onmessage_without_origin() {
     assert_postmessage_fires("onmessage = (event) => { handle(event.data); };");
+}
+
+// `requires_semantic` is the gate that decides whether the (expensive)
+// SemanticBuilder runs. The whole safety argument of the lazy build rests on
+// it returning `true` for every identifier-param handler: if it ever returned
+// `false` for one, `scoping` would be `None`, `handler_validates_origin` would
+// return `false`, and a validating handler would fire as a false positive
+// (never a suppressed finding — but a regression nonetheless). These assert the
+// gate decision directly, so a future break in `note_handler` (e.g. it stops
+// recognizing `BindingIdentifier` params) fails here rather than silently
+// degrading the rule. The nesting cases also confirm the `visit_statement`
+// early-exit guard does not stop descent before the handler is reached.
+fn requires_semantic_for(code: &str) -> bool {
+    with_parsed_program(code, "/src/page.ts", |program, _| {
+        super::requires_semantic(program)
+    })
+    .expect("parse should succeed for test inputs")
+}
+
+#[test]
+fn requires_semantic_true_for_identifier_param_addeventlistener() {
+    assert!(requires_semantic_for(
+        "window.addEventListener('message', (event) => { handle(event.data); });"
+    ));
+}
+
+#[test]
+fn requires_semantic_true_for_identifier_param_onmessage_assignment() {
+    assert!(requires_semantic_for(
+        "window.onmessage = (event) => { handle(event.data); };"
+    ));
+}
+
+#[test]
+fn requires_semantic_false_for_object_pattern_param() {
+    assert!(!requires_semantic_for(
+        "window.addEventListener('message', ({ data }) => { handle(data); });"
+    ));
+}
+
+#[test]
+fn requires_semantic_false_for_zero_arg_handler() {
+    assert!(!requires_semantic_for(
+        "window.addEventListener('message', () => {});"
+    ));
+}
+
+#[test]
+fn requires_semantic_false_for_no_message_handler() {
+    assert!(!requires_semantic_for(
+        "window.addEventListener('click', (event) => { handle(event); });"
+    ));
+}
+
+#[test]
+fn requires_semantic_false_for_handler_less_file() {
+    assert!(!requires_semantic_for(
+        "const x = 1; function f(y) { return y + 1; }"
+    ));
+}
+
+#[test]
+fn requires_semantic_true_for_identifier_handler_nested_in_iife() {
+    assert!(requires_semantic_for(
+        "(function () { window.addEventListener('message', (event) => { handle(event.data); }); })();"
+    ));
+}
+
+#[test]
+fn requires_semantic_true_for_identifier_onmessage_nested_in_iife() {
+    assert!(requires_semantic_for(
+        "(function () { window.onmessage = (event) => { handle(event.data); }; })();"
+    ));
+}
+
+#[test]
+fn requires_semantic_true_for_identifier_handler_in_named_function() {
+    assert!(requires_semantic_for(
+        "function setup() { window.addEventListener('message', (event) => { handle(event.data); }); }",
+    ));
+}
+
+#[test]
+fn requires_semantic_true_for_identifier_handler_in_class_method() {
+    assert!(requires_semantic_for(
+        "class App { init() { window.addEventListener('message', (event) => { handle(event.data); }); } }",
+    ));
 }
 
 #[test]
