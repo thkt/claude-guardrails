@@ -52,10 +52,11 @@ fn lint_with_ast(
     file_path: &str,
     config: &Config,
 ) -> (Vec<Violation>, Option<String>) {
-    // Skip the parse when every AST-driven rule is disabled. The flag list
-    // here must stay in lockstep with the per-rule dispatch arms below; a
-    // missing rule on either side reintroduces the drift that motivated
-    // removing the outer `has_ast_rules` guard.
+    // Skip the parse when every AST-driven rule is disabled. This flag list
+    // must stay in lockstep with the per-rule dispatch arms that follow — the
+    // pre-parse `check_bidi` arm and the parse-closure arms alike; a missing
+    // rule on either side reintroduces the drift that motivated removing the
+    // outer `has_ast_rules` guard.
     if !config.rules.ast_security
         && !config.rules.no_use_effect
         && !config.rules.open_redirect
@@ -65,27 +66,33 @@ fn lint_with_ast(
     {
         return (Vec::new(), None);
     }
+    // check_bidi is a pure byte scan with no AST dependency. Run it before the
+    // parse so a parse failure (panic / unsupported type) cannot skip the most
+    // important security check — the fail-open fixed in #294.
+    let mut found = Vec::new();
+    if config.rules.ast_security {
+        if let Some(v) = ast_security::check_bidi(content, file_path) {
+            found.push(v);
+        }
+    }
     let result = ast::with_parsed_program(content, file_path, |program, line_offsets| {
-        let mut found = Vec::new();
+        let mut ast_found = Vec::new();
         if config.rules.ast_security {
-            if let Some(v) = ast_security::check_bidi(content, file_path, line_offsets) {
-                found.push(v);
-            }
-            found.extend(ast_security::check_program(
+            ast_found.extend(ast_security::check_program(
                 program,
                 line_offsets,
                 file_path,
             ));
         }
         if config.rules.no_use_effect {
-            found.extend(rules::no_use_effect::check_program(
+            ast_found.extend(rules::no_use_effect::check_program(
                 program,
                 line_offsets,
                 file_path,
             ));
         }
         if config.rules.open_redirect {
-            found.extend(rules::open_redirect::check_program(
+            ast_found.extend(rules::open_redirect::check_program(
                 program,
                 line_offsets,
                 file_path,
@@ -93,7 +100,7 @@ fn lint_with_ast(
         }
         if config.rules.eval {
             let import_map = import_map::ImportMap::build(program);
-            found.extend(rules::eval::check_program(
+            ast_found.extend(rules::eval::check_program(
                 program,
                 line_offsets,
                 file_path,
@@ -101,26 +108,33 @@ fn lint_with_ast(
             ));
         }
         if config.rules.sqli_concat {
-            found.extend(rules::sqli_concat::check_program(
+            ast_found.extend(rules::sqli_concat::check_program(
                 program,
                 line_offsets,
                 file_path,
             ));
         }
         if config.rules.cors_wildcard {
-            found.extend(rules::cors_wildcard::check_program(
+            ast_found.extend(rules::cors_wildcard::check_program(
                 program,
                 line_offsets,
                 file_path,
             ));
         }
-        found
+        ast_found
     });
     match result {
-        Some(v) => (v, None),
+        Some(v) => {
+            found.extend(v);
+            (found, None)
+        }
         None => (
-            Vec::new(),
-            Some(String::from("AST parse failed, structural rules skipped")),
+            found,
+            // check_bidi already ran above, so any bidi violation is in `found`;
+            // only the AST-dependent (structural) rules were skipped.
+            Some(String::from(
+                "AST parse failed; structural rules skipped (bidi scan still applied)",
+            )),
         ),
     }
 }

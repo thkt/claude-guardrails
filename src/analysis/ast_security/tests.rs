@@ -31,6 +31,15 @@ fn bidi_rlm_in_string_blocked() {
 }
 
 #[test]
+fn bidi_alm_in_string_blocked() {
+    // U+061C ARABIC LETTER MARK is the 12th Trojan-Source bidi control char
+    // (Bidi_Control=Yes); the other 11 are already covered above.
+    let v = check_js("const s = \"a\u{061C}b\";");
+    assert_eq!(v.len(), 1, "should detect U+061C (ALM) bidi char");
+    assert_eq!(v[0].rule, rule_id::BIDI_CHARACTERS);
+}
+
+#[test]
 fn no_bidi_safe() {
     assert!(check_js("const x = 1;\nconst y = 2;").is_empty());
 }

@@ -84,6 +84,32 @@ fn collect_violations_ast_security_disabled() {
         .any(|v| v.rule == "child-process-injection"));
 }
 
+// #294 regression guard at the production-wiring level: check_bidi must run
+// even when oxc parse fails. The unterminated string makes the parser panic, so
+// `with_parsed_program` returns None — the "parse failed" note confirms the
+// fail-open path was taken, and the bidi violation must still be reported. If a
+// future change re-traps check_bidi inside the parse closure, this fails (the
+// unit suite would otherwise miss it; the CLI test alone would catch it).
+#[test]
+fn collect_violations_bidi_detected_when_parse_fails() {
+    let config = Config::default();
+    let (violations, notes) = collect_violations(
+        "/src/app.ts",
+        "const x = \"\u{202E}\nfoo",
+        &config,
+        None,
+        true,
+    );
+    assert!(
+        notes.iter().any(|n| n.contains("parse failed")),
+        "expected parse-failure note (confirms fail-open path); notes: {notes:?}"
+    );
+    assert!(
+        violations.iter().any(|v| v.rule == "bidi-characters"),
+        "bidi must be detected despite parse failure; got: {violations:?}"
+    );
+}
+
 #[test]
 fn collect_violations_no_use_effect_detects_in_tsx() {
     let config = Config::default();
