@@ -74,8 +74,10 @@ fn ascii_fold_underscore_contains(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 impl SecurityVisitor<'_> {
-    // Flags only `process.env.X || "literal"`. Identifier-bound fallbacks are
-    // intentionally skipped so the violation message cannot double as a bypass hint.
+    // Flags `process.env.X || "literal"` and left-associated multi-stage env
+    // chains ending in a string literal (see #295). Identifier-bound fallbacks
+    // are intentionally skipped so the violation message cannot double as a
+    // bypass hint.
     pub(super) fn check_env_var_fallback(&mut self, expr: &LogicalExpression) {
         if !matches!(
             expr.operator,
@@ -89,10 +91,14 @@ impl SecurityVisitor<'_> {
         if s.value.is_empty() {
             return;
         }
-        let Some(name) = process_env_access_name(&expr.left) else {
-            return;
-        };
-        if !SENSITIVE_ENV_KEYWORDS.iter().any(|kw| name.contains(kw)) {
+        // The literal fallback only takes effect as the chain's last operand,
+        // so the sensitive env access may sit anywhere in the left chain. For the
+        // primary `env || env || "lit"` shape the inner `env || env` node has a
+        // non-literal right operand and bails above, so it fires exactly once.
+        // intentional: the degenerate `env || "x" || "y"` (literals mid-chain)
+        // fires once per node since each is an independent true positive; the
+        // shape is rare and deduping would need parent tracking (rejected, #295).
+        if !chain_contains_sensitive_env(&expr.left) {
             return;
         }
         self.push_violation(
@@ -163,23 +169,38 @@ impl SecurityVisitor<'_> {
                 );
                 continue;
             }
-            if let Some(env_name) = process_env_access_name(&op.value) {
-                if SENSITIVE_ENV_KEYWORDS
-                    .iter()
-                    .any(|kw| env_name.contains(kw))
-                {
-                    self.push_violation(
-                        rule_id::SSR_SECRET_BLEED,
-                        Severity::High,
-                        "SSR/Server Action return is sent to the client. process.env secret leaks to the browser; return only render-needed data.",
-                        op.span,
-                    );
-                    continue;
-                }
+            if is_sensitive_env_access(&op.value) {
+                self.push_violation(
+                    rule_id::SSR_SECRET_BLEED,
+                    Severity::High,
+                    "SSR/Server Action return is sent to the client. process.env secret leaks to the browser; return only render-needed data.",
+                    op.span,
+                );
+                continue;
             }
             self.check_ssr_secret_object(&op.value);
         }
     }
+}
+
+/// True when `expr` is a `process.env.<SENSITIVE>` access, or a `||`/`??` chain
+/// any of whose operands is one. Recurses the left-leaning spine so a multi-stage
+/// fallback like `process.env.SECRET || process.env.ALT || "lit"` is reached even
+/// though its outer left operand is itself a `LogicalExpression` (see #295).
+fn chain_contains_sensitive_env(expr: &Expression) -> bool {
+    match unwrap_parenthesized(expr) {
+        Expression::LogicalExpression(le)
+            if matches!(le.operator, LogicalOperator::Coalesce | LogicalOperator::Or) =>
+        {
+            chain_contains_sensitive_env(&le.left) || chain_contains_sensitive_env(&le.right)
+        }
+        other => is_sensitive_env_access(other),
+    }
+}
+
+fn is_sensitive_env_access(expr: &Expression) -> bool {
+    process_env_access_name(expr)
+        .is_some_and(|name| SENSITIVE_ENV_KEYWORDS.iter().any(|kw| name.contains(kw)))
 }
 
 fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {
