@@ -133,7 +133,47 @@ pub fn check_program(
         scoping,
     };
     visitor.visit_program(program);
-    visitor.violations
+    dedup_math_random_insecure(visitor.violations)
+}
+
+/// `MATH_RANDOM_INSECURE` だけを (rule, line) で重複排除する。`keyword_var` は
+/// `decl.span`、`keyword_fn` は `call.span` で別 span を push するが、同一の
+/// `Math.random()` を指すため同一 line に解決する (#297)。span でなく line 単位で
+/// 畳む。同一 line の複数 push からは highest severity を残す (push 箇所には
+/// `toString(36)` / crypto sink の High と keyword 系の Medium が混在し、keep-first だと
+/// 並び次第で blocking High を Medium に潰す)。同 severity は先 push (handler 特異性順) を残す。
+/// scope を本 rule に限定するのは、`SSR_SECRET_BLEED` のように 1 行で per-property に
+/// 正当複数発火する rule を巻き込まないため。
+fn dedup_math_random_insecure(violations: Vec<Violation>) -> Vec<Violation> {
+    use std::collections::HashMap;
+    // line -> 現時点で残す MATH_RANDOM_INSECURE の出力先 index
+    let mut kept: HashMap<u32, usize> = HashMap::new();
+    let mut dropped = vec![false; violations.len()];
+    for (i, v) in violations.iter().enumerate() {
+        if v.rule != rule_id::MATH_RANDOM_INSECURE {
+            continue;
+        }
+        let Some(line) = v.line else {
+            continue;
+        };
+        match kept.get(&line).copied() {
+            None => {
+                kept.insert(line, i);
+            }
+            Some(prev) if v.severity > violations[prev].severity => {
+                dropped[prev] = true;
+                kept.insert(line, i);
+            }
+            Some(_) => {
+                dropped[i] = true;
+            }
+        }
+    }
+    violations
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, v)| (!dropped[i]).then_some(v))
+        .collect()
 }
 
 fn has_use_server_directive(directives: &[oxc_ast::ast::Directive]) -> bool {

@@ -160,10 +160,50 @@ fn math_random_keyword_fn_declaration_blocked() {
 #[test]
 fn math_random_keyword_fn_arrow_with_parent_blocked() {
     let v = check_js("const generateSessionId = () => Math.floor(Math.random() * 1000000);");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+    assert_eq!(v[0].severity, Severity::Medium);
+}
+
+// T-042: math_random_keyword_var_in_keyword_fn_dedup_to_one
+// keyword_var (decl.span) と keyword_fn (call.span) は同一 Math.random() に対し
+// 別 span で発火し同一 line に解決する。返却直前の line 単位 dedup で 1 件に集約し、
+// より具体的な keyword_var 側 message を残す (#297)。
+#[test]
+fn math_random_keyword_var_in_keyword_fn_dedup_to_one() {
+    let v = check_js("function generateToken() { const token = Math.random(); return token; }");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+    assert_eq!(v[0].severity, Severity::Medium);
     assert!(
-        v.iter().any(|v| v.severity == Severity::Medium),
-        "expected at least one Medium violation, got: {v:?}"
+        v[0].fix.contains("assigned to a security-named variable"),
+        "expected keyword_var message to survive dedup, got: {:?}",
+        v[0].fix
     );
+}
+
+// T-043: math_random_tostring_in_keyword_fn_keeps_high
+// security fn 内の `Math.random().toString(36)` は toString36 (High) と keyword_fn
+// (Medium) が同一 line に発火する。dedup は keep-highest-severity で High を残し、
+// blocking 違反を Medium に潰さない (#297)。
+#[test]
+fn math_random_tostring_in_keyword_fn_keeps_high() {
+    let v = check_js("const generateToken = () => Math.random().toString(36).substring(2);");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+    assert_eq!(v[0].severity, Severity::High);
+}
+
+// T-044: math_random_dedup_medium_before_high_keeps_high
+// 1 物理行に Medium (keyword_var, 先 push) と High (toString36, 後 push) が並ぶと、
+// dedup の置換分岐が走り High を残す。keep-first なら Medium が残るため、
+// keep-highest-severity 不変量を keep-first から区別する唯一の assertion (#297)。
+#[test]
+fn math_random_dedup_medium_before_high_keeps_high() {
+    let v = check_js("const token = Math.random(); const key = Math.random().toString(36);");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+    assert_eq!(v[0].severity, Severity::High);
 }
 
 // T-032: math_random_keyword_fn_no_keyword_match_allowed
