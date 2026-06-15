@@ -8,10 +8,17 @@ fn single_line_comments_filtered() {
 }
 
 #[test]
-fn jsdoc_star_lines_filtered() {
+fn jsdoc_star_lines_outside_block_are_code() {
+    // Drift pin: `* `/`*` lines are only comments when a real `/* */` block
+    // encloses them. With no enclosing block, `build_source_masks` marks none
+    // as comment, so they survive as code (previously dropped by the hand-rolled
+    // `is_line_comment` heuristic).
     let content = "code\n * jsdoc line\n *\nmore";
     let lines: Vec<_> = non_comment_lines(content);
-    assert_eq!(lines, vec![(1, "code"), (4, "more")]);
+    assert_eq!(
+        lines,
+        vec![(1, "code"), (2, " * jsdoc line"), (3, " *"), (4, "more")]
+    );
 }
 
 #[test]
@@ -56,6 +63,15 @@ fn nested_style_block_comments() {
 fn empty_content() {
     let lines: Vec<_> = non_comment_lines("");
     assert!(lines.is_empty());
+}
+
+#[test]
+fn blank_and_whitespace_only_lines_omitted() {
+    // Pin: a line with no visible (non-whitespace) byte is dropped. Callers key
+    // on returned line text, so the index gaps are inert (no FN/FP).
+    let content = "code\n\n   \nmore";
+    let lines: Vec<_> = non_comment_lines(content);
+    assert_eq!(lines, vec![(1, "code"), (4, "more")]);
 }
 
 #[test]
@@ -181,13 +197,14 @@ fn re_react_file_excludes_esm_non_jsx_extensions() {
     }
 }
 
-// --- Known limitations ---
+// --- String-literal comment markers (not mistaken for comments) ---
 
 #[test]
-fn known_limitation_block_comment_in_string_literal() {
+fn block_comment_markers_in_string_literal_ignored() {
     let content = "let x = '/* not a comment */';\nreal code;";
     let lines: Vec<_> = non_comment_lines(content);
-    // `/*` inside string opens block comment; `*/` closes it on same line.
+    // `/*`/`*/` sit inside a string literal, so `build_source_masks` keeps the
+    // whole line as code; both lines survive.
     assert_eq!(
         lines,
         vec![(1, "let x = '/* not a comment */';"), (2, "real code;")]
@@ -195,14 +212,16 @@ fn known_limitation_block_comment_in_string_literal() {
 }
 
 #[test]
-fn known_limitation_block_comment_in_string_spans_lines() {
+fn block_comment_markers_in_string_across_lines_ignored() {
     let content = "let x = '/*';\nreal code;\nlet y = '*/';\nmore code;";
     let lines: Vec<_> = non_comment_lines(content);
-    // `/*` in string opens block; lines 2-3 treated as inside block comment.
+    // `/*` is string content, not a block-comment open, so line 2 stays code.
+    // The pre-fix hand-rolled parser dropped `real code;` here (the bug #301 fixes).
     assert_eq!(
         lines,
         vec![
             (1, "let x = '/*';"),
+            (2, "real code;"),
             (3, "let y = '*/';"),
             (4, "more code;")
         ]

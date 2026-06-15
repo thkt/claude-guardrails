@@ -24,6 +24,7 @@ mod test_assertion;
 mod test_location;
 mod transaction;
 
+use crate::analysis::scanner::build_source_masks;
 use crate::config::Config;
 use crate::regex_compile::regex_or_die;
 use regex::Regex;
@@ -121,12 +122,6 @@ pub static RE_API_OR_ROUTE_FILE: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
-/// Matches `* ` (with space) or bare `*` to avoid `x * y` false positives.
-fn is_line_comment(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with("//") || trimmed.starts_with("* ") || trimmed == "*"
-}
-
 /// 1-based line number for a 0-based iteration index. Hook input is capped
 /// at `MAX_INPUT_SIZE` bytes far below `u32::MAX` lines, so overflow means the
 /// cap broke upstream; fail loudly instead of silently reporting `u32::MAX`.
@@ -134,42 +129,34 @@ fn line_number(idx: usize) -> u32 {
     u32::try_from(idx + 1).expect("line count exceeds u32::MAX despite input size cap")
 }
 
-/// Known limitation: `/*`/`*/` inside string literals are treated as comment markers.
+/// Lines whose visible (non-whitespace) bytes are not entirely inside comments.
+/// Comment classification is delegated to [`build_source_masks`] so string
+/// literals containing `/*`/`*/` are not misread as comment markers. Each
+/// surviving line is returned as its original full text (zero-copy `&str`).
+/// Blank and whitespace-only lines have no visible byte, so they are omitted;
+/// callers key on the returned line text (not line-index continuity), so the
+/// gaps are inert.
+///
+/// Perf: this adds a 2nd O(n) scan over `content` (the first being the caller's
+/// own parse) plus a `Vec<bool>`/`Vec<u8>` of `content.len()`. Input is bounded
+/// by `MAX_INPUT_SIZE` (10 MB) and the NFR budget is <10 ms/file, so the extra
+/// pass stays well inside budget; revisit only if dogfooding shows latency.
 pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
-    let mut result = Vec::new();
-    let mut in_block = false;
-    for (idx, line) in content.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if in_block {
-            if let Some(pos) = trimmed.find("*/") {
-                in_block = false;
-                let after = trimmed[pos + 2..].trim();
-                if !after.is_empty() && !is_line_comment(after) {
-                    result.push((line_number(idx), line));
-                }
-            }
-            continue;
-        }
-        if let Some(pos) = trimmed.find("/*") {
-            let before = trimmed[..pos].trim();
-            if !trimmed[pos..].contains("*/") {
-                in_block = true;
-                if !before.is_empty() {
-                    result.push((line_number(idx), line));
-                }
-                continue;
-            }
-            // Inline block comment like `code /* comment */ code`
-            if before.is_empty() && trimmed[pos..].ends_with("*/") {
-                continue;
-            }
-        }
-        if is_line_comment(line) {
-            continue;
-        }
-        result.push((line_number(idx), line));
-    }
-    result
+    let comment = build_source_masks(content).comment;
+    let base = content.as_ptr() as usize;
+    content
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            // `lines()` yields subslices of `content`; the pointer delta is the
+            // line's byte offset, which indexes the per-byte comment mask.
+            let start = line.as_ptr() as usize - base;
+            line.bytes()
+                .enumerate()
+                .any(|(i, b)| !b.is_ascii_whitespace() && !comment[start + i])
+        })
+        .map(|(idx, line)| (line_number(idx), line))
+        .collect()
 }
 
 pub fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32> {

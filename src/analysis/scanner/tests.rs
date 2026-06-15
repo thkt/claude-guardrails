@@ -124,6 +124,8 @@ fn source_masks_flag_line_comment_bytes() {
     // 14 = '\n' (still inside line comment until consumed), 15..19 = "more".
     assert!(!masks.comment[0]);
     assert!(!masks.comment[4]);
+    assert!(masks.comment[5], "the // opener delimiter must be flagged");
+    assert!(masks.comment[6], "the // opener delimiter must be flagged");
     assert!(masks.comment[7], "byte inside // comment must be flagged");
     assert!(!masks.comment[15], "first byte after the newline is code");
 }
@@ -149,7 +151,12 @@ fn source_masks_preserve_template_interpolation_as_code() {
 #[test]
 fn source_masks_flag_block_comment_bytes() {
     let masks = build_source_masks("a /* hidden */ b");
+    // bytes: 0 = 'a', 1 = ' ', 2..4 = "/*", 5..11 = "hidden", 11 = ' ',
+    // 12..14 = "*/", 14 = ' ', 15 = 'b'.
+    assert!(masks.comment[2], "the /* opener delimiter must be flagged");
+    assert!(masks.comment[3], "the /* opener delimiter must be flagged");
     assert!(masks.comment[5], "block comment body must be flagged");
+    assert!(masks.comment[13], "the */ closer delimiter must be flagged");
     assert!(!masks.comment[0]);
     assert!(
         !masks.comment[15],
