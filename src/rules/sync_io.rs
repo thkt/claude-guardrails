@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 static RE_EXCLUDED_FILE: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_EXCLUDED_FILE",
-        r"(\.config\.[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)",
+        r"(\.config\.m?[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)",
     )
 });
 
@@ -141,6 +141,21 @@ mod tests {
         let content = r"const data = fs.readFileSync('config.json', 'utf8');";
         assert!(check(content, "/next.config.ts").is_empty());
         assert!(check(content, "/next.config.js").is_empty());
+    }
+
+    #[test]
+    fn allows_in_esm_config_files() {
+        // .mjs/.mts config (vite.config.mts) is Node tooling, not frontend ESM.
+        let content = r"const data = fs.readFileSync('config.json', 'utf8');";
+        assert!(check(content, "/vite.config.mts").is_empty());
+        assert!(check(content, "/vitest.config.mjs").is_empty());
+    }
+
+    #[test]
+    fn detects_in_non_config_esm_module() {
+        // A frontend .mts module using readFileSync is a real bug (no fs in browser).
+        let content = r"const data = fs.readFileSync('file.txt', 'utf8');";
+        assert_eq!(check(content, "/src/loader.mts").len(), 1);
     }
 
     #[test]
