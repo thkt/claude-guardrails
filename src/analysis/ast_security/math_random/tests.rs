@@ -277,3 +277,39 @@ fn math_random_keyword_fn_object_property_blocked() {
         "expected at least one Medium violation, got: {v:?}"
     );
 }
+
+// T-045: math_random_keyword_var_snake_case_blocked (#304)
+// `_` 折り畳み統一前は `api_key` が "apikey" に一致せず検出漏れだった。
+#[test]
+fn math_random_keyword_var_snake_case_blocked() {
+    let v = check_js("const api_key = Math.random();");
+    assert!(
+        v.iter().any(|v| v.severity == Severity::Medium),
+        "expected snake_case api_key to be flagged, got: {v:?}"
+    );
+}
+
+// T-046: math_random_keyword_var_snake_case_jitter_allowed (#304)
+// 折り畳みで `user_identity`→"useridentity"⊃"userid" は一致するが、加算+乗算 jitter は
+// rhs_has_insecure_math_random のカーブアウト (T-029) で無発火。
+#[test]
+fn math_random_keyword_var_snake_case_jitter_allowed() {
+    let v = check_js("const user_identity = base + Math.random() * 1000;");
+    assert_eq!(
+        v.len(),
+        0,
+        "expected jitter multiplication to be carved out, got: {v:?}"
+    );
+}
+
+// T-047: math_random_keyword_var_short_word_bridge_fires (#304)
+// `is_alt`→"isalt"⊃"salt"。折り畳みが widen した superset 挙動を明示 pin する。
+// 直接代入経路では発火する (coincidental-substring FP は許容、word-boundary は対象外)。
+#[test]
+fn math_random_keyword_var_short_word_bridge_fires() {
+    let v = check_js("const is_alt = Math.random();");
+    assert!(
+        v.iter().any(|v| v.severity == Severity::Medium),
+        "expected underscore-bridged salt match to fire, got: {v:?}"
+    );
+}
