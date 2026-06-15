@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 static RE_EXCLUDED_FILE: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_EXCLUDED_FILE",
-        r"(\.config\.m?[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)",
+        r"(\.config\.m?[jt]s$|(^|/)build\.m[jt]s$|/scripts?/|/cli/|/bin/|\.mjs$)",
     )
 });
 
@@ -156,6 +156,27 @@ mod tests {
         // A frontend .mts module using readFileSync is a real bug (no fs in browser).
         let content = r"const data = fs.readFileSync('file.txt', 'utf8');";
         assert_eq!(check(content, "/src/loader.mts").len(), 1);
+    }
+
+    #[test]
+    fn allows_in_root_build_esm_script() {
+        // build.mjs/build.mts are build tooling entries (OUTCOME Non-goal), not frontend
+        // modules. #300 added .mts to JS scope, which began over-flagging root build.mts;
+        // exclude the build entry so the advisory noise on a Non-goal file is removed.
+        let content = r"const data = fs.readFileSync('manifest.json', 'utf8');";
+        assert!(check(content, "/build.mts").is_empty());
+        assert!(check(content, "/build.mjs").is_empty());
+    }
+
+    #[test]
+    fn known_limitation_frontend_mjs_sync_io_exempt() {
+        // Extension proxy limit: `\.mjs$` blanket-exempts every .mjs to avoid FP on build /
+        // generator tooling (.storybook/main.mjs, esbuild.mjs), which are not `*.config.*`.
+        // A genuine frontend src/loader.mjs using readFileSync is therefore missed (FN).
+        // The role discriminator is path/name, not extension, so .mjs cannot be split
+        // cleanly; authored frontend .mjs source is rare, so the FN is accepted here.
+        let content = r"const data = fs.readFileSync('file.txt', 'utf8');";
+        assert!(check(content, "/src/loader.mjs").is_empty());
     }
 
     #[test]
