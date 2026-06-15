@@ -400,6 +400,36 @@ fn toggle_isolation_mapping_covers_catalog_exactly() {
     assert_eq!(mapped, catalog);
 }
 
+// #303: hook.rs の AST skip-guard (`lint_with_ast`) と dispatch アームは同じ AST
+// フラグ集合を二重に列挙する。新 AST ルールを片方にだけ足すと、そのルールだけを
+// 有効化し他を全 off にした構成で parse がスキップ (skip-guard 漏れ) または check
+// 未呼び出し (dispatch 漏れ) となり、Fire sample が黙って FN に落ちる。既定の
+// all-on 構成では他フラグの OR で skip-guard が真のままになるためこの drift は
+// `corpus_fixtures_match_their_fire_clean_expectation` を素通りする。
+//
+// 各トグルを単独有効化 (all-off + 1 toggle on) し、そのトグルが gate する全 rule の
+// Fire sample が発火することを assert して、その silent drift を hot-path 改変ゼロで
+// 閉じる。AST 系に限らず全トグル一様で、line rule は単独でも独立に発火するため green。
+#[test]
+fn every_toggle_fires_its_rules_under_single_toggle_isolation() {
+    let mut missed = Vec::new();
+    for (name, config, rules) in toggle_isolation_cases() {
+        for sample in corpus::SAMPLES
+            .iter()
+            .filter(|s| rules.contains(&s.rule) && s.expectation == Expectation::Fire)
+        {
+            if !detected_rules(sample.path, sample.content, &config).contains(sample.rule) {
+                missed.push(format!("{name}/{} ({})", sample.rule, sample.path));
+            }
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "fire samples not detected under single-toggle isolation \
+         (skip-guard/dispatch flag drift?): {missed:?}"
+    );
+}
+
 // T-267: should-fire sample は検出で tp、未検出で fn に計上される。
 #[test]
 fn fire_samples_tally_tp_when_detected_and_fn_when_missed() {
