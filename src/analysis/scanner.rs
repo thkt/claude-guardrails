@@ -239,12 +239,16 @@ pub fn build_line_offsets(content: &str) -> Vec<usize> {
 /// Per-byte classification of source. Built in a single pass so callers can
 /// replace per-position rescans (O(n) each) with O(1) lookups.
 ///
-/// - `comment[i]` is true when byte `i` is inside a `//` or `/* */` comment.
+/// - `comment[i]` is true when byte `i` is inside a `//` or `/* */` comment,
+///   including the opener (`//`/`/*`) and closer (`*/`) delimiter bytes.
 /// - `code_visible[i]` keeps the original byte when `i` is code, otherwise
 ///   ASCII space (`0x20`). Template interpolation (`${...}`) content stays
 ///   code. Multi-byte string/comment content is preserved at byte level by
 ///   replacing each byte individually; UTF-8 validity is maintained because
-///   ASCII space is a single-byte ASCII codepoint.
+///   ASCII space is a single-byte ASCII codepoint. The two masks disagree at
+///   opener delimiters: `comment` flags them, but `code_visible` keeps them
+///   visible (hiding uses the pre-advance state), so do not treat the masks as
+///   inverses of each other.
 pub struct SourceMasks {
     pub comment: Vec<bool>,
     pub code_visible: Vec<u8>,
@@ -270,8 +274,16 @@ pub fn build_source_masks(content: &str) -> SourceMasks {
         scanner.advance();
         let end = scanner.pos.min(len);
 
+        // `advance` consumes both opener bytes (`//`/`/*`) while flipping the
+        // comment flag, so those bytes carry the pre-advance state (code). Fold
+        // in the post-advance flag so the opener delimiters count as comment;
+        // string openers only set string flags, so this never bleeds into a
+        // string literal that contains `/*`/`*/`.
+        let in_comment_after = scanner.in_block_comment || scanner.in_line_comment;
+        let in_comment = in_comment_now || in_comment_after;
+
         for i in start..end {
-            comment[i] = in_comment_now;
+            comment[i] = in_comment;
             if hide {
                 code_visible[i] = b' ';
             }
