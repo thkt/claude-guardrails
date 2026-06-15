@@ -15,6 +15,9 @@ static RE_CONSOLE_CALL: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
+// log/logger 終端識別子 (catalog.log 等) の FP は正規表現に先頭境界を持たせず、
+// 検出ループ側で直前バイトを見て弾く (#298)。`\b` だと `_` が word 文字のため
+// `_logger`/`this._logger` を取りこぼすので採用しない。
 static RE_LOGGER_CALL: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_LOGGER_CALL",
@@ -53,6 +56,13 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
         let logger_hits = RE_LOGGER_CALL.find_iter(content).map(|m| (m, MSG_LOGGER));
 
         for (caps, msg) in console_hits.chain(logger_hits) {
+            // log/logger/console を独立レシーバに限定する。直前バイトが ASCII 英数字
+            // なら catalog.log / mylogger.info / myconsole.log のように大きな識別子の
+            // 一部であり FP (#298)。`_logger`/`this._logger` は直前が `_`/`.` で英数字
+            // ではないため発火を維持する。
+            if caps.start() > 0 && content.as_bytes()[caps.start() - 1].is_ascii_alphanumeric() {
+                continue;
+            }
             if masks.comment.get(caps.start()).copied().unwrap_or(false) {
                 continue;
             }
@@ -102,6 +112,40 @@ mod tests {
         for (content, keyword) in cases {
             let violations = check(content);
             assert_eq!(violations.len(), 1, "Should detect: {keyword}");
+        }
+    }
+
+    // #298: log/logger/console で終わる識別子のプロパティ呼び出し
+    // (catalog.log / auditlog.error / myconsole.log) は直前バイトが ASCII 英数字の
+    // ため発火させない。
+    #[test]
+    fn ignores_identifier_ending_in_logger_or_console() {
+        let cases = [
+            r"catalog.log(secret);",
+            r"auditlog.error(token);",
+            r"mylogger.debug(apiKey);",
+            r"myconsole.log(secret);",
+        ];
+        for content in cases {
+            assert!(check(content).is_empty(), "Should not fire on: {content}");
+        }
+    }
+
+    // #298: 独立した log/logger/console レシーバ (bare / プロパティチェーン経由 /
+    // 先頭が `_`) は引き続き発火する。直前が `.`/`_`/行頭で ASCII 英数字でないため
+    // 検知対象に残す。`_logger` は `\b` 方式では取りこぼす true positive。
+    #[test]
+    fn detects_standalone_chained_and_underscore_receiver() {
+        let cases = [
+            r"log.warn(password);",
+            r"this.logger.info(secret);",
+            r"app.log.error(apiKey);",
+            r"_logger.warn(token);",
+            r"this._logger.info(secret);",
+            r"console.error(password);",
+        ];
+        for content in cases {
+            assert_eq!(check(content).len(), 1, "Should fire on: {content}");
         }
     }
 
