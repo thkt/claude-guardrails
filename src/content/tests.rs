@@ -350,29 +350,29 @@ fn read_file_capped_degrades_on_non_utf8() {
 }
 
 #[test]
-fn content_within_cap_accepts_empty() {
-    assert!(content_within_cap("", 100));
+fn length_within_cap_accepts_empty() {
+    assert!(length_within_cap(0, 100));
 }
 
 #[test]
-fn content_within_cap_accepts_one_byte_under_cap() {
-    assert!(content_within_cap(&"a".repeat(99), 100));
+fn length_within_cap_accepts_one_byte_under_cap() {
+    assert!(length_within_cap(99, 100));
 }
 
 #[test]
-fn content_within_cap_accepts_at_exact_cap() {
-    assert!(content_within_cap(&"a".repeat(100), 100));
+fn length_within_cap_accepts_at_exact_cap() {
+    assert!(length_within_cap(100, 100));
 }
 
 #[test]
-fn content_within_cap_rejects_one_byte_over_cap() {
-    assert!(!content_within_cap(&"a".repeat(101), 100));
+fn length_within_cap_rejects_one_byte_over_cap() {
+    assert!(!length_within_cap(101, 100));
 }
 
 #[test]
-fn content_within_cap_accepts_zero_cap_only_for_empty() {
-    assert!(content_within_cap("", 0));
-    assert!(!content_within_cap("a", 0));
+fn length_within_cap_accepts_zero_cap_only_for_empty() {
+    assert!(length_within_cap(0, 0));
+    assert!(!length_within_cap(1, 0));
 }
 
 #[test]
@@ -381,6 +381,23 @@ fn read_file_capped_degrades_on_oversized_file() {
     let path = tmp.path().join("huge.ts");
     let size = usize::try_from(MAX_INPUT_SIZE + 1).unwrap();
     fs::write(&path, "a".repeat(size)).unwrap();
+    assert!(matches!(
+        read_file_capped(path.to_str().unwrap(), None, true),
+        ContentResolution::Degraded(DegradedReason::OversizedFile)
+    ));
+}
+
+#[test]
+fn read_file_capped_oversized_multibyte_split_degrades_oversized() {
+    // The cap boundary (byte N+1) splits a 4-byte codepoint: take(N+1)
+    // captures only 3 of its 4 bytes, so decode-first sees invalid UTF-8.
+    // Byte-first ordering must degrade as OversizedFile, not NonUtf8Content.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("split.ts");
+    let n = usize::try_from(MAX_INPUT_SIZE).unwrap();
+    let mut bytes = vec![b'a'; n - 2];
+    bytes.extend_from_slice("𝄞".as_bytes()); // 4 bytes -> total n + 2
+    fs::write(&path, bytes).unwrap();
     assert!(matches!(
         read_file_capped(path.to_str().unwrap(), None, true),
         ContentResolution::Degraded(DegradedReason::OversizedFile)

@@ -286,20 +286,25 @@ pub(crate) fn read_file_capped(
         Ok(f) => f,
         Err(e) => return ContentResolution::Degraded(io_error_to_reason(&e)),
     };
-    let mut buf = String::new();
-    if let Err(e) = file.take(MAX_INPUT_SIZE + 1).read_to_string(&mut buf) {
+    // Read bytes first so a cap-boundary split of a multibyte codepoint is
+    // reported as OversizedFile, not as a UTF-8 decode failure (#302).
+    let mut bytes = Vec::new();
+    if let Err(e) = file.take(MAX_INPUT_SIZE + 1).read_to_end(&mut bytes) {
         return ContentResolution::Degraded(io_error_to_reason(&e));
     }
-    if !content_within_cap(&buf, MAX_INPUT_SIZE) {
+    if !length_within_cap(bytes.len(), MAX_INPUT_SIZE) {
         return ContentResolution::Degraded(DegradedReason::OversizedFile);
     }
-    ContentResolution::Full(buf)
+    match String::from_utf8(bytes) {
+        Ok(buf) => ContentResolution::Full(buf),
+        Err(_) => ContentResolution::Degraded(DegradedReason::NonUtf8Content),
+    }
 }
 
-/// Pure size-cap predicate. Cap is parameterized so the boundary is
-/// testable with small fixtures (no 10MB allocation required).
-pub(crate) fn content_within_cap(content: &str, cap: u64) -> bool {
-    u64::try_from(content.len()).is_ok_and(|n| n <= cap)
+/// Pure size-cap predicate over a byte length. Cap is parameterized so the
+/// boundary is testable with small fixtures (no 10MB allocation required).
+pub(crate) fn length_within_cap(len: usize, cap: u64) -> bool {
+    u64::try_from(len).is_ok_and(|n| n <= cap)
 }
 
 fn io_error_to_reason(e: &io::Error) -> DegradedReason {
