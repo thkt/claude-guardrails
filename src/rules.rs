@@ -92,10 +92,10 @@ pub(crate) mod rule_id {
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =
-    LazyLock::new(|| regex_or_die("RE_JS_FILE", r"\.(tsx?|jsx?)$"));
+    LazyLock::new(|| regex_or_die("RE_JS_FILE", r"\.m?[jt]sx?$"));
 
 pub static RE_TEST_FILE: LazyLock<Regex> =
-    LazyLock::new(|| regex_or_die("RE_TEST_FILE", r"\.(test|spec)\.[jt]sx?$"));
+    LazyLock::new(|| regex_or_die("RE_TEST_FILE", r"\.(test|spec)\.m?[jt]sx?$"));
 
 pub static RE_ALL_FILES: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_ALL_FILES", r"."));
 

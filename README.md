@@ -520,6 +520,10 @@ These rules use `StringScanner` which tracks comment state across lines:
 
 These trade-offs are acceptable for guardrails use cases where false positives are preferable to false negatives.
 
+### File extension scope
+
+JS analysis (oxlint, AST, ast-security) covers `.js`, `.ts`, `.jsx`, `.tsx`, `.mjs`, and `.mts`. CommonJS `.cjs`/`.cts` are out of scope: they are predominantly Node tooling (build config, CLI, generators) rather than frontend code.
+
 ## Companion Tools
 
 This tool is part of a 4-tool quality pipeline for Claude Code. Each covers a

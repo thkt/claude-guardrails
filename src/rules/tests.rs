@@ -135,6 +135,52 @@ fn re_api_or_route_rejects_near_miss_paths() {
     assert!(!RE_API_OR_ROUTE_FILE.is_match("/src/app/route-helper.ts"));
 }
 
+#[test]
+fn re_js_file_matches_esm_and_classic_extensions() {
+    for ext in [
+        "foo.js", "foo.ts", "foo.jsx", "foo.tsx", "foo.mjs", "foo.mts",
+    ] {
+        assert!(RE_JS_FILE.is_match(ext), "{ext} should be JS-analyzed");
+    }
+}
+
+#[test]
+fn re_js_file_rejects_commonjs_extensions() {
+    // .cjs/.cts are Node tooling (build config, CLI), out of OUTCOME scope.
+    for ext in ["foo.cjs", "foo.cts", "foo.json", "foo.css"] {
+        assert!(!RE_JS_FILE.is_match(ext), "{ext} must not be JS-analyzed");
+    }
+}
+
+#[test]
+fn re_test_file_co_extends_to_esm() {
+    // ESM test files keep ast-security's test exemption (is_test_file=true).
+    for ext in ["a.test.mjs", "a.test.mts", "a.spec.mjs", "a.test.js"] {
+        assert!(RE_TEST_FILE.is_match(ext), "{ext} should classify as test");
+    }
+}
+
+#[test]
+fn re_test_file_rejects_commonjs_test_extensions() {
+    for ext in ["a.test.cjs", "a.spec.cts"] {
+        assert!(
+            !RE_TEST_FILE.is_match(ext),
+            "{ext} must not classify as test"
+        );
+    }
+}
+
+#[test]
+fn re_react_file_excludes_esm_non_jsx_extensions() {
+    // .mjs/.mts are not JSX, so React-only rules stay scoped to .tsx/.jsx.
+    for ext in ["foo.mjs", "foo.mts", "foo.js", "foo.ts"] {
+        assert!(
+            !RE_REACT_FILE.is_match(ext),
+            "{ext} must not be React-scoped"
+        );
+    }
+}
+
 // --- Known limitations ---
 
 #[test]
