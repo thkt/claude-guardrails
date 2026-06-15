@@ -2,7 +2,7 @@
 //! size cap, and deserializes into `ToolInput`. Failures map to typed
 //! `ParseStdinError` variants the caller renders.
 
-use crate::content::{content_within_cap, ToolInput};
+use crate::content::{length_within_cap, ToolInput};
 use crate::io::envelope::{ErrorCode, ErrorPayload};
 use crate::io::output::build_payload;
 use crate::MAX_INPUT_SIZE;
@@ -46,16 +46,21 @@ pub(crate) fn parse_stdin() -> Result<ToolInput, ParseStdinError> {
 }
 
 fn parse_stdin_from(reader: &mut dyn Read) -> Result<ToolInput, ParseStdinError> {
-    let mut input_str = String::new();
-    reader
-        .take(MAX_INPUT_SIZE + 1)
-        .read_to_string(&mut input_str)?;
+    // Read bytes first so a cap-boundary split of a multibyte codepoint is
+    // reported as Oversized, not as a UTF-8 decode failure (#302).
+    let mut bytes = Vec::new();
+    reader.take(MAX_INPUT_SIZE + 1).read_to_end(&mut bytes)?;
 
-    if !content_within_cap(&input_str, MAX_INPUT_SIZE) {
+    if !length_within_cap(bytes.len(), MAX_INPUT_SIZE) {
         return Err(ParseStdinError::Oversized {
             cap: MAX_INPUT_SIZE,
         });
     }
+
+    // No Utf8 variant on ParseStdinError: route a decode failure through the
+    // existing `Io` mapping (InvalidData) to keep the IO_ERROR next_step.
+    let input_str =
+        String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     Ok(serde_json::from_str(&input_str)?)
 }
@@ -97,6 +102,32 @@ mod tests {
         match parse_stdin_from(&mut cursor) {
             Err(e) => assert!(matches!(e, ParseStdinError::Oversized { .. }), "got {e:?}"),
             Ok(_) => panic!("expected Err for oversized input"),
+        }
+    }
+
+    #[test]
+    fn parse_stdin_from_oversized_multibyte_split_maps_oversized() {
+        // The cap boundary (byte N+1) splits a 4-byte codepoint: take(N+1)
+        // captures only 3 of its 4 bytes, so decode-first sees invalid UTF-8.
+        // Byte-first ordering must report Oversized, not Io.
+        let n = usize::try_from(MAX_INPUT_SIZE).unwrap();
+        let mut payload = vec![b'a'; n - 2];
+        payload.extend_from_slice("𝄞".as_bytes()); // 4 bytes -> total n + 2
+        let mut cursor = io::Cursor::new(payload);
+        match parse_stdin_from(&mut cursor) {
+            Err(e) => assert!(matches!(e, ParseStdinError::Oversized { .. }), "got {e:?}"),
+            Ok(_) => panic!("expected Err for oversized input"),
+        }
+    }
+
+    #[test]
+    fn parse_stdin_from_invalid_utf8_within_cap_maps_io() {
+        // Invalid UTF-8 that fits under the cap stays an Io error (IO_ERROR
+        // next_step), locking the decode-failure mapping unchanged.
+        let mut cursor = io::Cursor::new(vec![0xff, 0xfe, 0xfd]);
+        match parse_stdin_from(&mut cursor) {
+            Err(e) => assert!(matches!(e, ParseStdinError::Io(_)), "got {e:?}"),
+            Ok(_) => panic!("expected Err for invalid UTF-8 input"),
         }
     }
 
