@@ -1,1 +1,3 @@
 console.log('user:', userName);
+catalog.log(secret);
+myconsole.log(secret);
