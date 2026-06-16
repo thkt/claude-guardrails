@@ -89,6 +89,7 @@ pub(crate) mod rule_id {
         CLIENT_ENV_PUBLIC_LEAK = "client-env-public-leak",
         SSR_SECRET_BLEED = "ssr-secret-bleed",
         POSTMESSAGE_ORIGIN_MISSING = "postmessage-origin-missing",
+        EXCESSIVE_NESTING = "excessive-nesting",
     }
 }
 
@@ -206,20 +207,25 @@ impl fmt::Display for Severity {
 /// wire format, so toggle-off output is unchanged. The hook makes no positive
 /// claim that a survivor was introduced: non-allowlisted rules are never
 /// before-compared, so an "introduced" mark could not be verified.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViolationOrigin {
     Preexisting,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Violation {
     pub rule: String,
     pub severity: Severity,
     pub fix: String,
     pub file: String,
     pub line: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    // `Deserialize` decodes child-subprocess violations (#314 parse-in-child).
+    // `skip_serializing_if` keeps `origin` off the wire when None, so a decoder
+    // must tolerate its absence: `default` supplies None instead of failing with
+    // "missing field origin", which would silently drop every structural rule
+    // the child found (fail-open). The two attributes are a matched pair.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub origin: Option<ViolationOrigin>,
 }
 

@@ -441,6 +441,18 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
     },
     RuleDoc {
         table: Table::AstSecurity,
+        key: "excessive-nesting",
+        rule_id: Some(rule_id::EXCESSIVE_NESTING),
+        severity: "High",
+        description: r"Source nested past a safe depth — `()[]{}` brackets or `!`/`~` prefix runs",
+        why: r"Deeply nested input overflows the parser's recursion and crashes the check process before any rule runs, which would silently let the edit through; a byte scan blocks it before the parse",
+        when_to_disable: None,
+        description_ja: r"安全な深さを超えた入れ子 — `()[]{}` 括弧または `!`/`~` の連鎖",
+        why_ja: r"深い入れ子はパーサの再帰をオーバーフローさせ、ルール実行前にチェックプロセスを落とし、編集が黙って通ってしまう。パース前のバイトスキャンで阻止する",
+        when_to_disable_ja: None,
+    },
+    RuleDoc {
+        table: Table::AstSecurity,
         key: "env-var-fallback",
         rule_id: Some(rule_id::ENV_VAR_FALLBACK),
         severity: "High",

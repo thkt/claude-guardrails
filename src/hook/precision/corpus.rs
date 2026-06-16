@@ -70,4 +70,5 @@ samples! {
     "client-env-public-leak" => fire: "/src/components/Profile.tsx", clean: "/src/components/Profile.tsx";
     "ssr-secret-bleed" => fire: "/pages/dashboard.tsx", clean: "/pages/dashboard.tsx";
     "postmessage-origin-missing" => fire: "/src/page.ts", clean: "/src/page.ts";
+    "excessive-nesting" => fire: "/src/app.ts", clean: "/src/app.ts";
 }

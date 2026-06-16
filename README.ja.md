@@ -202,6 +202,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `non-literal-require` | Medium | require() への非リテラル引数（動的モジュールロード） | 汚染されたモジュール名で攻撃者制御の JavaScript を実行中プロセスにロードする |
 | `unsafe-regex` | Medium | ReDoS に脆弱な正規表現リテラル（ネストされた量指定子、catastrophic backtracking） | 細工した入力でエンジンが指数バックトラックに陥り、CPU が 100% になって他のリクエストに応答できなくなる |
 | `bidi-characters` | High | ソース中に潜む Unicode 双方向制御文字（CVE-2021-42574 / Trojan Source） | bidi 文字は描画時にソースを並べ替えるので、レビュワーが見るコードとコンパイラが見るコードが食い違い、悪意あるロジックが平然と隠れる |
+| `excessive-nesting` | High | 安全な深さを超えた入れ子 — `()[]{}` 括弧または `!`/`~` の連鎖 | 深い入れ子はパーサの再帰をオーバーフローさせ、ルール実行前にチェックプロセスを落とし、編集が黙って通ってしまう。パース前のバイトスキャンで阻止する |
 | `env-var-fallback` | High | `process.env.X \|\| 'default'` 形式 — ハードコードされたフォールバックでシークレットが漏洩する | env var が未設定だとハードコードされたデフォルトが本物の credential として動き、しかもソース内に永遠に残る |
 | `prototype-pollution` | High | `Object.assign({}, untrusted)`、`_.merge`、`__proto__`/`constructor` を伴う `Object.create` | `__proto__` への書き込みがランタイム上の全オブジェクトを汚染し、認可チェックが誤動作し、sink 次第ではコード実行も開く |
 | `math-random-insecure` | Mixed | トークン/ID/シークレット用途の `Math.random()`。用法が確定する場合（`toString(36)` イディオム / 暗号 API 引数）は High、命名ヒューリスティック（security 系の変数名・関数名、`toString` 他基数）止まりは Medium。詳細は [ADR-0003](docs/decisions/0003-math-random-severity-policy.md) | `Math.random` は予測可能で、これで作ったトークンは推測されセッションがハイジャックされうる |

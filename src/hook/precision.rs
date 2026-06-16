@@ -173,10 +173,10 @@ toggle_isolation! {
     open_redirect => "openRedirect": ["open-redirect"];
     ast_security => "astSecurity": [
         "bidi-characters", "child-process-injection", "client-env-public-leak",
-        "env-var-fallback", "err-stack-exposure", "math-random-insecure",
-        "non-literal-fs-path", "non-literal-require", "postmessage-origin-missing",
-        "prototype-pollution", "ssr-secret-bleed", "unsafe-html-injection",
-        "unsafe-regex",
+        "env-var-fallback", "err-stack-exposure", "excessive-nesting",
+        "math-random-insecure", "non-literal-fs-path", "non-literal-require",
+        "postmessage-origin-missing", "prototype-pollution", "ssr-secret-bleed",
+        "unsafe-html-injection", "unsafe-regex",
     ];
     cot_leakage_marker => "cotLeakageMarker": ["cot-leakage-marker"];
     sqli_concat => "sqliConcat": ["sqli-concat"];

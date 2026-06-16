@@ -2,11 +2,11 @@
 //! runs the lint/AST/rule passes, partitions violations by severity, and maps
 //! the outcome to a sysexits exit code.
 
-use crate::analysis::{ast, ast_security, oxlint};
+use crate::analysis::ast_rules::{self, AstRequest, AstRuleFlags};
+use crate::analysis::{ast_security, nesting, oxlint};
 use crate::config::{Config, ConfigError};
 use crate::content::{get_file_and_content, ToolInput, ToolName};
 use crate::hook_exit::HookExitCode;
-use crate::import_map;
 use crate::io::output::{
     emit_human_violations, emit_json_if_enabled, render_error, show_config_hint,
 };
@@ -14,8 +14,9 @@ use crate::io::stdin::parse_stdin;
 use crate::rules::{self, non_comment_lines, Violation, ViolationOrigin};
 use std::env;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 fn lint_with_external_tools(
     content: &str,
@@ -47,23 +48,30 @@ fn lint_with_external_tools(
     (violations, notes)
 }
 
+/// Outcome of running the six structural AST rules, from whichever path
+/// produced it (in-process under test, or the child subprocess in production).
+enum AstOutcome {
+    /// Parse succeeded; these are the structural violations (possibly empty).
+    Violations(Vec<Violation>),
+    /// Parse failed (unsupported type or parser panic). Structural rules are
+    /// skipped and the edit proceeds with a note — the #294 fail-open contract.
+    ParseFailed,
+    /// The parse aborted on a stack overflow the byte scan could not see (deep
+    /// JSX / ternary / generics). Block the edit (#314).
+    Overflow,
+}
+
 fn lint_with_ast(
     content: &str,
     file_path: &str,
     config: &Config,
 ) -> (Vec<Violation>, Option<String>) {
-    // Skip the parse when every AST-driven rule is disabled. This flag list
-    // must stay in lockstep with the per-rule dispatch arms that follow — the
-    // pre-parse `check_bidi` arm and the parse-closure arms alike; a missing
-    // rule on either side reintroduces the drift that motivated removing the
-    // outer `has_ast_rules` guard.
-    if !config.rules.ast_security
-        && !config.rules.no_use_effect
-        && !config.rules.open_redirect
-        && !config.rules.eval
-        && !config.rules.sqli_concat
-        && !config.rules.cors_wildcard
-    {
+    // The parse fires whenever ANY of the six AST rules is on. `AstRuleFlags`
+    // is the single source for that set, so the early-return, the child request,
+    // and the in-process call cannot drift apart (the lockstep that motivated
+    // removing the old outer `has_ast_rules` guard).
+    let flags = AstRuleFlags::from_config(config);
+    if !flags.any() {
         return (Vec::new(), None);
     }
     // check_bidi is a pure byte scan with no AST dependency. Run it before the
@@ -75,60 +83,38 @@ fn lint_with_ast(
             found.push(v);
         }
     }
-    let result = ast::with_parsed_program(content, file_path, |program, line_offsets| {
-        let mut ast_found = Vec::new();
-        if config.rules.ast_security {
-            ast_found.extend(ast_security::check_program(
-                program,
-                line_offsets,
-                file_path,
-            ));
-        }
-        if config.rules.no_use_effect {
-            ast_found.extend(rules::no_use_effect::check_program(
-                program,
-                line_offsets,
-                file_path,
-            ));
-        }
-        if config.rules.open_redirect {
-            ast_found.extend(rules::open_redirect::check_program(
-                program,
-                line_offsets,
-                file_path,
-            ));
-        }
-        if config.rules.eval {
-            let import_map = import_map::ImportMap::build(program);
-            ast_found.extend(rules::eval::check_program(
-                program,
-                line_offsets,
-                file_path,
-                &import_map,
-            ));
-        }
-        if config.rules.sqli_concat {
-            ast_found.extend(rules::sqli_concat::check_program(
-                program,
-                line_offsets,
-                file_path,
-            ));
-        }
-        if config.rules.cors_wildcard {
-            ast_found.extend(rules::cors_wildcard::check_program(
-                program,
-                line_offsets,
-                file_path,
-            ));
-        }
-        ast_found
-    });
-    match result {
-        Some(v) => {
+    // Pre-parse depth guard (#314), tier 1: deeply nested brackets / prefix runs
+    // overflow oxc's recursive-descent parser and abort (exit 134 = fail-open).
+    // This deterministic byte scan blocks them before the parse with zero false
+    // positives. Unconditional (not gated on ast_security) because the parse
+    // runs on any of the six rules; gating it would let {ast_security:false,
+    // eval:true} reach the parse unguarded and abort.
+    if let Some(v) = nesting::check_excessive_nesting(content, file_path) {
+        // No note: unlike a parse failure (which silently drops structural
+        // rules while the edit still proceeds = degraded coverage), this is
+        // a deliberate block. The High Violation rejects the edit (exit 2),
+        // so the skipped structural rules are moot.
+        found.push(v);
+        return (found, None);
+    }
+    // Tier 2: run the parse + structural rules in a child process so an overflow
+    // the byte scan cannot see (deep JSX / ternary / generics carry no bracket
+    // signature) aborts the child, not the hook. The child re-execs this same
+    // binary with the same stack, so it aborts exactly when an in-process parse
+    // would. Under cfg!(test) the test binary's entry point cannot dispatch the
+    // child subcommand, so unit tests use the in-process path — their inputs
+    // never reach the overflow floor, so they never abort the test runner.
+    let outcome = if cfg!(test) {
+        run_ast_inprocess(content, file_path, &flags)
+    } else {
+        spawn_ast_child(content, file_path, &flags)
+    };
+    match outcome {
+        AstOutcome::Violations(v) => {
             found.extend(v);
             (found, None)
         }
-        None => (
+        AstOutcome::ParseFailed => (
             found,
             // check_bidi already ran above, so any bidi violation is in `found`;
             // only the AST-dependent (structural) rules were skipped.
@@ -136,6 +122,73 @@ fn lint_with_ast(
                 "AST parse failed; structural rules skipped (bidi scan still applied)",
             )),
         ),
+        AstOutcome::Overflow => {
+            found.push(nesting::overflow_violation(file_path));
+            (found, None)
+        }
+    }
+}
+
+fn run_ast_inprocess(content: &str, file_path: &str, flags: &AstRuleFlags) -> AstOutcome {
+    match ast_rules::run_ast_rules(content, file_path, flags) {
+        Some(v) => AstOutcome::Violations(v),
+        None => AstOutcome::ParseFailed,
+    }
+}
+
+/// Spawns the hidden `__ast-child` subcommand to parse in isolation. Every
+/// spawn-time failure (serialize, `current_exe`, spawn) fails closed
+/// (`Overflow` → block): falling back to the in-process parse here would re-open
+/// the exact #314 fail-open, because a byte-scan-invisible overflow input would
+/// then abort the hook (exit 134, non-blocking). A spawn failure is
+/// environmental and astronomically rare; blocking on it is the safe direction.
+fn spawn_ast_child(content: &str, file_path: &str, flags: &AstRuleFlags) -> AstOutcome {
+    let request = AstRequest {
+        content: content.to_owned(),
+        file_path: file_path.to_owned(),
+        flags: flags.clone(),
+    };
+    let Ok(payload) = serde_json::to_vec(&request) else {
+        return AstOutcome::Overflow;
+    };
+    let Ok(exe) = env::current_exe() else {
+        return AstOutcome::Overflow;
+    };
+    let spawned = Command::new(exe)
+        .arg("__ast-child")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = spawned else {
+        return AstOutcome::Overflow;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        // Ignore write errors: a child that aborts before draining stdin closes
+        // the pipe (EPIPE). The exit code below is the source of truth, so do
+        // not unwrap — unwrapping would crash the hook on the very overflow this
+        // path exists to contain.
+        let _ = stdin.write_all(&payload);
+    }
+    // stdin dropped here → EOF for the child's read_to_string.
+    let Ok(output) = child.wait_with_output() else {
+        return AstOutcome::Overflow;
+    };
+    match output.status.code() {
+        Some(0) => match serde_json::from_slice::<Vec<Violation>>(&output.stdout) {
+            Ok(v) => AstOutcome::Violations(v),
+            // Exit 0 means the child encoded a valid Vec<Violation> and wrote
+            // nothing else (its only stdout write is that one line), so an
+            // undecodable payload is an unreachable contract breach. Fail closed:
+            // proceeding here would silently drop any violation the child found.
+            Err(_) => AstOutcome::Overflow,
+        },
+        Some(1) => AstOutcome::ParseFailed,
+        // None = killed by a signal (the SIGABRT overflow on Unix); on Windows a
+        // stack overflow is exit 0xC0000409/0xC00000FD (also not 0/1). Any other
+        // code is an unexpected child failure. All fail closed: block rather than
+        // let a file that overflows the parser through unchecked.
+        _ => AstOutcome::Overflow,
     }
 }
 
