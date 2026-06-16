@@ -164,6 +164,11 @@ const MAX_DOWNLOAD_SIZE: u64 = 50_000_000;
 
 fn fetch_url(url: &str) -> Result<Vec<u8>, OxlintError> {
     eprintln!("guardrails: downloading oxlint v{OXLINT_VERSION}...");
+    // Integrity rests solely on the SHA-256 pin (verify_sha256, constant-time):
+    // bytes off any host fail the pin and never execute. Redirects are followed
+    // by default because the GitHub release asset 302s to
+    // objects.githubusercontent.com; pinning the scheme/host would reject that
+    // legitimate hop and break cold-cache install on every platform.
     let resp = ureq::get(url)
         .call()
         .map_err(|e| OxlintError::NetworkFailure(e.to_string()))?;
