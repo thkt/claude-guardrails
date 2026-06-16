@@ -27,7 +27,10 @@ struct OxlintOutput {
 #[derive(Debug, Deserialize)]
 struct OxlintDiagnostic {
     message: String,
-    code: String,
+    // oxlint omits `code` for parse/semantic diagnostics (syntax errors,
+    // redeclarations). Optional so one code-less entry does not fail the whole
+    // batch deserialize and silently drop every real rule violation (#320).
+    code: Option<String>,
     severity: String,
     help: Option<String>,
     #[serde(default)]
@@ -107,17 +110,21 @@ fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> 
     output
         .diagnostics
         .into_iter()
-        .map(|d| {
+        .filter_map(|d| {
+            // code-less diagnostics are oxlint's own parse/semantic errors, not
+            // rule violations; skip them so the real violations in the same
+            // batch still surface (#320).
+            let code = d.code?;
             let severity = Severity::from_linter_str(&d.severity);
 
-            Violation {
-                rule: format!("oxlint/{}", d.code),
+            Some(Violation {
+                rule: format!("oxlint/{code}"),
                 severity,
                 fix: d.help.unwrap_or(d.message),
                 file: file_path.to_owned(),
                 line: d.labels.first().map(|l| l.span.line),
                 origin: None,
-            }
+            })
         })
         .collect()
 }
@@ -191,6 +198,43 @@ mod tests {
 
         let violations = parse_diagnostics(json, "f");
         assert_eq!(violations[0].line, None);
+    }
+
+    // T-320 (#320): synthetic unit test for the deserialize/filter contract,
+    // not a reproduction of real oxlint output. Under guardrails' args oxlint
+    // stops linting on a parse/semantic error and emits the code-less
+    // diagnostic alone — it does not co-batch a code-less entry with coded
+    // violations (that needs `--report-unused-disable-directives`, which
+    // guardrails never passes). This pins the contract anyway: a code-less
+    // entry deserializes (was `code: String` → whole-batch deserialize
+    // failure) and is filtered out, while any coded violation in the same
+    // batch survives. Guards against a future oxlint / arg change that does
+    // co-batch them.
+    #[test]
+    fn codeless_diagnostic_is_skipped_real_violations_survive() {
+        let json = r#"{"diagnostics": [
+            {
+                "message": "Unexpected token",
+                "severity": "error",
+                "labels": [{"span": {"offset": 0, "length": 1, "line": 1, "column": 1}}]
+            },
+            {
+                "message": "Unexpected console statement",
+                "code": "eslint(no-console)",
+                "severity": "error",
+                "help": "Delete this console statement",
+                "labels": [{"span": {"offset": 20, "length": 11, "line": 3, "column": 1}}]
+            }
+        ]}"#;
+
+        let violations = parse_diagnostics(json, "f.ts");
+        assert_eq!(
+            violations.len(),
+            1,
+            "code-less diagnostic must be skipped while the real violation is kept"
+        );
+        assert_eq!(violations[0].rule, "oxlint/eslint(no-console)");
+        assert_eq!(violations[0].line, Some(3));
     }
 
     // T-007: default config → 5 deny flags
