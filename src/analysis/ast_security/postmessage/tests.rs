@@ -400,3 +400,47 @@ fn postmessage_origin_missing_silent_on_bare_onmessage_with_origin_check() {
         "onmessage = (event) => { if (event.origin !== 'https://x') return; handle(event.data); };",
     );
 }
+
+// #317: end-to-end (`check()` → lazy SemanticBuilder → fire/silent) regression
+// guards for two container shapes that the pre-scan / SecurityVisitor walk
+// descends but no e2e test pinned: class methods and try blocks. The fire+silent
+// pair per shape is the assertion, not redundancy — the fire case proves the
+// walker reaches the handler, the silent case proves origin resolution works
+// once reached. A silent test alone could pass by the handler never being
+// reached (silent by accident); the paired fire test rules that out.
+//
+// object-literal methods (`{ init() { window.addEventListener(...) } }`) are the
+// same equivalence class as class methods: both descend through a normal
+// function body and resolve `event.origin` by `SymbolId` (nesting-independent),
+// so they are not pinned separately.
+#[test]
+fn postmessage_origin_missing_fires_on_handler_in_class_method() {
+    assert_postmessage_fires(
+        "class App { init() { window.addEventListener('message', (event) => { handle(event.data); }); } }",
+    );
+}
+
+#[test]
+fn postmessage_origin_missing_silent_on_validating_handler_in_class_method() {
+    assert_postmessage_silent(
+        "class App { init() { window.addEventListener('message', (event) => { if (event.origin !== 'https://x') return; handle(event.data); }); } }",
+    );
+}
+
+// try block exercises the `walk_try_statement → .block` dispatch arm. Unlike the
+// other container shapes it has no gate-level pin either, so it is the case most
+// likely to surface a real descent gap if the pre-scan ever stops walking
+// `TryStatement`.
+#[test]
+fn postmessage_origin_missing_fires_on_handler_in_try_block() {
+    assert_postmessage_fires(
+        "try { window.addEventListener('message', (event) => { handle(event.data); }); } catch (e) { report(e); }",
+    );
+}
+
+#[test]
+fn postmessage_origin_missing_silent_on_validating_handler_in_try_block() {
+    assert_postmessage_silent(
+        "try { window.addEventListener('message', (event) => { if (event.origin !== 'https://x') return; handle(event.data); }); } catch (e) { report(e); }",
+    );
+}
