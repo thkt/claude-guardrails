@@ -224,8 +224,16 @@ fn degraded_edit_resolution_skips_demotion_with_note() {
         "degraded resolution must mark the envelope: {stdout}"
     );
     assert!(
-        stdout.contains("demotion skipped"),
-        "envelope notes must state demotion was skipped: {stdout}"
+        stdout.contains("demotion skipped; pre-existing violations kept blocking"),
+        "skip note must keep its consequence clause: {stdout}"
+    );
+    assert!(
+        !stdout.contains("content resolution degraded"),
+        "skip note must not repeat the reason the degraded note already carries: {stdout}"
+    );
+    assert!(
+        stdout.contains("analyzed Edit snippet only"),
+        "the degraded note must still carry the reason the skip note dropped: {stdout}"
     );
 }
 
@@ -256,10 +264,11 @@ fn completed_demotion_reports_count_note_without_degraded() {
     );
 }
 
-// T-295: when the second pass runs but demotes nothing, the count note still
-// appears with zero and the envelope stays non-degraded.
+// T-295: when the second pass runs but demotes nothing, no count note is
+// emitted; the count note is reserved for runs that actually demote. The
+// envelope stays non-degraded either way.
 #[test]
-fn second_pass_with_zero_demoted_still_reports_count_note() {
+fn second_pass_with_zero_demoted_omits_count_note() {
     let tmp = tmp_repo_with_claude();
     enable_diff_aware(tmp.path());
     let file = tmp.path().join("app.ts");
@@ -274,12 +283,12 @@ fn second_pass_with_zero_demoted_still_reports_count_note() {
         "the newly added eval must keep blocking; stdout: {stdout}"
     );
     assert!(
-        stdout.contains("diff-aware: 0 pre-existing violation(s) demoted to advisory"),
-        "notes must report the zero demoted count: {stdout}"
+        !stdout.contains("demoted to advisory"),
+        "a run that demotes nothing must not emit a count note: {stdout}"
     );
     assert!(
         stdout.contains(r#""degraded":false"#),
-        "the count note must not flag the envelope degraded: {stdout}"
+        "a completed second pass must not flag the envelope degraded: {stdout}"
     );
 }
 

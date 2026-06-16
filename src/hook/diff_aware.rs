@@ -28,8 +28,8 @@ pub(crate) struct DemotionOutcome {
     pub(crate) demoted: Vec<Violation>,
     /// Degradation note: demotion was skipped and why. Drives `degraded`.
     pub(crate) skip_note: Option<String>,
-    /// Count report for a completed second pass (zero included). Never
-    /// drives `degraded`.
+    /// Count report for a completed second pass that demoted at least one
+    /// violation. Absent when nothing demoted. Never drives `degraded`.
     pub(crate) info_note: Option<String>,
 }
 
@@ -60,7 +60,9 @@ pub(crate) fn demote_preexisting(
         return DemotionOutcome::unchanged(blocking);
     }
     if target.degraded.is_some() {
-        return keep_all(blocking, "content resolution degraded");
+        // The degraded note already states the reason; emit only the
+        // consequence here so the two notes do not repeat it.
+        return keep_all(blocking, None);
     }
     let before_content = match target.before {
         BeforeSource::Retained(s) => s,
@@ -72,7 +74,7 @@ pub(crate) fn demote_preexisting(
             let Some(root) = project_root else {
                 return keep_all(
                     blocking,
-                    "cannot verify before-edit file is inside the project",
+                    Some("cannot verify before-edit file is inside the project"),
                 );
             };
             match read_file_capped(&target.file_path, Some(root), target.is_js) {
@@ -81,15 +83,15 @@ pub(crate) fn demote_preexisting(
                     return DemotionOutcome::unchanged(blocking);
                 }
                 ContentResolution::Degraded(reason) => {
-                    return keep_all(blocking, read_failure_phrase(reason));
+                    return keep_all(blocking, Some(read_failure_phrase(reason)));
                 }
                 ContentResolution::NotApplicable => {
-                    return keep_all(blocking, "before-edit content unavailable");
+                    return keep_all(blocking, Some("before-edit content unavailable"));
                 }
             }
         }
         BeforeSource::Unavailable => {
-            return keep_all(blocking, "before-edit content unavailable");
+            return keep_all(blocking, Some("before-edit content unavailable"));
         }
     };
     let (before_violations, before_notes) = super::collect_first_party_violations(
@@ -101,7 +103,10 @@ pub(crate) fn demote_preexisting(
     if !before_notes.is_empty() {
         return keep_all(
             blocking,
-            &format!("before-edit lint incomplete: {}", before_notes.join("; ")),
+            Some(&format!(
+                "before-edit lint incomplete: {}",
+                before_notes.join("; ")
+            )),
         );
     }
     let result = classify(
@@ -110,25 +115,31 @@ pub(crate) fn demote_preexisting(
         &before_violations,
         &before_content,
     );
-    let info_note = format!(
-        "diff-aware: {} pre-existing violation(s) demoted to advisory",
-        result.demoted.len()
-    );
+    // Only a run that actually demotes something says so; demoting nothing is
+    // the no-op outcome and needs no note.
+    let info_note = (!result.demoted.is_empty()).then(|| {
+        format!(
+            "diff-aware: {} pre-existing violation(s) demoted to advisory",
+            result.demoted.len()
+        )
+    });
     DemotionOutcome {
         blocking: result.blocking,
         demoted: result.demoted,
         skip_note: None,
-        info_note: Some(info_note),
+        info_note,
     }
 }
 
-fn keep_all(blocking: Vec<Violation>, why: &str) -> DemotionOutcome {
+fn keep_all(blocking: Vec<Violation>, why: Option<&str>) -> DemotionOutcome {
+    let skip_note = match why {
+        Some(why) => format!("demotion skipped ({why}); pre-existing violations kept blocking"),
+        None => "demotion skipped; pre-existing violations kept blocking".to_owned(),
+    };
     DemotionOutcome {
         blocking,
         demoted: Vec::new(),
-        skip_note: Some(format!(
-            "demotion skipped ({why}); pre-existing violations kept blocking"
-        )),
+        skip_note: Some(skip_note),
         info_note: None,
     }
 }
