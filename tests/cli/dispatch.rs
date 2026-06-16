@@ -94,23 +94,27 @@ fn deep_jsx_exits_two_not_aborts() {
 }
 
 // #314 tier 2: deep ternary chain. `a?b:` has no brackets at all, so the byte
-// scan is blind to it. The subprocess overflow path must block.
+// scan is blind to it; the parse runs in the child subprocess. Ternary frames
+// are shallow, so the depth at which oxc overflows is environment-dependent
+// (macOS overflows at 20000, CI Linux parses it). Both are correct: where the
+// child overflows the parent blocks (exit 2), where it parses cleanly the edit
+// proceeds (exit 0). The contract this guards is that neither path is the
+// fail-open SIGABRT (exit 134 / signal death). deep_generics and deep_jsx pin
+// the construct-agnostic overflow→block path itself on every runner.
 #[test]
-fn deep_ternary_exits_two_not_aborts() {
+fn deep_ternary_never_aborts_fail_open() {
     let content = format!("const x = {}3;", "1?2:".repeat(20000));
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": { "file_path": "/src/app.ts", "content": content }
     });
     let output = run_guardrails_json(&json.to_string());
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "deep ternary must block (exit 2), not abort (134) or pass; stderr: {}",
+    let code = output.status.code();
+    assert!(
+        code == Some(0) || code == Some(2),
+        "deep ternary must proceed (0) or block (2), never abort fail-open (134/signal); got {code:?}, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("BLOCKED"), "expected BLOCKED in: {stderr}");
 }
 
 // #314 round-trip: a structural rule found by the child subprocess must survive
