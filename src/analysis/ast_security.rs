@@ -60,23 +60,40 @@ fn name_matches_security_keyword(name: &str) -> bool {
     let bytes = name.as_bytes();
     MATH_RANDOM_SECURITY_KEYWORDS
         .iter()
-        .any(|kw| ascii_fold_contains(bytes, kw.as_bytes()))
+        .any(|kw| ascii_fold_underscore_contains(bytes, kw.as_bytes()))
 }
 
-/// `haystack` を per-byte ASCII-lowercase で fold した結果に `needle` (lowercase ASCII) が
-/// 含まれるか調べる。`needle.len() <= haystack.len()` のときのみ true を返す。
-fn ascii_fold_contains(haystack: &[u8], needle: &[u8]) -> bool {
+/// Return true when `haystack`, ASCII-lowercase folded and with `_` removed, contains `needle`
+/// (already underscore-free lowercase ASCII) as a substring. So `api_key` matches `apikey`.
+/// Shared with `ssr_env` (via `super::`) so security naming detection is uniform across rules;
+/// keyword lists stay independent (see #304).
+fn ascii_fold_underscore_contains(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() {
         return true;
     }
     if needle.len() > haystack.len() {
         return false;
     }
-    haystack.windows(needle.len()).any(|w| {
-        w.iter()
-            .zip(needle)
-            .all(|(h, n)| h.to_ascii_lowercase() == *n)
-    })
+    for start in 0..haystack.len() {
+        let mut hi = start;
+        let mut ni = 0;
+        while hi < haystack.len() && ni < needle.len() {
+            let h = haystack[hi];
+            if h == b'_' {
+                hi += 1;
+                continue;
+            }
+            if h.to_ascii_lowercase() != needle[ni] {
+                break;
+            }
+            hi += 1;
+            ni += 1;
+        }
+        if ni == needle.len() {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

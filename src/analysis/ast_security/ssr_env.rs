@@ -1,4 +1,4 @@
-use super::{unwrap_parenthesized, SecurityVisitor};
+use super::{ascii_fold_underscore_contains, unwrap_parenthesized, SecurityVisitor};
 use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
@@ -40,37 +40,6 @@ fn name_matches_ssr_secret_keyword(name: &str) -> bool {
     SSR_SECRET_KEYWORDS
         .iter()
         .any(|kw| ascii_fold_underscore_contains(bytes, kw.as_bytes()))
-}
-
-/// Like `ascii_fold_contains` but treats `_` in the haystack as if it were not present,
-/// so `API_KEY` matches `apikey`. The needle must already be underscore-free lowercase.
-fn ascii_fold_underscore_contains(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-    if needle.len() > haystack.len() {
-        return false;
-    }
-    for start in 0..haystack.len() {
-        let mut hi = start;
-        let mut ni = 0;
-        while hi < haystack.len() && ni < needle.len() {
-            let h = haystack[hi];
-            if h == b'_' {
-                hi += 1;
-                continue;
-            }
-            if h.to_ascii_lowercase() != needle[ni] {
-                break;
-            }
-            hi += 1;
-            ni += 1;
-        }
-        if ni == needle.len() {
-            return true;
-        }
-    }
-    false
 }
 
 impl SecurityVisitor<'_> {
