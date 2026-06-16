@@ -1,3 +1,4 @@
+use crate::content::length_within_cap;
 use crate::io::envelope::ErrorCode;
 use constant_time_eq::constant_time_eq;
 use flate2::read::GzDecoder;
@@ -68,6 +69,8 @@ pub enum OxlintError {
     },
     #[error("oxlint download failed: {0}")]
     NetworkFailure(String),
+    #[error("oxlint download exceeds {cap}-byte size limit")]
+    DownloadTooLarge { cap: u64 },
     #[error("oxlint tarball SHA-256 mismatch: expected {expected}, got {actual}")]
     ChecksumMismatch { expected: String, actual: String },
     #[error("oxlint extract failed: {0}")]
@@ -84,6 +87,10 @@ impl OxlintError {
             Self::NetworkFailure(_) => (
                 ErrorCode::IoError,
                 "Check network connectivity or install oxlint manually via npm",
+            ),
+            Self::DownloadTooLarge { .. } => (
+                ErrorCode::DataError,
+                "oxlint release exceeds the size limit; install oxlint manually via npm install -g oxlint",
             ),
             Self::ChecksumMismatch { .. } => (
                 ErrorCode::IoError,
@@ -161,12 +168,23 @@ fn fetch_url(url: &str) -> Result<Vec<u8>, OxlintError> {
         .call()
         .map_err(|e| OxlintError::NetworkFailure(e.to_string()))?;
 
+    let mut reader = resp.into_body().into_reader();
+    read_capped(&mut reader, MAX_DOWNLOAD_SIZE)
+}
+
+// Read at most `cap` bytes, rejecting anything larger as DownloadTooLarge.
+// Reading `cap + 1` then checking the length distinguishes an exactly-`cap`
+// legit file from a larger one truncated to `cap` (which would otherwise read
+// back clean and fail SHA later as a misleading ChecksumMismatch, #310).
+fn read_capped(reader: &mut dyn Read, cap: u64) -> Result<Vec<u8>, OxlintError> {
     let mut bytes = Vec::new();
-    resp.into_body()
-        .into_reader()
-        .take(MAX_DOWNLOAD_SIZE)
+    reader
+        .take(cap + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| OxlintError::NetworkFailure(e.to_string()))?;
+    if !length_within_cap(bytes.len(), cap) {
+        return Err(OxlintError::DownloadTooLarge { cap });
+    }
     Ok(bytes)
 }
 
