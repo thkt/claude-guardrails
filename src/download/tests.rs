@@ -53,6 +53,39 @@ fn checksum_of(bytes: &[u8]) -> [u8; 32] {
     h.finalize().into()
 }
 
+// #310: read at the cap boundary succeeds — a payload of exactly `cap`
+// bytes is a legit file (e.g. an exactly-50MB release), not a truncation.
+#[test]
+fn read_capped_accepts_payload_at_cap() {
+    let payload = vec![0x41_u8; 8];
+    let mut cursor = Cursor::new(payload.clone());
+    assert_eq!(read_capped(&mut cursor, 8).unwrap(), payload);
+}
+
+// #310: one byte over the cap is rejected with DownloadTooLarge, not read
+// back as a truncated buffer that later fails SHA as ChecksumMismatch.
+#[test]
+fn read_capped_rejects_payload_over_cap() {
+    let payload = vec![0x41_u8; 9];
+    let mut cursor = Cursor::new(payload);
+    match read_capped(&mut cursor, 8) {
+        Err(OxlintError::DownloadTooLarge { cap }) => assert_eq!(cap, 8),
+        other => panic!("expected DownloadTooLarge {{ cap: 8 }}, got {other:?}"),
+    }
+}
+
+// #310: oversize maps to DATA_ERROR (size/data policy), not IO_ERROR — the
+// IoError bucket is what made ChecksumMismatch read as "tampered/corrupt".
+#[test]
+fn download_too_large_classifies_as_data_error() {
+    let (code, next_step) = OxlintError::DownloadTooLarge { cap: 50_000_000 }.classify();
+    assert_eq!(code, ErrorCode::DataError);
+    assert!(
+        !next_step.contains("MAX_DOWNLOAD_SIZE"),
+        "remediation must not leak the internal constant name: {next_step}"
+    );
+}
+
 // T-014: platform detection on supported OS
 #[test]
 fn detect_pin_returns_known_triple() {
