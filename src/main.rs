@@ -60,6 +60,11 @@ struct Cli {
 enum Commands {
     /// Download oxlint binary into the cache (no-op if already present).
     Prefetch,
+    /// Internal (#314): parse stdin AST-request in an isolated child so a
+    /// deep-nesting stack overflow aborts this process, not the hook. Hidden:
+    /// only the hook spawns it.
+    #[command(name = "__ast-child", hide = true)]
+    AstChild,
 }
 
 #[derive(Serialize)]
@@ -113,6 +118,7 @@ fn main() {
 
     let exit_code = match cli.command {
         Some(Commands::Prefetch) => run_prefetch(cli.json),
+        Some(Commands::AstChild) => analysis::ast_rules::run_child(),
         None => run_hook(cli.json),
     };
     process::exit(exit_code);

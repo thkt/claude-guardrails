@@ -110,6 +110,64 @@ fn collect_violations_bidi_detected_when_parse_fails() {
     );
 }
 
+// #314 regression at the production-wiring level: deep nesting must produce a
+// High excessive-nesting violation that routes to blocking (exit 2) instead of
+// overflowing the parser stack and aborting (exit 134 = fail-open). Depth 150 is
+// above the guard threshold but below the parse overflow floor, so a guard
+// regression fails this assertion cleanly instead of aborting the test runner.
+// The before-parse timing is pinned by the CLI test `deep_nesting_exits_two_not_aborts`
+// (depth 5000 would abort with 134 if the parse ran).
+#[test]
+fn collect_violations_deep_nesting_blocks_before_parse() {
+    let config = Config::default();
+    let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.rule == "excessive-nesting" && v.severity == Severity::High),
+        "deep nesting must produce a High excessive-nesting violation; got: {violations:?}"
+    );
+    let (blocking, _warnings) = partition_violations(violations, &config);
+    assert!(
+        blocking.iter().any(|v| v.rule == "excessive-nesting"),
+        "High excessive-nesting must route to blocking (exit 2)"
+    );
+}
+
+// #314: the guard protects the parse, which fires whenever ANY AST rule is on
+// — not just ast_security. With ast_security off but eval still on, the parse
+// would run, so the guard must still block the deep input.
+#[test]
+fn collect_violations_deep_nesting_blocks_when_ast_security_disabled_but_parse_runs() {
+    let mut config = Config::default();
+    config.rules.ast_security = false;
+    let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.rule == "excessive-nesting" && v.severity == Severity::High),
+        "guard must fire while the parse it protects can still run; got: {violations:?}"
+    );
+}
+
+// #314: when every AST rule is off, the parse is skipped entirely, so the guard
+// that exists only to protect that parse is moot and must not fire.
+#[test]
+fn collect_violations_deep_nesting_skipped_when_all_ast_rules_disabled() {
+    let mut config = Config::default();
+    config.rules.ast_security = false;
+    config.rules.no_use_effect = false;
+    config.rules.open_redirect = false;
+    config.rules.eval = false;
+    config.rules.sqli_concat = false;
+    config.rules.cors_wildcard = false;
+    let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
+    assert!(!violations.iter().any(|v| v.rule == "excessive-nesting"));
+}
+
 #[test]
 fn collect_violations_no_use_effect_detects_in_tsx() {
     let config = Config::default();
