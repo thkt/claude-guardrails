@@ -7,8 +7,34 @@ struct NamingIssue {
     pattern: &'static LazyLock<Regex>,
     file_pattern: Option<&'static LazyLock<Regex>>,
     additional_check: Option<&'static LazyLock<Regex>>,
+    // When set, `pattern` must capture the identifier in group 1; a line is a
+    // violation only if its captured name fails this predicate. The filter runs
+    // per line so a passing name never suppresses a violation on another line.
+    exclude: Option<fn(&str) -> bool>,
     fix: &'static str,
     severity: Severity,
+}
+
+/// A proper React custom hook: `use` followed by an uppercase letter, per
+/// eslint-plugin-react-hooks. `userData` / `updateUser` are not hooks and must
+/// fire; `useFetch` is and must not.
+fn is_proper_hook(name: &str) -> bool {
+    name.strip_prefix("use")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|c| c.is_ascii_uppercase())
+}
+
+/// Like `find_match_in_lines`, but returns the first line whose group-1 capture
+/// fails `exclude`. Each line is judged on its own captured name.
+fn find_unexcluded_match(
+    lines: &[(u32, &str)],
+    pattern: &Regex,
+    exclude: fn(&str) -> bool,
+) -> Option<u32> {
+    lines.iter().find_map(|(line_num, line)| {
+        let name = pattern.captures(line)?.get(1)?.as_str();
+        (!exclude(name)).then_some(*line_num)
+    })
 }
 
 static RE_LOWERCASE_ARROW: LazyLock<Regex> = LazyLock::new(|| {
@@ -26,12 +52,8 @@ static RE_JSX_RETURN: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
-static RE_NON_USE_ARROW: LazyLock<Regex> = LazyLock::new(|| {
-    regex_or_die(
-        "RE_NON_USE_ARROW",
-        r"const\s+[a-tv-z][a-zA-Z]*\s*=.*=>\s*\{",
-    )
-});
+static RE_NON_USE_ARROW: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_NON_USE_ARROW", r"const\s+([a-z][a-zA-Z]*)\s*=.*=>\s*\{"));
 static RE_HOOKS_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_HOOKS_FILE", r"/hooks/.*\.ts$"));
 static RE_HOOK_USAGE: LazyLock<Regex> =
@@ -48,6 +70,7 @@ static NAMING_ISSUES: LazyLock<[NamingIssue; 4]> = LazyLock::new(|| {
             pattern: &RE_LOWERCASE_ARROW,
             file_pattern: Some(&RE_COMPONENT_FILE),
             additional_check: Some(&RE_JSX_RETURN),
+            exclude: None,
             fix: "Rename to PascalCase (e.g., myComponent → MyComponent)",
             severity: Severity::Medium,
         },
@@ -55,13 +78,16 @@ static NAMING_ISSUES: LazyLock<[NamingIssue; 4]> = LazyLock::new(|| {
             pattern: &RE_NON_USE_ARROW,
             file_pattern: Some(&RE_HOOKS_FILE),
             additional_check: Some(&RE_HOOK_USAGE),
-            fix: "Rename to useXxx (custom hooks must start with 'use')",
+            exclude: Some(is_proper_hook),
+            fix:
+                "Rename to useXxx (custom hook names must be 'use' followed by an uppercase letter)",
             severity: Severity::High,
         },
         NamingIssue {
             pattern: &RE_LOWERCASE_INTERFACE,
             file_pattern: None,
             additional_check: None,
+            exclude: None,
             fix: "Rename interface to PascalCase",
             severity: Severity::Low,
         },
@@ -69,6 +95,7 @@ static NAMING_ISSUES: LazyLock<[NamingIssue; 4]> = LazyLock::new(|| {
             pattern: &RE_LOWERCASE_TYPE,
             file_pattern: None,
             additional_check: None,
+            exclude: None,
             fix: "Rename type to PascalCase",
             severity: Severity::Low,
         },
@@ -91,7 +118,11 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                     continue;
                 }
             }
-            if let Some(line_num) = find_match_in_lines(lines, issue.pattern) {
+            let matched = match issue.exclude {
+                Some(exclude) => find_unexcluded_match(lines, issue.pattern, exclude),
+                None => find_match_in_lines(lines, issue.pattern),
+            };
+            if let Some(line_num) = matched {
                 violations.push(Violation {
                     rule: super::rule_id::NAMING_CONVENTION.to_owned(),
                     severity: issue.severity,
@@ -129,6 +160,31 @@ mod tests {
         let violations = check(content, "/src/hooks/useFetch.ts");
         assert_eq!(violations.len(), 1);
         assert!(violations[0].fix.contains("useXxx"));
+    }
+
+    #[test]
+    fn detects_u_prefixed_non_hook() {
+        // `updateUser` starts with `u` but is not a proper hook (`use` + uppercase).
+        let content = r"const updateUser = () => { const [d] = useState(null); return d; };";
+        let violations = check(content, "/src/hooks/useFetch.ts");
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].fix.contains("useXxx"));
+    }
+
+    #[test]
+    fn detects_use_lowercase_non_hook() {
+        // `userData` has the `use` prefix but is followed by lowercase, so it is
+        // not a proper hook and must fire even when the file calls a real hook.
+        let content = r"const userData = () => { const [d] = useState(null); return d; };";
+        let violations = check(content, "/src/hooks/useFetch.ts");
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].fix.contains("useXxx"));
+    }
+
+    #[test]
+    fn allows_proper_use_hook() {
+        let content = r"const useFetch = () => { const [d] = useState(null); return d; };";
+        assert!(check(content, "/src/hooks/useFetch.ts").is_empty());
     }
 
     #[test]
