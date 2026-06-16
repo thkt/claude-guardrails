@@ -40,6 +40,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify tag matches Cargo.toml version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          TAG_VERSION="${REF_NAME#v}"
+          CARGO_VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::tag v$TAG_VERSION does not match Cargo.toml version $CARGO_VERSION; bump Cargo.toml before tagging"
+            exit 1
+          fi
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
