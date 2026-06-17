@@ -36,8 +36,8 @@ decision-makers: thkt
 
 本 ADR は次の 3 点を固定する。
 
-- `src/reporter.rs` の reporter output に column 番号を追加しない
-- `src/rules/mod.rs` の `Violation` struct (`pub struct Violation { rule, severity, fix, file, line: Option<u32> }`) に `column` フィールドを追加しない
+- `src/io/reporter.rs` の reporter output に column 番号を追加しない
+- `src/rules.rs` の `Violation` struct (`pub struct Violation { rule, severity, fix, file, line: Option<u32>, origin: Option<ViolationOrigin> }`) に `column` フィールドを追加しない
 - JSON envelope の `violations[].file`, `violations[].line` のみで対象を表現する
 
 将来 column が必要になるケース (例: 同一行内で同種違反が複数発火し、rule_id だけでは区別不可) は本 ADR の Scope 外とする。

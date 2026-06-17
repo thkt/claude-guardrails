@@ -8,7 +8,7 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`src/main.rs` の `show_config_hint` は、`.claude/tools.json` が存在せず親の `.claude/` ディレクトリは存在するときに `{"guardrails": {}}` の payload を持つファイルを自動生成していた。実装は `fs::OpenOptions::new().write(true).create_new(true).open(path)` + `write_all` の 2 段階で、`create_new` 成功後 `write_all` 完了前に SIGKILL を受けると zero-byte ファイルが残る。残ったファイルは以後の hook 起動で invalid config error を返し続ける。
+`src/io/output.rs` の `show_config_hint` は、`.claude/tools.json` が存在せず親の `.claude/` ディレクトリは存在するときに `{"guardrails": {}}` の payload を持つファイルを自動生成していた。実装は `fs::OpenOptions::new().write(true).create_new(true).open(path)` + `write_all` の 2 段階で、`create_new` 成功後 `write_all` 完了前に SIGKILL を受けると zero-byte ファイルが残る。残ったファイルは以後の hook 起動で invalid config error を返し続ける。
 
 しかし atomicity の修正 (`NamedTempFile::persist` 等) を入れるかどうかの前に、より根本的な論点がある: **validation 目的の PreToolUse hook が、起動するたびにユーザーのプロジェクトに永続ファイルを書き込む副作用を持つこと自体が、OUTCOME.md の Non-goals「非 hook サブコマンド」「事後通知 / ログ出力のみ / 警告止まりで AI 修正サイクルに乗らない設計」の境界と衝突する。**
 
@@ -60,7 +60,7 @@ decision-makers: thkt
 
 - 既存の `.claude/tools.json` の migration (互換性は維持、変更しない)
 - `guardrails init` のような bootstrap subcommand の追加 (caller 実需が出るまで)
-- hint message 文言の変更 (現行「Guardrails: using defaults. Customize via .claude/tools.json — see ...」を維持)
+- hint message 文言の変更 (現行「Guardrails: using defaults. Customize via .guardrails.json — see ...」を維持)
 
 ## Consequences
 

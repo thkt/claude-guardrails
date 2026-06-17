@@ -8,26 +8,26 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`ssr-secret-bleed` rule (`src/ast_security.rs:561-613`) は SSR target (ADR-0012 で定義) の return statement / object literal を解析し、サーバ専用の secret が client に serialize されるパターンを検出する。
+`ssr-secret-bleed` rule (`src/analysis/ast_security/ssr_env.rs:105-152`) は SSR target (ADR-0012 で定義) の return statement / object literal を解析し、サーバ専用の secret が client に serialize されるパターンを検出する。
 
 検出は **shape-based**: AST 上で具体的に「secret-named property」または「`process.env.<SENSITIVE>` value」の literal 出現を見つけたときのみ flag する。
 
 | Signal              | 場所                              | 検出対象                                                          |
 | ------------------- | --------------------------------- | ----------------------------------------------------------------- |
-| key-name (primary)  | `src/ast_security.rs:585-595`     | `{ apiKey: ..., token: ..., password: ..., apikey: ..., jwt: ..., credential: ... }` |
-| env-value (secondary)| `src/ast_security.rs:597-610`    | `{ foo: process.env.DB_URL }` 形式の value 側に sensitive env 名が出現 |
+| key-name (primary)  | `src/analysis/ast_security/ssr_env.rs:132-140`     | `{ secret: ..., token: ..., password: ..., apikey: ..., jwt: ..., credential: ... }` |
+| env-value (secondary)| `src/analysis/ast_security/ssr_env.rs:141-149`    | `{ foo: process.env.DB_URL }` 形式の value 側に sensitive env 名が出現 |
 
 これに対し次は **intentional carve-out** (検出しない):
 
 | Carve-out                                | 場所                                      | 理由                                                                                       |
 | ---------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Spread property: `{ ...env }`            | `src/ast_security.rs:582-584` (`continue`) | spread 元の object resolution は 1-file 静的解析の範疇外、type info も import 解決も不可   |
-| Variable binding: `return data`          | `src/ast_security.rs:571-575` (doc comment) | `data` の出所 (`fetch().json()` / DB / `process.env.X` 経由)は 1-file では一意に決まらない |
+| Spread property: `{ ...env }`            | `src/analysis/ast_security/ssr_env.rs:126-128` (`continue`) | spread 元の object resolution は 1-file 静的解析の範疇外、type info も import 解決も不可   |
+| Variable binding: `return data`          | `src/analysis/ast_security/ssr_env.rs:115-119` (doc comment) | `data` の出所 (`fetch().json()` / DB / `process.env.X` 経由)は 1-file では一意に決まらない |
 | Dynamic getter: `{ ...getSecret() }`     | (上記 spread と同等)                      | call の戻り値の object literal shape は静的解析で resolve 不能                              |
 | Template literal: `` `${process.env.X}` ``| 検出対象外                                | string interpolation は client にレンダリングされるが secret かどうかは型不明              |
-| Bracket / destructured env access        | `src/ast_security.rs:1159-1174`           | `process.env.X` の exact StaticMemberExpression のみ認識 (ADR-0013 と一貫)                  |
+| Bracket / destructured env access        | `src/analysis/ast_security/ssr_env.rs:182-190`           | `process.env.X` の exact StaticMemberExpression のみ認識 (ADR-0013 と一貫)                  |
 
-doc comment (`src/ast_security.rs:571-575`) は spread と var-binding を「intentionally NOT analyzed」と記述するが、`{ props: { ...process.env } }` という known bad pattern が silent に通る理由 (= 1-file 解析制約) と user への influence (= rule で防げない範囲を理解すべき) は明示されていない。
+doc comment (`src/analysis/ast_security/ssr_env.rs:115-119`) は spread と var-binding を「intentionally NOT analyzed」と記述するが、`{ props: { ...process.env } }` という known bad pattern が silent に通る理由 (= 1-file 解析制約) と user への influence (= rule で防げない範囲を理解すべき) は明示されていない。
 
 ## Decision Drivers
 
@@ -71,7 +71,7 @@ doc comment (`src/ast_security.rs:571-575`) は spread と var-binding を「int
 
 ### Confirmation
 
-`tests/integration.rs` で次パターンを assert:
+`tests/rule_smoke.rs` および `src/analysis/ast_security/ssr_env/tests.rs` で次パターンを assert:
 - Positive: `{ props: { apiKey: process.env.API_KEY } }` → flag
 - Positive: `{ props: { user: { token: "..." } } }` (key-name match) → flag
 - Negative (carve-out): `{ ...env }` → no flag (intentional)
@@ -111,10 +111,10 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/pages/index.ts
 
 ### References
 
-- `src/ast_security.rs:36-41` (`SSR_SECRET_KEYWORDS`)
-- `src/ast_security.rs:561-613` (`check_ssr_secret_bleed_return` / `check_ssr_secret_object`)
-- `src/ast_security.rs:571-575` (doc comment with carve-out list)
-- `src/ast_security.rs:582-584` (spread silent skip)
+- `src/analysis/ast_security/ssr_env.rs:31-32` (`SSR_SECRET_KEYWORDS`)
+- `src/analysis/ast_security/ssr_env.rs:105-152` (`check_ssr_secret_bleed_return` / `check_ssr_secret_object`)
+- `src/analysis/ast_security/ssr_env.rs:115-119` (doc comment with carve-out list)
+- `src/analysis/ast_security/ssr_env.rs:126-128` (spread silent skip)
 - OUTCOME `.claude/OUTCOME.md` Constraints 節 (1-file content 制約)
 
 ### Reassessment Triggers
