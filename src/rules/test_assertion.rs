@@ -3,6 +3,7 @@ use crate::analysis::ast;
 use crate::regex_compile::regex_or_die;
 use oxc_ast::ast::{CallExpression, Expression, FunctionBody, Program};
 use oxc_ast_visit::{walk, Visit};
+use oxc_span::{GetSpan, Span};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -15,6 +16,38 @@ static RE_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
         r"(expect\s*\(|assert\.|should\.|\.toEqual|\.toBe|\.toHaveBeenCalled|\.rejects\.|\.resolves\.)",
     )
 });
+
+// Non-`expect` assertion forms. Their presence means the test verifies a real
+// value through chai `assert.`, BDD `should.`, or a promise `.rejects`/`.resolves`
+// chain, so the expect()-quality classification is suppressed for that body.
+static RE_NON_EXPECT_ASSERTION: LazyLock<Regex> = LazyLock::new(|| {
+    regex_or_die(
+        "RE_NON_EXPECT_ASSERTION",
+        r"(assert\.|should\.|\.rejects\.|\.resolves\.)",
+    )
+});
+
+// Matchers that pass for almost any defined/truthy value: they check shape, not
+// the actual result. A test whose only assertions are these verifies little.
+const WEAK_MATCHERS: &[&str] = &["toBeTruthy", "toBeDefined", "toBeFalsy"];
+
+// Matchers that assert a spy was called or returned, not the value it produced.
+const MOCK_MATCHERS: &[&str] = &[
+    "toHaveBeenCalled",
+    "toHaveBeenCalledWith",
+    "toHaveBeenCalledTimes",
+    "toHaveBeenLastCalledWith",
+    "toHaveBeenNthCalledWith",
+    "toHaveReturned",
+    "toHaveReturnedWith",
+    "toHaveReturnedTimes",
+    "toHaveLastReturnedWith",
+    "toHaveNthReturnedWith",
+];
+
+// Equality matchers whose self-comparison `expect(x).toBe(x)` always holds and so
+// proves nothing.
+const EQUALITY_MATCHERS: &[&str] = &["toBe", "toEqual", "toStrictEqual"];
 
 #[cfg(test)]
 fn check(content: &str, file_path: &str) -> Vec<Violation> {
@@ -73,23 +106,78 @@ impl TestAssertionVisitor<'_> {
         if body.statements.is_empty() {
             return;
         }
-        // The slice is lexical, so an assertion inside a nested `it`/`test`
-        // callback also satisfies the outer test (the visitor still flags the
-        // nested one on its own). Accepted: nested test definitions are
-        // uncommon and the rule is advisory, so the rare false negative costs
-        // less than tracking descendant spans.
-        let body_src = &self.content[body.span.start as usize..body.span.end as usize];
-        if RE_ASSERTION.is_match(body_src) {
+        let Some((severity, fix)) = self.classify(name, body) else {
             return;
-        }
+        };
         self.violations.push(Violation {
             rule: rule_id::TEST_ASSERTION.to_owned(),
-            severity: Severity::Medium,
-            fix: format!("Test '{name}' has no assertions. Add expect() or assert calls."),
+            severity,
+            fix,
             file: self.file_path.to_owned(),
             line: Some(ast::span_to_line(self.line_offsets, call.span)),
             origin: None,
         });
+    }
+
+    /// Grades a test body. `None` means the body verifies a real value. The
+    /// zero-assertion case keeps the original Medium finding; the three quality
+    /// classes (tautological / mock-only / weak) layer only onto `expect()`
+    /// chains, so a strong `assert.`/`should.` body is never downgraded.
+    fn classify(&self, name: &str, body: &FunctionBody) -> Option<(Severity, String)> {
+        // The slice is lexical, so an assertion inside a nested `it`/`test`
+        // callback also counts toward the outer test (the visitor still grades
+        // the nested one on its own). Accepted: nested test definitions are
+        // uncommon and the rule is advisory, so the rare false negative costs
+        // less than tracking descendant spans.
+        let body_src = &self.content[body.span.start as usize..body.span.end as usize];
+        if !RE_ASSERTION.is_match(body_src) {
+            return Some((
+                Severity::Medium,
+                format!("Test '{name}' has no assertions. Add expect() or assert calls."),
+            ));
+        }
+        let mut collector = ExpectCollector {
+            content: self.content,
+            expects: Vec::new(),
+        };
+        collector.visit_function_body(body);
+        let expects = collector.expects;
+        // An assertion is present but resolves to no `expect()` chain (e.g. only
+        // `assert.equal`): a non-expect assertion verifies a value, nothing to grade.
+        if expects.is_empty() {
+            return None;
+        }
+        let verifies_value = RE_NON_EXPECT_ASSERTION.is_match(body_src)
+            || expects
+                .iter()
+                .any(|e| !e.is_weak && !e.is_mock && !e.is_tautological);
+        if verifies_value {
+            return None;
+        }
+        if let Some(taut) = expects.iter().find(|e| e.is_tautological) {
+            return Some((
+                Severity::Medium,
+                format!(
+                    "Test '{name}' asserts a value against itself (expect({0}).{1}({0})). Compare against an expected value.",
+                    taut.target, taut.matcher
+                ),
+            ));
+        }
+        let matchers = expects
+            .iter()
+            .map(|e| e.matcher.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if expects.iter().all(|e| e.is_mock) {
+            return Some((
+                Severity::Medium,
+                format!("Test '{name}' only checks mock calls ({matchers}), not the result. Assert the produced value."),
+            ));
+        }
+        Some((
+            Severity::Low,
+            format!("Test '{name}' only uses weak matchers ({matchers}). Assert the actual value with toBe/toEqual."),
+        ))
     }
 }
 
@@ -98,6 +186,86 @@ impl<'a> Visit<'a> for TestAssertionVisitor<'_> {
         self.check_call(call);
         walk::walk_call_expression(self, call);
     }
+}
+
+/// One `expect(target).matcher(arg)` assertion, graded for verification quality.
+struct ExpectInfo {
+    target: String,
+    matcher: String,
+    is_weak: bool,
+    is_mock: bool,
+    is_tautological: bool,
+}
+
+/// Collects every `expect()` assertion in a test body, descending through nested
+/// statements so a chain inside an `if`/loop is still seen.
+struct ExpectCollector<'s> {
+    content: &'s str,
+    expects: Vec<ExpectInfo>,
+}
+
+impl<'a> Visit<'a> for ExpectCollector<'_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Some(info) = analyze_expect(call, self.content) {
+            self.expects.push(info);
+        }
+        walk::walk_call_expression(self, call);
+    }
+}
+
+/// Grades the outer matcher call of an `expect()` chain. Returns None for any
+/// call that is not the matcher end of such a chain (including the inner
+/// `expect(target)` call itself, whose callee is the bare `expect` identifier).
+fn analyze_expect(call: &CallExpression, source: &str) -> Option<ExpectInfo> {
+    let Expression::StaticMemberExpression(member) = &call.callee else {
+        return None;
+    };
+    let matcher = member.property.name.as_str();
+    let (target, negated) = find_expect_chain(&member.object, source)?;
+    // A `.not` anywhere in the chain makes the assertion a deliberate, specific
+    // negative check (`expect(spy).not.toHaveBeenCalled()`, `expect(x).not.toBe(x)`),
+    // not a weak/mock/tautological non-verification — so no class applies.
+    let is_tautological = !negated
+        && EQUALITY_MATCHERS.contains(&matcher)
+        && call
+            .arguments
+            .first()
+            .and_then(|arg| arg.as_expression())
+            .is_some_and(|arg| span_text(source, arg.span()).trim() == target.trim());
+    Some(ExpectInfo {
+        target,
+        matcher: matcher.to_owned(),
+        is_weak: !negated && WEAK_MATCHERS.contains(&matcher),
+        is_mock: !negated && MOCK_MATCHERS.contains(&matcher),
+        is_tautological,
+    })
+}
+
+/// Walks the object side of a matcher call down to its `expect(...)` root,
+/// returning the target argument's source text and whether the chain negates via
+/// `.not` (in dot or `['not']` form). None when the chain is not rooted at `expect`.
+fn find_expect_chain<'a>(expr: &'a Expression<'a>, source: &str) -> Option<(String, bool)> {
+    match expr {
+        Expression::CallExpression(call) => {
+            if !ast::is_ident(&call.callee, "expect") {
+                return None;
+            }
+            let arg = call.arguments.first()?.as_expression()?;
+            Some((span_text(source, arg.span()).to_owned(), false))
+        }
+        Expression::ParenthesizedExpression(p) => find_expect_chain(&p.expression, source),
+        // `.not` / `.resolves` / `['not']` — `member_name` unwraps both the dot and
+        // string-literal computed forms, so negation is caught for each.
+        _ => {
+            let (object, name) = ast::member_name(expr)?;
+            let (target, negated) = find_expect_chain(object, source)?;
+            Some((target, negated || name == "not"))
+        }
+    }
+}
+
+fn span_text(source: &str, span: Span) -> &str {
+    &source[span.start as usize..span.end as usize]
 }
 
 /// True when the leftmost identifier of the callee chain is `it` or `test`.
@@ -191,7 +359,7 @@ mod tests {
         let content = r"
             it('should fetch data', async () => {
                 const result = await fetchData();
-                expect(result).toBeDefined();
+                expect(result).toBe(42);
             });
         ";
         assert!(check(content).is_empty());
@@ -239,7 +407,7 @@ mod tests {
         let content = r"
             it('should handle single quoted braces', () => {
                 const s = '{ brace }';
-                expect(s).toBeDefined();
+                expect(s).toBe('{ brace }');
             });
         ";
         assert!(check(content).is_empty());
@@ -250,7 +418,7 @@ mod tests {
         let content = r"
             it('should handle template literal braces', () => {
                 const s = `{ template ${brace} }`;
-                expect(s).toBeTruthy();
+                expect(s).toContain('template');
             });
         ";
         assert!(check(content).is_empty());
@@ -262,7 +430,7 @@ mod tests {
             it('should handle comment braces', () => {
                 // { this is a comment }
                 /* { block comment } */
-                expect(true).toBe(true);
+                expect(1 + 1).toBe(2);
             });
         ";
         assert!(check(content).is_empty());
@@ -298,7 +466,7 @@ mod tests {
             it('should handle nested interpolation', () => {
                 const obj = { a: 1 };
                 const s = `value: ${obj.a > 0 ? 'positive' : 'negative'}`;
-                expect(s).toBeDefined();
+                expect(s).toContain('value');
             });
         ";
         assert!(check(content).is_empty());
@@ -322,7 +490,7 @@ mod tests {
         let content = r#"
             it('should handle string with braces inside interpolation', () => {
                 const s = `value: ${"a{b}c"}`;
-                expect(s).toBeDefined();
+                expect(s).toContain('a');
             });
         "#;
         assert!(check(content).is_empty());
@@ -492,6 +660,210 @@ mod tests {
     #[test]
     fn fail_open_on_invalid_syntax() {
         assert!(check_fail_open("function { invalid !!!", "/src/utils.test.ts").is_empty());
+    }
+
+    // --- #345: verification-quality classification of present assertions ---
+
+    #[test]
+    fn flags_weak_only_assertion_at_low() {
+        // Only `toBeTruthy` — passes for any truthy value, so it verifies shape
+        // not the result. Lower severity than no-assertion to keep inline noise down.
+        let content = r"
+            it('should produce a value', () => {
+                const result = doSomething();
+                expect(result).toBeTruthy();
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Low);
+        assert!(violations[0].fix.contains("weak matchers"));
+        assert!(violations[0].fix.contains("toBeTruthy"));
+    }
+
+    #[test]
+    fn flags_only_weak_matchers_across_multiple_assertions() {
+        let content = r"
+            it('should produce values', () => {
+                expect(a()).toBeDefined();
+                expect(b()).toBeFalsy();
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Low);
+    }
+
+    #[test]
+    fn allows_weak_matcher_alongside_strong_assertion() {
+        // A strong `toBe(42)` verifies the value, so the weak one no longer matters.
+        let content = r"
+            it('should produce a value', () => {
+                expect(defined()).toBeDefined();
+                expect(compute()).toBe(42);
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn allows_weak_matcher_alongside_non_expect_assertion() {
+        // chai `assert.equal` verifies the value even though the expect is weak.
+        let content = r"
+            it('should produce a value', () => {
+                expect(result).toBeTruthy();
+                assert.equal(result, 42);
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn flags_mock_only_assertion_at_medium() {
+        // Only `toHaveBeenCalled` — proves the spy ran, not what was produced.
+        let content = r"
+            it('should call the dependency', () => {
+                runThing();
+                expect(dep).toHaveBeenCalled();
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Medium);
+        assert!(violations[0].fix.contains("mock calls"));
+        assert!(violations[0].fix.contains("toHaveBeenCalled"));
+    }
+
+    #[test]
+    fn flags_mock_only_with_called_with_matcher() {
+        let content = r"
+            it('should call with args', () => {
+                runThing();
+                expect(dep).toHaveBeenCalledWith(1, 2);
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Medium);
+        assert!(violations[0].fix.contains("mock calls"));
+    }
+
+    #[test]
+    fn allows_mock_matcher_alongside_value_assertion() {
+        let content = r"
+            it('should call and return', () => {
+                const out = runThing();
+                expect(dep).toHaveBeenCalled();
+                expect(out).toBe(7);
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn flags_tautological_assertion_at_medium() {
+        // `expect(x).toBe(x)` holds for any x, so it proves nothing.
+        let content = r"
+            it('should equal itself', () => {
+                const x = compute();
+                expect(x).toBe(x);
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Medium);
+        assert!(violations[0].fix.contains("against itself"));
+    }
+
+    #[test]
+    fn flags_tautological_with_member_expression_target() {
+        let content = r"
+            it('should equal itself', () => {
+                expect(obj.value).toEqual(obj.value);
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Medium);
+        assert!(violations[0].fix.contains("against itself"));
+    }
+
+    #[test]
+    fn allows_non_tautological_equality() {
+        // `expect(x).toBe(expected)` compares against a different value: a real check.
+        let content = r"
+            it('should equal the expected value', () => {
+                expect(compute()).toBe(expected);
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn allows_negated_self_comparison() {
+        // `expect(x).not.toBe(x)` is a contradiction, not a tautology, and toBe is
+        // a real-value matcher, so the test is treated as verifying a value.
+        let content = r"
+            it('should differ from itself', () => {
+                expect(x).not.toBe(x);
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn tautological_takes_priority_over_weak() {
+        // Neither assertion verifies a value; the tautology is the more specific
+        // and higher-severity classification.
+        let content = r"
+            it('should verify nothing', () => {
+                expect(x).toBe(x);
+                expect(y).toBeTruthy();
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Medium);
+        assert!(violations[0].fix.contains("against itself"));
+    }
+
+    #[test]
+    fn allows_negated_mock_assertion() {
+        // `expect(spy).not.toHaveBeenCalled()` is a deliberate non-interaction
+        // check (e.g. cache hit must not reach the backend), a real verification.
+        let content = r"
+            it('should not call the backend on cache hit', () => {
+                runCached();
+                expect(backend).not.toHaveBeenCalled();
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn allows_negated_weak_assertion() {
+        // `expect(x).not.toBeTruthy()` is a specific negative check, not a weak one.
+        let content = r"
+            it('should be falsy', () => {
+                expect(compute()).not.toBeTruthy();
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn flags_weak_and_mock_mix_without_value_assertion() {
+        // A weak check plus a mock check still verifies no produced value; falls to
+        // the weak (Low) classification since the assertions are not uniformly mock.
+        let content = r"
+            it('should verify nothing', () => {
+                expect(value).toBeTruthy();
+                expect(dep).toHaveBeenCalled();
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].severity, Severity::Low);
     }
 
     #[test]
