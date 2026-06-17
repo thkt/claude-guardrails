@@ -10,10 +10,10 @@ decision-makers: thkt
 
 `.ts` ファイルに `eval(userInput);` を書いた際、同一 file:line に対して 2 件の違反が出力される。
 
-| 発火元              | rule_id                          | severity | 検出範囲                                                                                          |
-| ------------------- | -------------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| oxlint 既定         | `eslint(no-eval)`                | MEDIUM   | direct call (`eval(...)`)                                                                         |
-| `src/rules/eval.rs` | `eval`                           | HIGH     | direct call, `new Function(...)`, `window.eval`, `globalThis.eval`, import alias, namespace member (`ns.eval`), CJS destructuring, bracket notation (`window["eval"]`) |
+| 発火元              | rule_id           | severity | 検出範囲                                                                                                                                                               |
+| ------------------- | ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| oxlint 既定         | `eslint(no-eval)` | MEDIUM   | direct call (`eval(...)`)                                                                                                                                              |
+| `src/rules/eval.rs` | `eval`            | HIGH     | direct call, `new Function(...)`, `window.eval`, `globalThis.eval`, import alias, namespace member (`ns.eval`), CJS destructuring, bracket notation (`window["eval"]`) |
 
 AI agent から見ると同じ修正対象が 2 回 listing され、`BLOCKED: Fix 1 issue` の footer 件数とも食い違うため、修正対象数を誤認するリスクがある。これは OUTCOME の「フィードバックの精度と AI エージェントの体験を継続的に高める」に反する。
 
@@ -33,7 +33,7 @@ AI agent から見ると同じ修正対象が 2 回 listing され、`BLOCKED: F
 
 ## Decision Outcome
 
-採用: **Option B**。`src/oxlint.rs` の `build_args` で oxlint subprocess に `--allow eslint/no-eval` を常時渡し、eval の検出責務を `src/rules/eval.rs` の AST 検出 (`rule_id::EVAL`, HIGH) に集約する。custom 側は変更しない。
+採用: **Option B**。`src/analysis/oxlint.rs` の `build_args` で oxlint subprocess に `--allow eslint/no-eval` を常時渡し、eval の検出責務を `src/rules/eval.rs` の AST 検出 (`rule_id::EVAL`, HIGH) に集約する。custom 側は変更しない。
 
 選定対象を表に集約する定数を導入:
 
@@ -59,6 +59,6 @@ const OXLINT_RULES_OWNED_BY_CUSTOM: &[&str] = &["eslint/no-eval"];
 
 ### Verification
 
-- `src/oxlint.rs` の unit test `build_args_allows_eval_to_defer_to_custom_rule` で `--allow eslint/no-eval` 引数の出力を assert
-- `src/oxlint.rs` の unit test `build_args_overlap_allow_holds_even_with_user_deny` でユーザー `config.deny` 同 rule 指定下でも `--allow` が残ることを assert
-- `tests/integration.rs` の `json_mode_violation_emits_block_decision` で eval を含む `.ts` に対し JSON envelope の `violations` に `rule == "eval"` が含まれ、`rule == "oxlint/eslint(no-eval)"` が含まれないことを negative assertion で固定
+- `src/analysis/oxlint.rs` の unit test `build_args_allows_eval_to_defer_to_custom_rule` で `--allow eslint/no-eval` 引数の出力を assert
+- `src/analysis/oxlint.rs` の unit test `build_args_overlap_allow_holds_even_with_user_deny` でユーザー `config.deny` 同 rule 指定下でも `--allow` が残ることを assert
+- `tests/cli/json_envelope.rs` の `json_mode_violation_emits_block_decision` で eval を含む `.ts` に対し JSON envelope の `violations` に `rule == "eval"` が含まれ、`rule == "oxlint/eslint(no-eval)"` が含まれないことを negative assertion で固定

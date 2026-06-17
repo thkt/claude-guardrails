@@ -8,7 +8,7 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`Severity` in `src/rules/mod.rs` (`Critical` / `High` / `Medium` / `Low`) did not derive `Ord`, and the blocking decision was made by set membership over `SeverityConfig.block_on: Vec<Severity>` (`block_on.contains(&v.severity)`). The default was `block_on = [Critical, High]`.
+`Severity` in `src/rules.rs` (`Critical` / `High` / `Medium` / `Low`) did not derive `Ord`, and the blocking decision was made by set membership over `SeverityConfig.block_on: Vec<Severity>` (`block_on.contains(&v.severity)`). The default was `block_on = [Critical, High]`.
 
 This set representation is semantically weak.
 
@@ -51,12 +51,12 @@ Breaking change (config schema): `severity.blockOn` (an array) is removed and re
 
 Classification of old configs whose behavior changes:
 
-| Old `blockOn` | New behavior |
-| --- | --- |
-| `[critical, high]` (old default) | Equivalent to the new default `high`. **No change.** |
-| Set containing `medium` / `low` | That severity is demoted from blocking to advisory. Must migrate to `"blockThreshold": "medium"` etc. |
-| `[]` (block-none) | Becomes the new default `high`. **No equivalent** (capability removed). |
-| Non-monotonic set (`[critical, medium]` etc.) | Becomes the new default `high`. Invalid by this ADR's argument anyway. |
+| Old `blockOn`                                 | New behavior                                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `[critical, high]` (old default)              | Equivalent to the new default `high`. **No change.**                                                  |
+| Set containing `medium` / `low`               | That severity is demoted from blocking to advisory. Must migrate to `"blockThreshold": "medium"` etc. |
+| `[]` (block-none)                             | Becomes the new default `high`. **No equivalent** (capability removed).                               |
+| Non-monotonic set (`[critical, medium]` etc.) | Becomes the new default `high`. Invalid by this ADR's argument anyway.                                |
 
 ### Why not `deny_unknown_fields`
 

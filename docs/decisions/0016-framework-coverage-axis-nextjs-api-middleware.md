@@ -8,17 +8,17 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`src/rules/mod.rs` は file_pattern 用の `LazyLock<Regex>` を 7 個提供する。
+`src/rules.rs` は file_pattern 用の `LazyLock<Regex>` を 7 個提供する。
 
-| Pattern                       | 正規表現                                           | 用途                                          |
-| ----------------------------- | -------------------------------------------------- | --------------------------------------------- |
-| `RE_JS_FILE`                  | `\.(tsx?\|jsx?)$`                                  | JS/TS 全般                                    |
-| `RE_TEST_FILE`                | `\.(test\|spec)\.[jt]sx?$`                         | テストファイル                                |
-| `RE_ALL_FILES`                | `.`                                                | 全 path                                       |
-| `RE_REACT_FILE`               | `\.(tsx\|jsx)$`                                    | React/JSX                                     |
-| `RE_API_FILE`                 | `(^\|/)(app\|pages)/api/`                          | Next.js API endpoint                          |
-| `RE_API_OR_MIDDLEWARE_FILE`   | API + `middleware\.[jt]sx?`                        | API + Next.js middleware                      |
-| `RE_API_OR_ROUTE_FILE`        | API + `app/**/route\.[jt]sx?`                      | API + App Router route handler                |
+| Pattern                     | 正規表現                      | 用途                           |
+| --------------------------- | ----------------------------- | ------------------------------ |
+| `RE_JS_FILE`                | `\.(tsx?\|jsx?)$`             | JS/TS 全般                     |
+| `RE_TEST_FILE`              | `\.(test\|spec)\.[jt]sx?$`    | テストファイル                 |
+| `RE_ALL_FILES`              | `.`                           | 全 path                        |
+| `RE_REACT_FILE`             | `\.(tsx\|jsx)$`               | React/JSX                      |
+| `RE_API_FILE`               | `(^\|/)(app\|pages)/api/`     | Next.js API endpoint           |
+| `RE_API_OR_MIDDLEWARE_FILE` | API + `middleware\.[jt]sx?`   | API + Next.js middleware       |
+| `RE_API_OR_ROUTE_FILE`      | API + `app/**/route\.[jt]sx?` | API + App Router route handler |
 
 これに依存する rule が 7+ ある (`corsWildcard`, `transaction`, `child-process-injection`, `err-stack-exposure`, `non-literal-fs-path`, `non-literal-require`, 等)。`API_PREFIX_PAT = r"(^|/)(app|pages)/api/"` で Next.js convention に hardcode 結合している。
 
@@ -54,7 +54,7 @@ decision-makers: thkt
 
 本 ADR は次の境界を固定する。
 
-- `src/rules/mod.rs` の 7 `LazyLock<Regex>` pattern (`RE_JS_FILE` / `RE_TEST_FILE` / `RE_ALL_FILES` / `RE_REACT_FILE` / `RE_API_FILE` / `RE_API_OR_MIDDLEWARE_FILE` / `RE_API_OR_ROUTE_FILE`) を server-side rule の shared pool とする
+- `src/rules.rs` の 7 `LazyLock<Regex>` pattern (`RE_JS_FILE` / `RE_TEST_FILE` / `RE_ALL_FILES` / `RE_REACT_FILE` / `RE_API_FILE` / `RE_API_OR_MIDDLEWARE_FILE` / `RE_API_OR_ROUTE_FILE`) を server-side rule の shared pool とする
 - `API_PREFIX_PAT = r"(^|/)(app|pages)/api/"` は Next.js Pages Router + App Router API endpoint の convention に hardcode する。Express / NestJS / Hono の routes/ や controller pattern は **意図的に対象外**
 - `middleware.{ts,js}` (Next.js Edge / Node middleware) は API と同じ server-side scope に含める
 - App Router `app/**/route.ts` は `RE_API_OR_ROUTE_FILE` で API 扱いとする一方、SSR target rule (ADR-0012) では除外する。この二重扱いは意図的 (route handler は Response object 直接返却で client serialization なし)
@@ -75,9 +75,10 @@ decision-makers: thkt
 
 ### Confirmation
 
-`src/rules/mod.rs` の `re_api_file_rejects_near_miss_paths` test 等で各 pattern の境界 (positive / near-miss / negative) を assert する。
+`src/rules/tests.rs` の `re_api_file_rejects_near_miss_paths` test 等で各 pattern の境界 (positive / near-miss / negative) を assert する。
 
 新規 rule 追加 PR の review checklist:
+
 - 新 rule の file_pattern は 7 shared pool の lookup か?
 - shared pool 外の pattern が必要なら本 ADR の改訂 PR を同時提出しているか?
 
@@ -120,9 +121,9 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/routes/users.t
 
 ### References
 
-- `src/rules/mod.rs` shared pattern pool (`RE_JS_FILE` 〜 `RE_API_OR_ROUTE_FILE` の 7 const)
-- `src/rules/mod.rs` `API_PREFIX_PAT`
-- `src/rules/mod.rs` `re_api_file_rejects_near_miss_paths` 等 pattern boundary tests
+- `src/rules.rs` shared pattern pool (`RE_JS_FILE` 〜 `RE_API_OR_ROUTE_FILE` の 7 const)
+- `src/rules.rs` `API_PREFIX_PAT`
+- `src/rules/tests.rs` `re_api_file_rejects_near_miss_paths` 等 pattern boundary tests
 - `README.md` (per-rule scope 記述)
 - OUTCOME `.claude/OUTCOME.md` Non-goals 節 (独立 Node.js バックエンド除外)
 

@@ -39,7 +39,7 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 
 ### Envelope shapes
 
-成功時 (`SuccessEnvelope<T>` in `src/envelope.rs`):
+成功時 (`SuccessEnvelope<T>` in `src/io/envelope.rs`):
 
 ```json
 {
@@ -57,7 +57,7 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 | `degraded` | bool     | Yes      | 機能低下フラグ。oxlint 不在や snippet fallback で `true`。機能低下 note のみが立て、diff-aware の降格件数報告 note では立たない                                                                                                                                                                             |
 | `notes`    | string[] | Yes      | 機能低下の理由・補足。diff-aware on で第 2 pass が完走した場合は降格件数報告が末尾に続く。`degraded: true` ⇔ 機能低下 note が 1 件以上。降格件数報告のみの notes は non-empty でも `degraded: false`                                                                                                        |
 
-エラー時 (`ErrorEnvelope` in `src/envelope.rs`):
+エラー時 (`ErrorEnvelope` in `src/io/envelope.rs`):
 
 ```json
 {
@@ -142,15 +142,15 @@ prefetch は外部 IO 中心 (download + cache) なので `EX_DATAERR` (65) と 
 
 envelope schema と exit code は次のテストで pin されている。
 
-| 対象                                             | テスト                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SuccessEnvelope` shape                          | `success_envelope_ok_is_not_degraded` / `success_envelope_with_notes_sets_degraded` / `success_envelope_with_empty_notes_is_not_degraded` / `success_envelope_with_info_only_is_not_degraded` / `success_envelope_orders_degradations_before_info` (`src/envelope.rs`) |
-| `ErrorEnvelope` shape                            | `error_envelope_wraps_payload_under_error_key` / `error_payload_omits_optional_next_step` / `error_payload_omits_empty_candidates` / `error_payload_includes_present_optional_fields` (`src/envelope.rs`)                                                              |
-| `error.code` SCREAMING_SNAKE_CASE                | `error_code_serializes_screaming_snake_case` (`src/envelope.rs`)                                                                                                                                                                                                       |
-| `error.code` ↔ sysexits 数値                     | `error_code_exit_code_matches_sysexits_h` (`src/envelope.rs`)                                                                                                                                                                                                          |
-| Hook 5 種 exit code                              | T-001 `pass_is_zero` / T-002 `advisory_is_one` / T-003 `blocking_is_two` / T-004 `input_error_is_sysexits_usage` / T-005 `internal_is_sysexits_software` (`src/hook_exit.rs`)                                                                                          |
-| Hook mode JSON envelope (e2e)                    | `tests/integration.rs` の `--json` envelope 検証群                                                                                                                                                                                                                     |
-| violation payload の `origin` field (diff-aware) | `format_json_report_omits_origin_when_absent` / `format_json_report_emits_origin_when_present` (`src/io/reporter.rs`)                                                                                                                                                  |
+| 対象                                             | テスト                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SuccessEnvelope` shape                          | `success_envelope_ok_is_not_degraded` / `success_envelope_with_notes_sets_degraded` / `success_envelope_with_empty_notes_is_not_degraded` / `success_envelope_with_info_only_is_not_degraded` / `success_envelope_orders_degradations_before_info` (`src/io/envelope.rs`) |
+| `ErrorEnvelope` shape                            | `error_envelope_wraps_payload_under_error_key` / `error_payload_omits_optional_next_step` / `error_payload_omits_empty_candidates` / `error_payload_includes_present_optional_fields` (`src/io/envelope.rs`)                                                              |
+| `error.code` SCREAMING_SNAKE_CASE                | `error_code_serializes_screaming_snake_case` (`src/io/envelope.rs`)                                                                                                                                                                                                       |
+| `error.code` ↔ sysexits 数値                     | `error_code_exit_code_matches_sysexits_h` (`src/io/envelope.rs`)                                                                                                                                                                                                          |
+| Hook 5 種 exit code                              | T-001 `pass_is_zero` / T-002 `advisory_is_one` / T-003 `blocking_is_two` / T-004 `input_error_is_sysexits_usage` / T-005 `internal_is_sysexits_software` (`src/hook_exit.rs`)                                                                                             |
+| Hook mode JSON envelope (e2e)                    | `tests/cli/json_envelope.rs` の `--json` envelope 検証群                                                                                                                                                                                                                  |
+| violation payload の `origin` field (diff-aware) | `format_json_report_omits_origin_when_absent` / `format_json_report_emits_origin_when_present` (`src/io/reporter.rs`)                                                                                                                                                     |
 
 新規 exit code / envelope field 追加 PR では、上記テストの新規追加または既存 update を description に明示する。
 
@@ -209,9 +209,12 @@ envelope schema と exit code は次のテストで pin されている。
 
 ### References
 
-- `src/envelope.rs` — `SuccessEnvelope` / `ErrorEnvelope` / `ErrorCode` / `ErrorPayload` 実装
+- `src/io/envelope.rs` — `SuccessEnvelope` / `ErrorEnvelope` / `ErrorCode` / `ErrorPayload` 実装
 - `src/hook_exit.rs` — `HookExitCode` 実装と sysexits.h 由来 doc コメント
-- `src/main.rs` — `parse_stdin` / `run_hook` / `run_prefetch` / `fail` / `emit_*` 関数群
+- `src/io/stdin.rs` — `parse_stdin`
+- `src/hook.rs` — `run_hook`
+- `src/main.rs` — `run_prefetch`
+- `src/io/output.rs` — `emit_human_violations` / `emit_json_if_enabled` / `emit_error_envelope_if_enabled` 関数群
 - `README.md` の Exit Codes / JSON Output Mode セクション
 - dotclaude ADR-0065 "scout JSON output schema and sysexits exit code policy" (inspiration; lives in a private dotclaude store, not navigable from this repo)
 - dotclaude ADR-0066 "CLI exit code policy grouped by error topology" (inspiration; private dotclaude store) — guardrails is a hook tool consuming stdin JSON and emitting violations on stderr; its exit code map follows the hook-tool grouping defined there.

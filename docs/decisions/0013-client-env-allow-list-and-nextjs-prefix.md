@@ -8,14 +8,14 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`client-env-public-leak` rule (`check_client_env_public_leak` in `src/ast_security.rs`) は `'use client'` 文脈で `process.env.X` の参照を検出し、X が「client bundle に embed されて良い public env」でない限り flag する。
+`client-env-public-leak` rule (`check_client_env_public_leak` in `src/analysis/ast_security/ssr_env.rs`) は `'use client'` 文脈で `process.env.X` の参照を検出し、X が「client bundle に embed されて良い public env」でない限り flag する。
 
 判定は二重免除機構で構成される。
 
-| 機構                                        | 場所                                                   | 対象                                                     |
-| ------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
-| `NEXT_PUBLIC_` prefix の `starts_with` 判定 | `NEXT_PUBLIC_PREFIX` const + `check_client_env_public_leak` の prefix check | Next.js 公式の client-exposed env naming convention      |
-| `CLIENT_ENV_ALLOW_LIST` 完全一致            | `CLIENT_ENV_ALLOW_LIST` const                          | 長さ 1: `NODE_ENV` のみ (compile-time embed される定数)  |
+| 機構                                        | 場所                                                                        | 対象                                                    |
+| ------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `NEXT_PUBLIC_` prefix の `starts_with` 判定 | `NEXT_PUBLIC_PREFIX` const + `check_client_env_public_leak` の prefix check | Next.js 公式の client-exposed env naming convention     |
+| `CLIENT_ENV_ALLOW_LIST` 完全一致            | `CLIENT_ENV_ALLOW_LIST` const                                               | 長さ 1: `NODE_ENV` のみ (compile-time embed される定数) |
 
 ここで明示されていない 2 つの policy が code に潜在している。
 
@@ -62,7 +62,7 @@ OUTCOME `Behavior` は「フロントエンドプロジェクト」を一般化�
 
 ### Confirmation
 
-`tests/integration.rs` および `src/ast_security.rs` 内 unit test で `process.env.NEXT_PUBLIC_API_URL` (pass) / `process.env.NODE_ENV` (pass) / `process.env.SECRET_KEY` (flag) の挙動を assert する。
+`tests/rule_smoke.rs` および `src/analysis/ast_security/ssr_env/tests.rs` 内 unit test で `process.env.NEXT_PUBLIC_API_URL` (pass) / `process.env.NODE_ENV` (pass) / `process.env.SECRET_KEY` (flag) の挙動を assert する。
 
 Vite prefix の挙動を確認:
 
@@ -103,9 +103,9 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/components/Com
 
 ### References
 
-- `src/ast_security.rs` `CLIENT_ENV_ALLOW_LIST`
-- `src/ast_security.rs` `check_client_env_public_leak`
-- `src/ast_security.rs` `process_env_access_name_from_sme` (StaticMemberExpression exact shape)
+- `src/analysis/ast_security/ssr_env.rs` `CLIENT_ENV_ALLOW_LIST`
+- `src/analysis/ast_security/ssr_env.rs` `check_client_env_public_leak`
+- `src/analysis/ast_security/ssr_env.rs` `process_env_access_name_from_sme` (StaticMemberExpression exact shape)
 - OUTCOME `.claude/OUTCOME.md` Behavior 節
 
 ### Reassessment Triggers

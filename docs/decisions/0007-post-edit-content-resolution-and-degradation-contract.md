@@ -33,7 +33,7 @@ snippet 単独に対して security check を走らせると、context が不足
 
 ## Decision Outcome
 
-採用: `ContentResolution` 3 値 (`Full` / `Degraded(DegradedReason)` / `NotApplicable`) と `DegradedReason` 8 variant の組合せ。`src/main.rs` で定義。
+採用: `ContentResolution` 3 値 (`Full` / `Degraded(DegradedReason)` / `NotApplicable`) と `DegradedReason` 8 variant の組合せ。`src/content.rs` で定義。
 
 ### ContentResolution 3 値の意味論
 
@@ -55,7 +55,7 @@ snippet 単独に対して security check を走らせると、context が不足
 
 ### DegradedReason 8 variant
 
-`src/main.rs` の `DegradedReason::note` が AI agent 向けの文字列を生成する。
+`src/content.rs` の `DegradedReason::note` が AI agent 向けの文字列を生成する。
 
 | Variant                      | 発生条件                                                                  | note 文言                                                                                                |
 | ---------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -77,7 +77,7 @@ snippet 単独に対して security check を走らせると、context が不足
 
 ### Degradation contract
 
-`Degraded(reason)` の場合の挙動 (`run_hook` in `src/main.rs`):
+`Degraded(reason)` の場合の挙動 (`run_hook` in `src/hook.rs`):
 
 1. `reason.note()` で文字列を生成
 2. stderr に `"guardrails: degraded: {note}"` を出力
@@ -89,7 +89,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 ### Notes aggregation order
 
-`run_hook_with_input` (`src/main.rs`) は単一の `notes: Vec<String>` に複数 source から push してから `SuccessEnvelope` に渡す。順序と作法は固定。
+`run_hook_with_input` (`src/hook.rs`) は単一の `notes: Vec<String>` に複数 source から push してから `SuccessEnvelope` に渡す。順序と作法は固定。
 
 | Order | Source                                                   | Pushed by                       |
 | ----- | -------------------------------------------------------- | ------------------------------- |
@@ -106,7 +106,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 ### Degraded derivation semantics
 
-`SuccessEnvelope.degraded` は `envelope.rs::SuccessEnvelope::with_notes_and_info` で degradation notes の有無 (`!degradations.is_empty()`) として派生する。次の意味を持つ。
+`SuccessEnvelope.degraded` は `src/io/envelope.rs::SuccessEnvelope::with_notes_and_info` で degradation notes の有無 (`!degradations.is_empty()`) として派生する。次の意味を持つ。
 
 - `degraded: true` は `ContentResolution::Degraded` 由来に限らず、上記 Order 1〜4 のどれか 1 つでも degradation note が積まれた状態を包含する
 - 「ContentResolution::Degraded」と「any environmental note present」を **同じ flag に union** している。flag 単体では原因軸を区別できない設計
@@ -126,7 +126,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 ### Confirmation
 
-`ContentResolution` 3 値と `DegradedReason` 8 variant は次のテストで pin されている (`src/main.rs` の `#[cfg(test)] mod tests`)。
+`ContentResolution` 3 値と `DegradedReason` 8 variant は次のテストで pin されている (`src/content/tests.rs`)。
 
 | 確認内容                                                         | テスト                                                                                                                                     |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -140,9 +140,9 @@ security check は止めない。snippet 単独でも false positive が出る�
 | `Degraded(PathOutsideProject)`                                   | `read_file_capped_degrades_when_file_outside_explicit_root` / `read_file_capped_degrades_on_symlink_pointing_outside_root` (unix)          |
 | `get_file_and_content` の `DegradedReason` 伝播                  | `get_file_and_content_propagates_degraded_reason`                                                                                          |
 | note 文言                                                        | `degraded_reason_note_contains_actionable_text`                                                                                            |
-| RC-001 (full-file fail → snippet fallback + `degraded: true`)    | `tests/integration.rs:164-191`                                                                                                             |
-| TC-004 (エラー優先順位 PathOutsideProject > MultiEditMidFailure) | `tests/integration.rs:193-224`                                                                                                             |
-| issue #59 (JSX snippet alone fails → full-file resolution)       | `tests/integration.rs:130-162`                                                                                                             |
+| RC-001 (full-file fail → snippet fallback + `degraded: true`)    | `tests/cli/edit.rs:56-83` (`edit_snippet_fallback_emits_degraded_true_in_json_envelope`)                                                   |
+| TC-004 (エラー優先順位 PathOutsideProject > MultiEditMidFailure) | `tests/cli/edit.rs:85-116` (`multi_edit_mid_sequence_failure_propagates_to_envelope`)                                                      |
+| issue #59 (JSX snippet alone fails → full-file resolution)       | `tests/cli/edit.rs:22-54` (`edit_with_jsx_attribute_snippet_detects_via_full_file`)                                                        |
 
 新規 `DegradedReason` variant を追加する PR では、note 文言と上記 confirmation 表への追加を必須にする。
 
@@ -200,7 +200,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 ### References
 
-- `src/main.rs` (`ContentResolution`, `DegradedReason`, `DegradedReason::note`, `get_file_and_content`, `resolve_edit_content`, `resolve_multi_edit_content`, `read_file_capped`, `apply_edit`, `io_error_to_reason`)
-- `tests/integration.rs` (RC-001 / TC-004 / issue #59 シナリオ)
+- `src/content.rs` (`ContentResolution`, `DegradedReason`, `DegradedReason::note`, `get_file_and_content`, `resolve_edit_content`, `resolve_multi_edit_content`, `read_file_capped`, `apply_edit`, `io_error_to_reason`)
+- `tests/cli/edit.rs` (RC-001 / TC-004 / issue #59 シナリオ)
 - ADR-0004 (Fail-mode policy) — `Degraded` は環境失敗軸に該当
 - `README.md` の "Known Limitations" / "JSON Output Mode" (degraded notes 例示)

@@ -10,24 +10,24 @@ decision-makers: thkt
 
 `ssr-secret-bleed` と `client-env-public-leak` の 2 rule は「サーバ側で構築した値がクライアントに serialize されるかどうか」を判定軸にする。判定には「現在の関数 / モジュールが SSR target か」を解決する必要がある。
 
-`src/ast_security.rs` の `is_ssr_target_function` および `check_program` は次の 3 trigger のみ SSR target として扱う。
+`src/analysis/ast_security.rs` の `is_ssr_target_function` および `check_program` は次の 3 trigger のみ SSR target として扱う。
 
-| Trigger                                       | 検出条件                                                                                     |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `getServerSideProps`                          | 関数名一致 (function declaration / const-arrow at function_depth==0 双方)                    |
-| Function body に `'use server'` directive     | React Server Components の Server Action 形式                                                |
-| Top-level `'use server'` file                 | ファイル全体が Server Actions module、program-scope の export は SSR target として扱う       |
+| Trigger                                   | 検出条件                                                                               |
+| ----------------------------------------- | -------------------------------------------------------------------------------------- |
+| `getServerSideProps`                      | 関数名一致 (function declaration / const-arrow at function_depth==0 双方)              |
+| Function body に `'use server'` directive | React Server Components の Server Action 形式                                          |
+| Top-level `'use server'` file             | ファイル全体が Server Actions module、program-scope の export は SSR target として扱う |
 
 これに対し次は **意図的に対象外**:
 
-| 除外対象                                | 理由                                                                                                       |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `getStaticProps`                        | SSG (build 時実行) のため client bundle に embed されず secret leakage の risk axis が異なる                |
-| Next.js App Router `app/**/route.ts`    | Response object を直接返す API endpoint、client への automatic serialization なし (rule は API scope 側で扱う) |
-| Remix `loader` / `action`               | 現状 OUTCOME `Behavior` の対象範囲 (Next.js 中心) を超える                                                   |
-| SvelteKit `+page.server.ts` `load`      | 同上                                                                                                       |
+| 除外対象                             | 理由                                                                                                           |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `getStaticProps`                     | SSG (build 時実行) のため client bundle に embed されず secret leakage の risk axis が異なる                   |
+| Next.js App Router `app/**/route.ts` | Response object を直接返す API endpoint、client への automatic serialization なし (rule は API scope 側で扱う) |
+| Remix `loader` / `action`            | 現状 OUTCOME `Behavior` の対象範囲 (Next.js 中心) を超える                                                     |
+| SvelteKit `+page.server.ts` `load`   | 同上                                                                                                           |
 
-negative test (`getStaticProps_is_not_in_scope_for_this_rule` in `src/ast_security.rs`) で `getStaticProps` 除外を assert する。
+negative test (`ssr_secret_bleed_silent_in_named_function_other_than_gssp` in `src/analysis/ast_security/ssr_env/tests.rs`) で `getStaticProps` 除外を assert する。
 
 Issue: 上記 trigger 限定および除外の判断は code と test のみに存在し、「なぜ App Router を含めないのか / Remix loader を含めないのか」の policy が記録されていない。新規 framework support 追加 PR で「Remix loader も SSR target に含めるべきでは」という review が周回する coordinate cost が見込まれる。
 
@@ -53,8 +53,8 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 
 本 ADR は次の境界を固定する。
 
-- `src/ast_security.rs` の `is_ssr_target_function` は上記 3 trigger に限定する
-- `getStaticProps` は SSG なので serialize 経路が異なり、本 ADR 対象外 (`getStaticProps_is_not_in_scope_for_this_rule` test で negative 維持)
+- `src/analysis/ast_security.rs` の `is_ssr_target_function` は上記 3 trigger に限定する
+- `getStaticProps` は SSG なので serialize 経路が異なり、本 ADR 対象外 (`ssr_secret_bleed_silent_in_named_function_other_than_gssp` test で negative 維持)
 - App Router `app/**/route.ts` の `GET` / `POST` 等 handler は Response object 直接返却で client serialization 経路を持たないため対象外
 - Remix `loader` / `action`、SvelteKit `+page.server.ts` `load` 等の他 framework は OUTCOME の Next.js 中心運用方針により現状対象外。framework support 追加時は本 ADR を改訂
 - 未 export の `getServerSideProps` も flag する (false positive 容認、false negative 抑制を優先)
@@ -71,7 +71,7 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 
 ### Confirmation
 
-`src/ast_security.rs` の `getStaticProps_is_not_in_scope_for_this_rule` test が現状の Pages Router 限定方針を assert する。framework coverage 拡張時は本 test を更新 + ADR 改訂をセットで実施する。
+`src/analysis/ast_security/ssr_env/tests.rs` の `ssr_secret_bleed_silent_in_named_function_other_than_gssp` test が現状の Pages Router 限定方針を assert する。framework coverage 拡張時は本 test を更新 + ADR 改訂をセットで実施する。
 
 `cargo test ssr_target` で SSR target 判定の test suite (3 trigger ごとの positive + negative) を実行可能。
 
@@ -104,10 +104,10 @@ Issue: 上記 trigger 限定および除外の判断は code と test のみに�
 
 ### References
 
-- `src/ast_security.rs` `check_program`
-- `src/ast_security.rs` `is_ssr_target_function`
-- `src/ast_security.rs` `visit_variable_declarator` の const-arrow form gate (`function_depth == 0` + `getServerSideProps` binding 判定)
-- `src/ast_security.rs` `getStaticProps_is_not_in_scope_for_this_rule` test (negative for `getStaticProps`)
+- `src/analysis/ast_security.rs` `check_program`
+- `src/analysis/ast_security.rs` `is_ssr_target_function`
+- `src/analysis/ast_security.rs` `visit_variable_declarator` の const-arrow form gate (`function_depth == 0` + `getServerSideProps` binding 判定)
+- `src/analysis/ast_security/ssr_env/tests.rs` `ssr_secret_bleed_silent_in_named_function_other_than_gssp` test (negative for `getStaticProps`)
 - OUTCOME `.claude/OUTCOME.md` Behavior / Non-goals 節
 
 ### Reassessment Triggers

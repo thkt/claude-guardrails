@@ -8,12 +8,12 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-`src/reporter.rs` の `format_violations` が hook stderr に出力する 2 つの装飾要素について、design intent が ADR で記録されていないため「意図的設計」か「token 浪費 / 過剰表現」かを後から判別できない状態にあった。
+`src/io/reporter.rs` の `format_violations` が hook stderr に出力する 2 つの装飾要素について、design intent が ADR で記録されていないため「意図的設計」か「token 浪費 / 過剰表現」かを後から判別できない状態にあった。
 
-| 要素 | 出力 | 長さ |
-| ---- | ---- | ---- |
-| `━` ボーダー | `Guardrails ━━━...` (39 chars) + `━━━...` (50 chars) | 計 89 chars / hook 起動 |
-| anti-circumvention 文言 | `Do not circumvent this check.` | 29 chars / blocking 時 |
+| 要素                    | 出力                                                 | 長さ                    |
+| ----------------------- | ---------------------------------------------------- | ----------------------- |
+| `━` ボーダー            | `Guardrails ━━━...` (39 chars) + `━━━...` (50 chars) | 計 89 chars / hook 起動 |
+| anti-circumvention 文言 | `Do not circumvent this check.`                      | 29 chars / blocking 時  |
 
 Issue #127 で両要素の design intent を確認し、結論を本 ADR に固定する。
 
@@ -52,7 +52,7 @@ commit `0103129` で確立された design intent をそのまま維持する:
 
 ### Scope
 
-本 ADR は `src/reporter.rs` の以下 2 箇所の現状維持を固定する:
+本 ADR は `src/io/reporter.rs` の以下 2 箇所の現状維持を固定する:
 
 - `HEADER_SEPARATOR` / `FOOTER_SEPARATOR` (border 装飾)
 - `BLOCKED: Fix N issue(s) in the source code and retry. Do not circumvent this check.` (anti-circumvention 文言)
@@ -69,5 +69,5 @@ commit `0103129` で確立された design intent をそのまま維持する:
 
 ### Verification
 
-- `src/reporter.rs` の `format_violations_single_issue` で `output.contains("━")` と `output.contains("BLOCKED")` を assert 済み
+- `src/io/reporter.rs` の `format_violations_single_issue` で `output.contains("━")` と `output.contains("BLOCKED")` を assert 済み
 - `format_violations` 本体に `BLOCKED:` 文言と `Do not circumvent this check.` の連結が残っていることは grep で固定可能
