@@ -80,3 +80,11 @@ Spec scenarios T-274 through T-296 (`.claude/workspace/planning/2026-06-10-diff-
 ## Reversibility
 
 The classifier is a new module wired into the hook at one branch point; the toggle defaults off and the off-path wire format is byte-identical. Removing the feature deletes the module, the toggle, and the `origin` field without affecting any existing consumer.
+
+## Amendment 2026-06-17: fourth DEMOTABLE_RULES enrollment clause
+
+The Locality allowlist states three enrollment clauses (reports every occurrence; decides each violation from a single line; reports the line whose text alone reproduces the violation). The demotion budget is keyed on `(rule_id, trimmed line text)` as a multiset, which silently assumes a fourth precondition this amendment makes explicit: for an enrolled rule, text identity equals violation identity, so the same trimmed line means the same severity wherever it sits. `eval`, a flat substring match, satisfies this.
+
+A future context-dependent rule (same line text, severity varying by surrounding scope) breaks the assumption. A demoted preexisting copy and a newly-introduced copy share one key, so the new copy borrows the old one's demotion budget and slips through as advisory — a bypass — with green CI, because the demotion-surface scenarios (`preserved` / `added` / `surplus-copy` / `swap` / `replaced`) all hold the rule's text-to-severity mapping constant and so cannot exercise the failure.
+
+Fourth clause: a rule may join `DEMOTABLE_RULES` only if its violation identity is fully determined by the trimmed line text. A context-dependent rule must first ship demotion-surface pairs that vary the surrounding context while holding the line text constant, proving the classifier blocks a context-changed reintroduction, before it is enrolled.

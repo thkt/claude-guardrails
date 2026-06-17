@@ -58,3 +58,26 @@ Chosen: **Option D**, as `#[cfg(test)] mod precision;` under `src/hook/` (a sibl
 ## Reversibility
 
 The harness is `#[cfg(test)]`-only data and one CI job. Moving fixtures, changing the gate formula, or deleting the whole module touches no production code path. The fp-rate-only gate can be extended with a tp-floor (recall regression detection) later without reshaping the metrics JSON.
+
+## Amendment 2026-06-17: pin the metrics JSON schema as a base-vs-head contract
+
+The Decision Outcome leaves the on-disk metrics JSON shape implicit. This amendment pins it as the cross-process base-vs-head compatibility contract the CI precision delta gate depends on. The decision is unchanged; the schema is made explicit.
+
+`RuleMetrics` serializes as one JSON object per rule_id under `rules`, carrying exactly these fields.
+
+| JSON key            | Rust field (`RuleMetrics`)          | Type |
+| ------------------- | ----------------------------------- | ---- |
+| `tp`                | `tp`                                | u32  |
+| `fn`                | `fn_count` (`serde(rename = "fn")`) | u32  |
+| `fp`                | `fp`                                | u32  |
+| `tn`                | `tn`                                | u32  |
+| `precision`         | `precision`                         | f64  |
+| `recall`            | `recall`                            | f64  |
+| `latency_us_median` | `latency_us_median`                 | u64  |
+| `unexpected_fires`  | `unexpected_fires`                  | u32  |
+
+`MetricsReport` is `{ "rules": { <rule_id>: RuleMetrics }, "toggle_latency_us": { <toggle>: u64 } }`, written by `write_metrics_json` when `GUARDRAILS_METRICS_OUT` is set (`emit_metrics`). `GUARDRAILS_METRICS_OUT` is itself the seam name the workflow YAML and the gate script must agree on.
+
+The gate parses base.json and head.json with jq and compares `fp` against the clean-sample count per rule. The comparison is meaningful only if both checkouts emit the same keys, so the field names and the `serde(rename = "fn")` are a compatibility contract: renaming a field (e.g. `fp` to `false_pos`) makes jq read null on one side, the cross-multiplication then passes vacuously, and the FP/recall gate silently disables with no failing line. A field rename is therefore a breaking change that must update the gate's jq paths in the same PR.
+
+Enforcement gap recorded here, not closed: the gate does not check jq's exit code, so a malformed or renamed field exits 0. Closing it is a separate bug-fix follow-up surfaced by the 2026-06-17 census; this amendment pins the contract, the follow-up makes the gate enforce it.
