@@ -167,7 +167,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `domAccess` | Medium | React（.tsx/.jsx）での直接 DOM 操作 | 命令的 DOM 操作は React の reconciler と競合し、不変条件が崩れて再現性の低いバグになる | React 以外のプロジェクト、またはバニラ JS/TS |
 | `syncIo` | Medium | readFileSync、writeFileSync（イベントループをブロック） | 一回の同期 I/O が event loop を凍結し、並行リクエストが全てそこで詰まる | CLI ツール、ビルドスクリプト、同期のみのコンテキスト |
 | `bundleSize` | Medium | lodash/moment のフルインポート | `lodash` / `moment` を丸ごとインポートすると、数個の utility のために数百 KB が全訪問者に届く | バックエンド/Node.js（バンドルサイズの懸念なし） |
-| `testAssertion` | Medium | expect() や assert のないテスト | 表明が無いテストは何が返っても green になり、CI が回帰を隠す | Playwright、カスタムテストフレームワーク |
+| `testAssertion` | Medium | 表明が無い、または弱い表明・モック呼び出しのみ・自明な恒真のテスト | どんな出力でも通る表明（無し・toBeTruthy/toBeDefined のみ・toHaveBeenCalled のみ・expect(x).toBe(x)）は CI を green にして回帰を隠す | Playwright、カスタムテストフレームワーク |
 | `flakyTest` | Low | テスト内の setTimeout、Math.random | 時刻と RNG で失敗が非決定的になり、原因究明より retry が選ばれて CI シグナルが劣化する | 意図的なタイミング/ランダムネスのテスト |
 | `generatedFile` | High | \*.generated.\*、\*.g.ts の編集を警告 | 手編集は次回生成で上書きされ、修正が消える | コード生成のないプロジェクト |
 | `testLocation` | Medium | src/ ディレクトリ内のテストファイル | `src/` 配下のテストは build 除外漏れで本番バンドルに混入する | コロケーションテスト戦略（ソースと同じ場所） |
