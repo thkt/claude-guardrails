@@ -163,6 +163,7 @@ fn collect_violations_deep_nesting_skipped_when_all_ast_rules_disabled() {
     config.rules.eval = false;
     config.rules.sqli_concat = false;
     config.rules.cors_wildcard = false;
+    config.rules.test_assertion = false;
     let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
     let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
     assert!(!violations.iter().any(|v| v.rule == "excessive-nesting"));

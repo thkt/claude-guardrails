@@ -222,6 +222,10 @@ pub fn extract_delimited_range(
     }
 }
 
+// Test-only ergonomic wrapper: returns the delimited slice as `&str` so the
+// `extract_delimited_range` bracket-matching / string-skip tests can assert on
+// text. Production callers use `extract_delimited_range` (offsets) directly.
+#[cfg(test)]
 pub fn extract_delimited_content(content: &str, start: usize, open: u8, close: u8) -> Option<&str> {
     extract_delimited_range(content, start, open, close).map(|(s, e)| &content[s..e])
 }

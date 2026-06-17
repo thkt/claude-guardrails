@@ -20,7 +20,7 @@ mod sensitive_logging;
 mod service_worker;
 pub(crate) mod sqli_concat;
 mod sync_io;
-mod test_assertion;
+pub(crate) mod test_assertion;
 mod test_location;
 mod transaction;
 
@@ -262,7 +262,6 @@ pub fn load_rules(config: &Config) -> Vec<&'static Rule> {
         dom_access        => dom_access,
         sync_io           => sync_io,
         bundle_size       => bundle_size,
-        test_assertion    => test_assertion,
         flaky_test        => flaky_test,
         sensitive_logging => sensitive_logging,
         hardcoded_secrets => hardcoded_secrets,
