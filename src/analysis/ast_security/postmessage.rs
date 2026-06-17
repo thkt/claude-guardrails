@@ -1,5 +1,4 @@
 use super::SecurityVisitor;
-use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,
@@ -54,20 +53,27 @@ impl SecurityVisitor<'_> {
     }
 }
 
-/// `window.addEventListener("message", handler)` / `self.…` / bare
-/// `addEventListener("message", handler)` の handler 引数を返す。受信側 (window /
-/// self / bare global) と event 名 "message" が揃わなければ None。
-/// `check_postmessage_origin_missing` と `requires_semantic` の双方がこれを共有し、
-/// pre-scan と本検査の検出条件が乖離しないようにする。
+/// 真のグローバル受信側として扱う識別子名。`window` / `self` / `globalThis` は
+/// いずれも同一のグローバルオブジェクトを指すため、postMessage の受信登録先として
+/// 等価。`MessagePort.onmessage` や cross-frame (`iframe.contentWindow`) は任意の
+/// binding を介して受信側になるため、1 ファイル静的解析では受信側と確定できず対象外。
+const GLOBAL_RECEIVERS: [&str; 3] = ["window", "self", "globalThis"];
+
+/// `expr` が `window` / `self` / `globalThis` のいずれかの bare identifier か。
+fn is_global_receiver(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(id) if GLOBAL_RECEIVERS.contains(&id.name.as_str()))
+}
+
+/// `window.addEventListener("message", handler)` / `self.…` / `globalThis.…` /
+/// bare `addEventListener("message", handler)` の handler 引数を返す。受信側
+/// (window / self / globalThis / bare global) と event 名 "message" が揃わなければ
+/// None。`check_postmessage_origin_missing` と `requires_semantic` の双方がこれを
+/// 共有し、pre-scan と本検査の検出条件が乖離しないようにする。
 fn message_listener_handler<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b Argument<'a>> {
     let callee_ok = match &call.callee {
         Expression::Identifier(id) => id.name == "addEventListener",
         Expression::StaticMemberExpression(sme) => {
-            sme.property.name == "addEventListener"
-                && matches!(
-                    &sme.object,
-                    Expression::Identifier(id) if matches!(id.name.as_str(), "window" | "self")
-                )
+            sme.property.name == "addEventListener" && is_global_receiver(&sme.object)
         }
         _ => false,
     };
@@ -83,16 +89,15 @@ fn message_listener_handler<'a, 'b>(call: &'b CallExpression<'a>) -> Option<&'b 
     call.arguments.get(1)
 }
 
-/// `window.onmessage = handler` / `self.…` / bare `onmessage = handler` の RHS を
-/// 返す。受信側が一致しなければ None。`message_listener_handler` と同様、検出条件を
-/// pre-scan と共有するための抽出。
+/// `window.onmessage = handler` / `self.…` / `globalThis.…` / bare
+/// `onmessage = handler` の RHS を返す。受信側が一致しなければ None。
+/// `message_listener_handler` と同様、検出条件を pre-scan と共有するための抽出。
 fn message_assignment_handler<'a, 'b>(
     expr: &'b AssignmentExpression<'a>,
 ) -> Option<&'b Expression<'a>> {
     let receiver_ok = match &expr.left {
         AssignmentTarget::StaticMemberExpression(sme) => {
-            sme.property.name == "onmessage"
-                && (ast::is_ident(&sme.object, "window") || ast::is_ident(&sme.object, "self"))
+            sme.property.name == "onmessage" && is_global_receiver(&sme.object)
         }
         AssignmentTarget::AssignmentTargetIdentifier(id) => id.name == "onmessage",
         _ => false,

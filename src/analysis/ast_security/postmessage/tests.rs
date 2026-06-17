@@ -132,16 +132,25 @@ fn postmessage_origin_missing_silent_on_zero_arg_callback() {
     assert_postmessage_silent("window.addEventListener('message', () => {});");
 }
 
-// Issue letter limits the receiver to `window` / `self` / bare global.
-// `globalThis.addEventListener` is out of scope by Issue letter; silent
-// until expanded with explicit user request.
+// `globalThis` is a true global receiver (same object as `window` / `self`),
+// so an unguarded `globalThis.addEventListener('message', ...)` is the same
+// vulnerability and must fire (#346).
 #[test]
-fn postmessage_origin_missing_silent_on_globalthis_addeventlistener() {
+fn postmessage_origin_missing_fires_on_globalthis_addeventlistener() {
+    assert_postmessage_fires("globalThis.addEventListener('message', (e) => { handle(e.data); });");
+}
+
+// The origin-check path still suppresses the finding on the globalThis receiver.
+#[test]
+fn postmessage_origin_missing_silent_on_globalthis_addeventlistener_with_origin_check() {
     assert_postmessage_silent(
-        "globalThis.addEventListener('message', (e) => { handle(e.data); });",
+        "globalThis.addEventListener('message', (e) => { if (e.origin !== 'https://x') return; handle(e.data); });",
     );
 }
 
+// A `Worker` instance bound to a local variable is not a global receiver; its
+// `addEventListener` registers on an arbitrary binding the 1-file analysis
+// cannot confirm as a message receiver, so it stays out of scope (silent).
 #[test]
 fn postmessage_origin_missing_silent_on_worker_addeventlistener() {
     assert_postmessage_silent(
@@ -221,11 +230,19 @@ fn postmessage_origin_missing_fires_on_window_onmessage_param_destructure_withou
     );
 }
 
-// Receiver allowlist is `window` / `self` / bare global only; `globalThis`
-// is intentionally excluded so the boundary matches `addEventListener`.
+// `globalThis.onmessage` assigns the same global receiver as `window.onmessage`,
+// so the unguarded assignment must fire and the boundary matches
+// `addEventListener` (#346).
 #[test]
-fn postmessage_origin_missing_silent_on_globalthis_onmessage() {
-    assert_postmessage_silent("globalThis.onmessage = (event) => { handle(event.data); };");
+fn postmessage_origin_missing_fires_on_globalthis_onmessage() {
+    assert_postmessage_fires("globalThis.onmessage = (event) => { handle(event.data); };");
+}
+
+#[test]
+fn postmessage_origin_missing_silent_on_globalthis_onmessage_with_origin_check() {
+    assert_postmessage_silent(
+        "globalThis.onmessage = (event) => { if (event.origin !== 'https://x') return; handle(event.data); };",
+    );
 }
 
 // Nested function shadows the handler param. The inner `event.origin`
