@@ -23,7 +23,6 @@ pub(crate) const REGISTERED_RULE_IDS: &[&str] = &[
     rule_id::DOM_ACCESS,
     rule_id::SYNC_IO,
     rule_id::BUNDLE_SIZE,
-    rule_id::TEST_ASSERTION,
     rule_id::FLAKY_TEST,
     rule_id::SENSITIVE_LOGGING,
     rule_id::HARDCODED_SECRET,
@@ -55,6 +54,7 @@ pub(crate) const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::NO_USE_EFFECT,       // main.rs から no_use_effect::check_program を直接呼ぶ
     rule_id::OPEN_REDIRECT,       // main.rs から open_redirect::check_program を直接呼ぶ
     rule_id::SQLI_CONCAT,         // main.rs から sqli_concat::check_program を直接呼ぶ
+    rule_id::TEST_ASSERTION, // test_assertion::check_program (AST 経路、run_ast_rules dispatch)
 ];
 
 pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) -> Vec<Violation> {

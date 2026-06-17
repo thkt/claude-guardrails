@@ -242,7 +242,8 @@ fn inline_block_comment_with_code_on_both_sides() {
 fn load_rules_default_config_loads_all() {
     let config = Config::default();
     let rules = load_rules(&config);
-    assert_eq!(rules.len(), 20);
+    // test-assertion runs on the AST path (run_ast_rules), not register_rules!.
+    assert_eq!(rules.len(), 19);
 }
 
 #[test]

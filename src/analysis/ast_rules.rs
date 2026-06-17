@@ -30,6 +30,7 @@ pub struct AstRuleFlags {
     pub eval: bool,
     pub sqli_concat: bool,
     pub cors_wildcard: bool,
+    pub test_assertion: bool,
 }
 
 impl AstRuleFlags {
@@ -41,6 +42,7 @@ impl AstRuleFlags {
             eval: config.rules.eval,
             sqli_concat: config.rules.sqli_concat,
             cors_wildcard: config.rules.cors_wildcard,
+            test_assertion: config.rules.test_assertion,
         }
     }
 
@@ -51,6 +53,7 @@ impl AstRuleFlags {
             || self.eval
             || self.sqli_concat
             || self.cors_wildcard
+            || self.test_assertion
     }
 }
 
@@ -118,6 +121,14 @@ pub fn run_ast_rules(
                 file_path,
             ));
         }
+        if flags.test_assertion {
+            found.extend(rules::test_assertion::check_program(
+                program,
+                line_offsets,
+                file_path,
+                content,
+            ));
+        }
         found
     })
 }
@@ -168,6 +179,7 @@ mod tests {
             eval: true,
             sqli_concat: true,
             cors_wildcard: true,
+            test_assertion: true,
         }
     }
 
