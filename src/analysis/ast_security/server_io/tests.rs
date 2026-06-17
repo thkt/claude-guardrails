@@ -84,6 +84,42 @@ fn child_process_literal_safe() {
 }
 
 #[test]
+fn child_process_named_alias_dynamic_arg_blocked() {
+    for code in [
+        "import { exec as run } from 'child_process';\nrun(userInput);",
+        "import { spawn as sp } from 'child_process';\nsp(cmd, args);",
+        "import { execSync as runSync } from 'node:child_process';\nrunSync(cmd);",
+    ] {
+        let v = check_js(code);
+        assert_eq!(v.len(), 1, "failed for: {code}");
+        assert_eq!(
+            v[0].rule,
+            rule_id::CHILD_PROCESS_INJECTION,
+            "failed for: {code}"
+        );
+    }
+}
+
+#[test]
+fn child_process_named_alias_literal_safe() {
+    assert!(check_js("import { exec as run } from 'child_process';\nrun('ls -la');").is_empty());
+}
+
+#[test]
+fn child_process_alias_from_non_cp_module_not_detected() {
+    // Source restriction: an alias bound from a non-child-process module carries
+    // no child-process prior, so the dynamic-arg call must not fire.
+    assert!(check_js("import { exec as run } from './db';\nrun(userInput);").is_empty());
+}
+
+#[test]
+fn child_process_alias_of_non_cp_export_not_detected() {
+    // The imported original name must itself be a child-process function;
+    // aliasing an unrelated export from the module does not arm the local name.
+    assert!(check_js("import { query as run } from 'child_process';\nrun(userInput);").is_empty());
+}
+
+#[test]
 fn fs_dynamic_path_blocked() {
     for code in [
         "fs.readFile(userInput, cb);",
