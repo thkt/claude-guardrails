@@ -118,6 +118,40 @@ fn extract_delimited_skips_string_braces() {
 }
 
 #[test]
+fn extract_delimited_skips_double_quote_string_inside_interpolation() {
+    // `${"a{b}c"}` — the braces sit inside a double-quoted string within template
+    // interpolation, so they must not move the outer `{}` depth. Exercises the
+    // in-interpolation double-quote branch of the scanner.
+    let content = r#"{`${"a{b}c"}`}"#;
+    assert_eq!(
+        extract_delimited_content(content, 1, b'{', b'}'),
+        Some(r#"`${"a{b}c"}`"#)
+    );
+}
+
+#[test]
+fn extract_delimited_skips_single_quote_string_inside_interpolation() {
+    // `${'x{y}'}` — same as above for a single-quoted string in interpolation.
+    let content = r"{`${'x{y}'}`}";
+    assert_eq!(
+        extract_delimited_content(content, 1, b'{', b'}'),
+        Some(r"`${'x{y}'}`")
+    );
+}
+
+#[test]
+fn extract_delimited_skips_escaped_quote_inside_interpolation_string() {
+    // `${"a\"b"}` — the escaped quote keeps the string open past the `\"`, so the
+    // closing `}` is the interpolation's, not a premature outer close. Exercises
+    // the escape branch inside an in-interpolation string.
+    let content = r#"{`${"a\"b"}`}"#;
+    assert_eq!(
+        extract_delimited_content(content, 1, b'{', b'}'),
+        Some(r#"`${"a\"b"}`"#)
+    );
+}
+
+#[test]
 fn source_masks_flag_line_comment_bytes() {
     let masks = build_source_masks("code\n// hidden\nmore");
     // bytes: 0..4 = "code", 4 = '\n', 5..7 = "//", 7..14 = " hidden",

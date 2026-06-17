@@ -443,6 +443,31 @@ mod tests {
     }
 
     #[test]
+    fn ignores_member_call_not_rooted_at_test() {
+        // `this.it(...)` — the callee root is `this`, not the `it`/`test`
+        // identifier, so the call is not a test definition and never fires.
+        let content = r"
+            this.it('looks like a test', () => {
+                doSomething();
+            });
+        ";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn detects_spread_argument_call_without_assertion() {
+        // `it(...args, fn)` — the spread element is not an expression argument, so
+        // name extraction skips it; the callback still resolves and fires.
+        let content = r"
+            it(...labels, () => {
+                doSomething();
+            });
+        ";
+        let violations = check(content);
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
     fn ignores_describe_block_without_assertion() {
         // A `describe` body legitimately holds no assertion; only `it`/`test` fire.
         let content = r"
