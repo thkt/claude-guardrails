@@ -148,6 +148,18 @@ fn postmessage_origin_missing_silent_on_globalthis_addeventlistener_with_origin_
     );
 }
 
+// Computed member access (`globalThis['addEventListener'](...)`) has a
+// `ComputedMemberExpression` callee, not a `StaticMemberExpression`, so the
+// receiver is not matched and the call stays silent. This boundary is
+// receiver-agnostic (`window['addEventListener']` is likewise out of scope)
+// and unchanged by #346; pinned here to keep the scope decision conscious.
+#[test]
+fn postmessage_origin_missing_silent_on_globalthis_computed_addeventlistener() {
+    assert_postmessage_silent(
+        "globalThis['addEventListener']('message', (e) => { handle(e.data); });",
+    );
+}
+
 // A `Worker` instance bound to a local variable is not a global receiver; its
 // `addEventListener` registers on an arbitrary binding the 1-file analysis
 // cannot confirm as a message receiver, so it stays out of scope (silent).
@@ -243,6 +255,15 @@ fn postmessage_origin_missing_silent_on_globalthis_onmessage_with_origin_check()
     assert_postmessage_silent(
         "globalThis.onmessage = (event) => { if (event.origin !== 'https://x') return; handle(event.data); };",
     );
+}
+
+// Computed assignment target (`globalThis['onmessage'] = ...`) is a computed
+// member, not a `StaticMemberExpression` target, so the receiver is not matched
+// and it stays silent. Receiver-agnostic boundary (also `window['onmessage']`),
+// unchanged by #346; pinned to keep the scope decision conscious.
+#[test]
+fn postmessage_origin_missing_silent_on_globalthis_computed_onmessage() {
+    assert_postmessage_silent("globalThis['onmessage'] = (event) => { handle(event.data); };");
 }
 
 // Nested function shadows the handler param. The inner `event.origin`
