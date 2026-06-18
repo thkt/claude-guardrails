@@ -202,16 +202,31 @@ jobs:
             echo "bootstrap: main has no precision metrics yet, skipping FP delta gate"
             exit 0
           fi
-          report=$(jq -rn --slurpfile base base.json --slurpfile head head.json '
+          # jq must error (not read null) on any schema drift, and the gate must
+          # observe that error: a bare `report=$(jq ...)` masks jq's exit status
+          # under set -e, so a renamed/missing field would exit 0 and the FP gate
+          # would silently disable (ADR-0019 schema contract). `// error(...)`
+          # makes a missing field fatal; `if ! report=$(...)` propagates it.
+          if ! report=$(jq -rn --slurpfile base base.json --slurpfile head head.json '
             ($base[0].rules // {}) as $b
-            | $head[0].rules | to_entries[]
+            | ($head[0].rules // error("head metrics: .rules key missing (schema drift? see ADR-0019)"))
+            | to_entries[]
             | .key as $rule | .value as $h | $b[$rule] as $br
             | if $br == null then
                 "SKIP \($rule): absent from base metrics (new rule)"
-              elif ($h.fp * ($br.fp + $br.tn)) > ($br.fp * ($h.fp + $h.tn)) then
-                "FAIL \($rule): FP rate worsened, base \($br.fp)/\($br.fp + $br.tn) -> head \($h.fp)/\($h.fp + $h.tn)"
-              else empty end
-          ')
+              else
+                ($h.fp // error("head rule \($rule): fp field missing")) as $hfp
+                | ($h.tn // error("head rule \($rule): tn field missing")) as $htn
+                | ($br.fp // error("base rule \($rule): fp field missing")) as $bfp
+                | ($br.tn // error("base rule \($rule): tn field missing")) as $btn
+                | if ($hfp * ($bfp + $btn)) > ($bfp * ($hfp + $htn)) then
+                    "FAIL \($rule): FP rate worsened, base \($bfp)/\($bfp + $btn) -> head \($hfp)/\($hfp + $htn)"
+                  else empty end
+              end
+          '); then
+            echo "::error::precision gate jq evaluation failed (metrics JSON schema drift? base/head field mismatch — see ADR-0019 schema contract)"
+            exit 1
+          fi
           if [ -n "$report" ]; then printf '%s\n' "$report"; fi
           if printf '%s\n' "$report" | grep -q '^FAIL'; then
             echo "::error::per-rule FP rate worsened vs main (see FAIL lines above)"
