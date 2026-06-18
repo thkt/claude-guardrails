@@ -3,10 +3,47 @@ use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BinaryOperator, CallExpression, Expression,
-    ObjectPropertyKind,
+    ImportDeclarationSpecifier, ObjectPropertyKind, Program, Statement,
 };
+use std::collections::HashSet;
 
 const CHILD_PROCESS_FNS: [&str; 4] = ["exec", "execSync", "spawn", "spawnSync"];
+
+// Modules whose named exports are the Node child-process API. A bare call like
+// `exec(x)` fires source-agnostically (the canonical name is signal enough), but
+// an arbitrary local alias (`run`) carries no such prior, so alias resolution is
+// restricted to these sources to keep precision: `import { exec as run } from
+// './db'` must not fire CHILD_PROCESS_INJECTION.
+const CHILD_PROCESS_MODULES: [&str; 2] = ["child_process", "node:child_process"];
+
+/// Collect the local names that `import { <cp-fn> as <local> }` binds from a
+/// child-process module, so a later call to `<local>(dynamicArg)` resolves back
+/// to the child-process API. Only true renames are recorded; a non-aliased
+/// `import { exec }` is already matched by the bare-name path.
+pub(super) fn collect_cp_named_aliases(program: &Program) -> HashSet<String> {
+    let mut aliases = HashSet::new();
+    for stmt in &program.body {
+        let Statement::ImportDeclaration(decl) = stmt else {
+            continue;
+        };
+        if !CHILD_PROCESS_MODULES.contains(&decl.source.value.as_str()) {
+            continue;
+        }
+        let Some(specifiers) = &decl.specifiers else {
+            continue;
+        };
+        for spec in specifiers {
+            let ImportDeclarationSpecifier::ImportSpecifier(s) = spec else {
+                continue;
+            };
+            let imported = s.imported.name();
+            if CHILD_PROCESS_FNS.contains(&imported.as_str()) && s.local.name.as_str() != imported {
+                aliases.insert(s.local.name.to_string());
+            }
+        }
+    }
+    aliases
+}
 
 impl SecurityVisitor<'_> {
     pub(super) fn check_err_stack(&mut self, call: &CallExpression) {
@@ -33,17 +70,27 @@ impl SecurityVisitor<'_> {
         if !self.in_server_context() {
             return;
         }
-        // KNOWN LIMITATION: aliased imports (import { exec as run }) are not detected.
-        let name = match &call.callee {
-            Expression::Identifier(id) => id.name.as_str(),
-            Expression::StaticMemberExpression(sme) => sme.property.name.as_str(),
+        // Named-import aliases (`import { exec as run }`) resolve via the
+        // child-process alias set built in collect_cp_named_aliases. Namespace
+        // (`import * as cp`) and default imports are not resolved here: a
+        // `cp.exec(x)` member call already matches by property name below, so the
+        // remaining gap is only a default/namespace binding renamed away from a
+        // bare child-process function name.
+        let is_child_process = match &call.callee {
+            Expression::Identifier(id) => {
+                CHILD_PROCESS_FNS.contains(&id.name.as_str())
+                    || self.cp_named_aliases.contains(id.name.as_str())
+            }
+            Expression::StaticMemberExpression(sme) => {
+                CHILD_PROCESS_FNS.contains(&sme.property.name.as_str())
+            }
             Expression::ComputedMemberExpression(cme) => match &cme.expression {
-                Expression::StringLiteral(s) => s.value.as_str(),
+                Expression::StringLiteral(s) => CHILD_PROCESS_FNS.contains(&s.value.as_str()),
                 _ => return,
             },
             _ => return,
         };
-        if !CHILD_PROCESS_FNS.contains(&name) {
+        if !is_child_process {
             return;
         }
         let Some(first) = call.arguments.first() else {
@@ -65,7 +112,10 @@ impl SecurityVisitor<'_> {
         }
         let obj = match &call.callee {
             Expression::StaticMemberExpression(sme) => &sme.object,
-            // KNOWN LIMITATION: only bare `fs` identifier matched — aliased imports not detected.
+            // Still-open gap: only a binding literally named `fs` is matched. A
+            // default or namespace import renamed away from `fs` (e.g. `import f
+            // from 'node:fs'; f.readFile(x)`) needs the module binding resolved,
+            // which the named-import alias set does not cover.
             Expression::ComputedMemberExpression(cme) => match &cme.expression {
                 Expression::StringLiteral(_) => &cme.object,
                 _ => return,

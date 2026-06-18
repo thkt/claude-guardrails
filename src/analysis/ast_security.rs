@@ -11,6 +11,7 @@ use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{Scoping, SemanticBuilder};
 use oxc_span::Span;
 use oxc_syntax::scope::ScopeFlags;
+use std::collections::HashSet;
 
 mod html;
 mod math_random;
@@ -148,6 +149,7 @@ pub fn check_program(
         in_security_named_fn: false,
         has_use_client,
         scoping,
+        cp_named_aliases: server_io::collect_cp_named_aliases(program),
     };
     visitor.visit_program(program);
     dedup_math_random_insecure(visitor.violations)
@@ -248,6 +250,9 @@ struct SecurityVisitor<'s> {
     // `None` when `check_program` skipped the SemanticBuilder (no identifier-param
     // message handler pre-scanned). Only the postMessage origin check reads it.
     scoping: Option<&'s Scoping>,
+    // Local names bound by `import { <cp-fn> as <local> }` from a child-process
+    // module, so `check_child_process` resolves the alias back to the API.
+    cp_named_aliases: HashSet<String>,
 }
 
 impl SecurityVisitor<'_> {
