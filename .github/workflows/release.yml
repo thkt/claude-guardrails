@@ -58,11 +58,6 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          key: ${{ matrix.target }}
-
       - name: Install cross-compilation tools (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -133,10 +128,14 @@ jobs:
           path: artifacts
 
       - name: Create Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          gh release create "$TAG" artifacts/*/* --generate-notes
 
   update-homebrew:
     needs: release
@@ -151,6 +150,7 @@ jobs:
         with:
           repository: thkt/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          persist-credentials: false
 
       - name: Download artifacts for checksums
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -195,9 +195,11 @@ jobs:
       - name: Commit and push
         env:
           VERSION: ${{ needs.release.outputs.version }}
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/thkt/homebrew-tap.git"
           git add Formula/guardrails.rb
           git diff --staged --quiet && echo "No changes to commit" && exit 0
           git commit -m "feat: update guardrails to v${VERSION}"
@@ -229,6 +231,7 @@ jobs:
         with:
           repository: thkt/sentinels
           token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Update plugin version
         env:
@@ -243,9 +246,11 @@ jobs:
         env:
           VERSION: ${{ needs.release.outputs.version }}
           TOOL: guardrails
+          TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/thkt/sentinels.git"
           git add "${TOOL}/.claude-plugin/plugin.json"
           git diff --staged --quiet && echo "No changes to commit" && exit 0
           git commit -m "sync: ${TOOL} v${VERSION}"
@@ -280,6 +285,7 @@ jobs:
           repository: thkt/sentinels
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -287,9 +293,13 @@ jobs:
           path: /tmp/artifacts
 
       - name: Stage binaries (preserve other tools, exclude Windows)
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           STAGE=/tmp/binaries-stage
           mkdir -p "$STAGE"
+
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/thkt/sentinels.git"
 
           # Preserve other tools' files from existing binaries branch (if present)
           if git fetch --depth=1 origin binaries:refs/remotes/origin/binaries 2>/dev/null; then
