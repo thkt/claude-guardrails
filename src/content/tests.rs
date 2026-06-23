@@ -99,6 +99,139 @@ fn multi_edit_join_preserves_separator_before_empty_string() {
     assert_eq!(content, "\nkept");
 }
 
+// T-16: a `.json` Edit reconstructs the full post-edit file into
+// `structured_full` (for the invariant gate) while `content` keeps the
+// new_string snippet, so existing content-scan rules see unchanged `.json`
+// behavior (AC8). This wiring is already implemented; the test guards it
+// against regression rather than driving a Red phase.
+#[test]
+fn json_edit_supplies_structured_full_but_content_stays_snippet() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // Canonicalize so the macOS `/var` -> `/private/var` symlink does not trip
+    // the `starts_with(project_root)` path-traversal guard.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{\n  \"checkout\": { \"v2\": false }\n}\n").unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path_str.clone()),
+            old_string: Some("\"v2\": false".to_owned()),
+            new_string: Some("\"v2\": true".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root)).unwrap();
+
+    // content-scan rules keep seeing the snippet, not the full file.
+    assert_eq!(target.content, "\"v2\": true");
+    // invariant gate gets the full reconstructed post-edit JSON.
+    assert_eq!(
+        target.structured_full.as_full_str(),
+        Some("{\n  \"checkout\": { \"v2\": true }\n}\n")
+    );
+}
+
+// The structured-full reconstruction is `.json`-only and mirrors the snippet
+// tool dispatch: Write takes `content` whole, Edit/MultiEdit replay against the
+// on-disk file with the read gate forced open. Each branch returns
+// `NotApplicable` when its required input is absent so the invariant gate skips
+// rather than comparing a partial document.
+#[test]
+fn reconstruct_structured_full_write_json_takes_whole_content() {
+    let input = make_write_input(Some("/app/flags.json"), Some(r#"{ "a": 1 }"#));
+    match reconstruct_structured_full(&input, "/app/flags.json", None) {
+        ContentResolution::Full(c) => assert_eq!(c, r#"{ "a": 1 }"#),
+        _ => panic!("expected Full"),
+    }
+}
+
+#[test]
+fn reconstruct_structured_full_write_json_without_content_is_not_applicable() {
+    let input = make_write_input(Some("/app/flags.json"), None);
+    assert!(matches!(
+        reconstruct_structured_full(&input, "/app/flags.json", None),
+        ContentResolution::NotApplicable
+    ));
+}
+
+#[test]
+fn reconstruct_structured_full_edit_json_without_new_string_is_not_applicable() {
+    let input = make_edit_input(Some("/app/flags.json"), None);
+    assert!(matches!(
+        reconstruct_structured_full(&input, "/app/flags.json", None),
+        ContentResolution::NotApplicable
+    ));
+}
+
+#[test]
+fn reconstruct_structured_full_multi_edit_without_edits_is_not_applicable() {
+    let input = ToolInput {
+        tool_name: ToolName::MultiEdit,
+        tool_input: ToolInputData {
+            file_path: Some("/app/flags.json".to_owned()),
+            edits: None,
+            ..ToolInputData::default()
+        },
+    };
+    assert!(matches!(
+        reconstruct_structured_full(&input, "/app/flags.json", None),
+        ContentResolution::NotApplicable
+    ));
+}
+
+#[test]
+fn reconstruct_structured_full_multi_edit_replays_over_disk_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{\n  \"checkout\": false\n}\n").unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+    let input = ToolInput {
+        tool_name: ToolName::MultiEdit,
+        tool_input: ToolInputData {
+            file_path: Some(path_str.clone()),
+            edits: Some(vec![EditItem {
+                old_string: Some("false".to_owned()),
+                new_string: Some("true".to_owned()),
+                ..EditItem::default()
+            }]),
+            ..ToolInputData::default()
+        },
+    };
+    match reconstruct_structured_full(&input, &path_str, None) {
+        ContentResolution::Full(c) => assert_eq!(c, "{\n  \"checkout\": true\n}\n"),
+        _ => panic!("expected Full"),
+    }
+}
+
+#[test]
+fn reconstruct_structured_full_other_tool_is_not_applicable() {
+    let input = ToolInput {
+        tool_name: ToolName::Other("Bash".to_owned()),
+        tool_input: ToolInputData {
+            file_path: Some("/app/flags.json".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+    assert!(matches!(
+        reconstruct_structured_full(&input, "/app/flags.json", None),
+        ContentResolution::NotApplicable
+    ));
+}
+
+#[test]
+fn reconstruct_structured_full_non_json_is_not_applicable() {
+    let input = make_write_input(Some("/app/main.ts"), Some("const x = 1;"));
+    assert!(matches!(
+        reconstruct_structured_full(&input, "/app/main.ts", None),
+        ContentResolution::NotApplicable
+    ));
+}
+
 #[test]
 fn multi_edit_empty_edits_returns_none() {
     let input = ToolInput {

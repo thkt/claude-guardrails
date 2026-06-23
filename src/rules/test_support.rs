@@ -56,6 +56,7 @@ pub(crate) const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::OPEN_REDIRECT,       // main.rs から open_redirect::check_program を直接呼ぶ
     rule_id::SQLI_CONCAT,         // main.rs から sqli_concat::check_program を直接呼ぶ
     rule_id::TEST_ASSERTION, // test_assertion::check_program (AST 経路、run_ast_rules dispatch)
+    rule_id::INVARIANT, // invariant::run_invariant_pass (collect_violations、is_js 非依存の独立パス)
 ];
 
 pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) -> Vec<Violation> {

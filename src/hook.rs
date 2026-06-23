@@ -5,8 +5,9 @@
 use crate::analysis::ast_rules::{self, AstRequest, AstRuleFlags};
 use crate::analysis::{ast_security, nesting, oxlint};
 use crate::config::{Config, ConfigError};
-use crate::content::{get_file_and_content, ToolInput, ToolName};
+use crate::content::{get_file_and_content, ContentResolution, ToolInput, ToolName};
 use crate::hook_exit::HookExitCode;
+use crate::invariant::{degraded_note, run_invariant_pass};
 use crate::io::output::{
     emit_human_violations, emit_json_if_enabled, render_error, show_config_hint,
 };
@@ -198,6 +199,7 @@ fn collect_violations(
     config: &Config,
     project_root: Option<&Path>,
     is_js: bool,
+    structured_full: Option<&str>,
 ) -> (Vec<Violation>, Vec<String>) {
     let mut violations = Vec::new();
     let mut notes = Vec::new();
@@ -211,6 +213,17 @@ fn collect_violations(
     let (vs, ns) = collect_first_party_violations(file_path, content, config, is_js);
     violations.extend(vs);
     notes.extend(ns);
+
+    // Invariant gate runs independent of is_js (it audits `.json`); the toggle
+    // gates step 1, the pass short-circuits on `structured_full = None` before
+    // any `.invariants.json` read.
+    if config.rules.invariant {
+        violations.extend(run_invariant_pass(
+            file_path,
+            structured_full,
+            config.git_root.as_deref(),
+        ));
+    }
 
     (violations, notes)
 }
@@ -356,8 +369,21 @@ where
         &config,
         project_root.as_deref(),
         target.is_js,
+        target.structured_full.as_full_str(),
     );
     notes.extend(lint_notes);
+    // A `.json` whose post-edit content could not be reconstructed (oversize,
+    // non-UTF8, IO error) reaches the invariant pass as `None` and is skipped.
+    // When the file is actually pinned, surface a note so the skip is visible
+    // instead of silent; an unpinned file stays quiet.
+    if config.rules.invariant {
+        if let ContentResolution::Degraded(_) = &target.structured_full {
+            if let Some(note) = degraded_note(&target.file_path, config.git_root.as_deref()) {
+                eprintln!("guardrails: invariant: {note}");
+                notes.push(note);
+            }
+        }
+    }
     if let Some(reason) = target.degraded {
         let note = reason.note();
         eprintln!("guardrails: degraded: {note}");

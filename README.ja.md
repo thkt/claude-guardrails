@@ -176,6 +176,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `serviceWorker` | Medium | ルートスコープ（`{ scope: '/' }`）での Service Worker 登録。特定パスへのスコープ絞り込みを提案 | ルートスコープはオリジンの全 navigation を傍受するので、一度の誤登録でサイト全体を乗っ取られる | サイト全体に worker を意図的に配信するプロジェクト |
 | `jwtClient` | Medium | クライアント側 JWT デコード（`jwtDecode`、`jwt_decode`、`atob(token.split('.'))`）。サーバー側 `jwtVerify` を推奨 | JWT payload は base64url で読めるが、署名検証なしには改竄も通る。クライアントで信用すると認可回避になる | サーバー専用 JWT デコード経路（Node 専用ファイル等） |
 | `astSecurity` | Mixed | ASTベース: コマンド/正規表現/require インジェクション、スタック露出、パストラバーサル、プロトタイプ汚染、bidi 文字、env-var フォールバック、不安全な乱数、HTML インジェクション、client env leak、SSR secret bleed、postMessage origin（下記参照） | AST ベースの集約。各 sub-rule にそれぞれの脅威がある（下記 sub-rule 表を参照） | Node.js以外のプロジェクト |
+| `invariant` | High | `.invariants.json` で固定したスカラー値から `.json` の値がずれる編集をブロック（feature flag、i18n 文言、design token） | 固定値はアプリ全体が依存する契約で、無言で変える編集は誰も承認していない挙動変更を出荷する | 不変値を固定しないプロジェクト |
 <!-- END GENERATED: rules-table -->
 
 ### セキュリティルール（`security`）
@@ -378,7 +379,8 @@ guardrails --json < tool-call.json
     "noUseEffect": true,
     "serviceWorker": true,
     "jwtClient": true,
-    "astSecurity": true
+    "astSecurity": true,
+    "invariant": true
   },
   "oxlint": {
     "deny": [],

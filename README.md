@@ -174,6 +174,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `serviceWorker` | Medium | Service Worker registration with root scope (`{ scope: '/' }`). Suggests narrowing to a specific path | Root scope intercepts every navigation on the origin, so one misregistration hijacks the whole site | Projects intentionally serving the worker site-wide |
 | `jwtClient` | Medium | Client-side JWT decode (`jwtDecode`, `jwt_decode`, `atob(token.split('.'))`). Suggests server-side `jwtVerify` | JWT payload is base64url. It is readable but also editable without a signature check, so trusting it on the client is an authorization bypass | Server-only JWT decode paths (e.g., Node-only files) |
 | `astSecurity` | Mixed | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection, client env leak, SSR secret bleed, postMessage origin (see below) | Aggregated AST checks. Each sub-rule has its own threat (see the sub-rule table below) | Non-Node.js projects |
+| `invariant` | High | Blocks an edit that drifts a `.json` value away from the scalar pinned for it in `.invariants.json` (feature flags, i18n strings, design tokens) | A pinned value is a contract the rest of the app depends on; a silent edit that changes it ships a behavior change no human approved | Projects that do not pin invariant values |
 <!-- END GENERATED: rules-table -->
 
 ### Security Rules (`security`)
@@ -288,15 +289,15 @@ guardrails --json < tool-call.json
 }
 ```
 
-| Field             | Type                                           | Notes                                                                                                                                                                                                              |
-| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `data.violations` | array                                          | Both blocking and warning entries; distinguish via `severity`                                                                                                                                                      |
-| `data.decision`   | `"block"` / `"allow"`                          | `block` only when an entry is at or above `severity.blockThreshold`                                                                                                                                                |
-| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"` | Lowercase                                                                                                                                                                                                          |
-| `line`            | integer or `null`                              | `null` when location is unknown                                                                                                                                                                                    |
+| Field             | Type                                           | Notes                                                                                                                                                                                                                                       |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data.violations` | array                                          | Both blocking and warning entries; distinguish via `severity`                                                                                                                                                                               |
+| `data.decision`   | `"block"` / `"allow"`                          | `block` only when an entry is at or above `severity.blockThreshold`                                                                                                                                                                         |
+| `severity`        | `"critical"` / `"high"` / `"medium"` / `"low"` | Lowercase                                                                                                                                                                                                                                   |
+| `line`            | integer or `null`                              | `null` when location is unknown                                                                                                                                                                                                             |
 | `origin`          | `"preexisting"` (optional)                     | Present only on violations demoted because they existed before the edit, and only when `diffAware` is on. Every other entry omits the field: the tool does not before-compare it, so it makes no origin claim (see [diffAware](#diffaware)) |
-| `degraded`        | boolean                                        | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause |
-| `notes`           | array of strings                               | Reasons for degradation in order of source (project root → config → linter → content fallback). Not deduplicated. Non-empty implies `degraded: true`                                                               |
+| `degraded`        | boolean                                        | `true` when any note is present. Union of environmental notes (project root canonicalize failure, config load failure, oxlint unavailable) and post-edit content fallback notes. Always read `notes` for the cause                          |
+| `notes`           | array of strings                               | Reasons for degradation in order of source (project root → config → linter → content fallback). Not deduplicated. Non-empty implies `degraded: true`                                                                                        |
 
 ### Error envelope
 
@@ -376,7 +377,8 @@ Place a `.guardrails.json` at your project root. The format is the flat `Project
     "noUseEffect": true,
     "serviceWorker": true,
     "jwtClient": true,
-    "astSecurity": true
+    "astSecurity": true,
+    "invariant": true
   },
   "oxlint": {
     "deny": [],

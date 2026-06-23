@@ -1,5 +1,5 @@
 use super::*;
-use crate::rules::Severity;
+use crate::rules::{rule_id, Severity};
 
 fn make_violation(rule: &str, severity: Severity) -> Violation {
     Violation {
@@ -16,8 +16,148 @@ fn make_violation(rule: &str, severity: Severity) -> Violation {
 fn collect_violations_detects_eval() {
     let config = Config::default();
     let (violations, _notes) =
-        collect_violations("/src/app.ts", "eval(userInput);", &config, None, true);
+        collect_violations("/src/app.ts", "eval(userInput);", &config, None, true, None);
     assert!(violations.iter().any(|v| v.rule == "eval"));
+}
+
+// T-11: with `config.rules.invariant=false` the invariant pass is skipped even
+// when a mismatching `.invariants.json` and full structured content are present
+// (toggle gate at the collect_violations level). No invariant violation fires.
+#[test]
+fn collect_violations_invariant_toggle_off_skips_gate() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+    let abs = tmp.path().join("flags.json").to_string_lossy().into_owned();
+
+    let mut config = Config::default();
+    config.rules.invariant = false;
+    config.git_root = Some(tmp.path().to_path_buf());
+
+    let (violations, _notes) = collect_violations(
+        &abs,
+        r#"{ "checkout": { "v2": true } }"#,
+        &config,
+        Some(tmp.path()),
+        false,
+        Some(r#"{ "checkout": { "v2": true } }"#),
+    );
+
+    assert_eq!(
+        violations
+            .iter()
+            .filter(|v| v.rule == rule_id::INVARIANT)
+            .count(),
+        0
+    );
+}
+
+// T-22: the flagship production chain. A non-JS `.json` Edit flows through
+// `get_file_and_content` (which reconstructs `structured_full`) into
+// `collect_violations` with the invariant toggle on, and a drifted pinned value
+// fires one violation. The split unit tests each verify one half; this joins
+// them so a future refactor dropping the `structured_full` argument is caught.
+#[test]
+fn json_edit_fires_invariant_violation_end_to_end() {
+    use crate::content::{get_file_and_content, ToolInput, ToolInputData, ToolName};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    // Canonicalize so the macOS `/var` -> `/private/var` symlink does not trip
+    // the `starts_with(project_root)` path-traversal guard.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{\n  \"checkout\": { \"v2\": false }\n}\n").unwrap();
+    fs::write(
+        root.join(".invariants.json"),
+        r#"{ "flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("\"v2\": false".to_owned()),
+            new_string: Some("\"v2\": true".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root)).unwrap();
+
+    let config = Config {
+        git_root: Some(root.clone()),
+        ..Config::default()
+    };
+
+    let (violations, _notes) = collect_violations(
+        &target.file_path,
+        &target.content,
+        &config,
+        Some(&root),
+        target.is_js,
+        target.structured_full.as_full_str(),
+    );
+
+    assert_eq!(
+        violations
+            .iter()
+            .filter(|v| v.rule == rule_id::INVARIANT)
+            .count(),
+        1,
+        "non-JS .json Edit must fire exactly one invariant violation through the production chain"
+    );
+}
+
+// T-29: a `.json` Edit whose on-disk content cannot be reconstructed (here
+// non-UTF8 bytes) reaches `run_hook_with_input` as a Degraded structured_full.
+// When the file is pinned, the gate must fail open (exit 0, advisory note) rather
+// than block, exercising the degraded-note wiring around the invariant pass.
+#[test]
+fn json_edit_degraded_content_fails_open_with_note() {
+    use crate::content::{ToolInput, ToolInputData, ToolName};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    // Invalid UTF-8 on disk -> reconstruct_structured_full returns Degraded.
+    fs::write(&path, [0xff, 0xfe, 0x00]).unwrap();
+    fs::write(
+        root.join(".invariants.json"),
+        r#"{ "flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("checkout".to_owned()),
+            new_string: Some("checkout-edited".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let root_for_config = root.clone();
+    let exit = run_hook_with_input(
+        &input,
+        Ok(root.clone()),
+        || {
+            Ok(Config {
+                git_root: Some(root_for_config),
+                ..Config::default()
+            })
+        },
+        false,
+    );
+
+    assert_eq!(
+        exit, 0,
+        "degraded pinned .json edit must fail open (advisory), not block"
+    );
 }
 
 #[test]
@@ -29,6 +169,7 @@ fn collect_violations_clean_code() {
         &config,
         None,
         true,
+        None,
     );
     assert!(
         violations.is_empty(),
@@ -41,7 +182,7 @@ fn collect_violations_disabled_rule_skipped() {
     let mut config = Config::default();
     config.rules.eval = false;
     let (violations, _notes) =
-        collect_violations("/src/app.ts", "eval(userInput);", &config, None, true);
+        collect_violations("/src/app.ts", "eval(userInput);", &config, None, true, None);
     assert!(!violations.iter().any(|v| v.rule == "eval"));
 }
 
@@ -49,7 +190,7 @@ fn collect_violations_disabled_rule_skipped() {
 fn collect_violations_non_js_skips_js_rules() {
     let config = Config::default();
     let (violations, _notes) =
-        collect_violations("/README.md", "eval(userInput);", &config, None, false);
+        collect_violations("/README.md", "eval(userInput);", &config, None, false, None);
     assert!(!violations.iter().any(|v| v.rule == "eval"));
 }
 
@@ -62,6 +203,7 @@ fn collect_violations_ast_security_detects_injection() {
         &config,
         None,
         true,
+        None,
     );
     assert!(violations
         .iter()
@@ -78,6 +220,7 @@ fn collect_violations_ast_security_disabled() {
         &config,
         None,
         true,
+        None,
     );
     assert!(!violations
         .iter()
@@ -99,6 +242,7 @@ fn collect_violations_bidi_detected_when_parse_fails() {
         &config,
         None,
         true,
+        None,
     );
     assert!(
         notes.iter().any(|n| n.contains("parse failed")),
@@ -121,7 +265,7 @@ fn collect_violations_bidi_detected_when_parse_fails() {
 fn collect_violations_deep_nesting_blocks_before_parse() {
     let config = Config::default();
     let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
-    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true, None);
     assert!(
         violations
             .iter()
@@ -143,7 +287,7 @@ fn collect_violations_deep_nesting_blocks_when_ast_security_disabled_but_parse_r
     let mut config = Config::default();
     config.rules.ast_security = false;
     let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
-    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true, None);
     assert!(
         violations
             .iter()
@@ -165,7 +309,7 @@ fn collect_violations_deep_nesting_skipped_when_all_ast_rules_disabled() {
     config.rules.cors_wildcard = false;
     config.rules.test_assertion = false;
     let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
-    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true);
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true, None);
     assert!(!violations.iter().any(|v| v.rule == "excessive-nesting"));
 }
 
@@ -178,6 +322,7 @@ fn collect_violations_no_use_effect_detects_in_tsx() {
         &config,
         None,
         true,
+        None,
     );
     assert!(violations.iter().any(|v| v.rule == "no-use-effect"));
 }
@@ -192,6 +337,7 @@ fn collect_violations_no_use_effect_disabled() {
         &config,
         None,
         true,
+        None,
     );
     assert!(!violations.iter().any(|v| v.rule == "no-use-effect"));
 }

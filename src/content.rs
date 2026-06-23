@@ -4,6 +4,7 @@
 //! apply functions reconstruct the post-edit file content (or a degraded
 //! snippet) that the linters audit.
 
+use crate::invariant::is_structured_config;
 use crate::rules::RE_JS_FILE;
 use crate::MAX_INPUT_SIZE;
 use std::fmt;
@@ -58,15 +59,15 @@ pub(crate) struct ToolInput {
 pub(crate) struct ToolInputData {
     pub(crate) file_path: Option<String>,
     pub(crate) content: Option<String>,
-    new_string: Option<String>,
-    old_string: Option<String>,
+    pub(crate) new_string: Option<String>,
+    pub(crate) old_string: Option<String>,
     #[serde(default)]
-    replace_all: bool,
-    edits: Option<Vec<EditItem>>,
+    pub(crate) replace_all: bool,
+    pub(crate) edits: Option<Vec<EditItem>>,
 }
 
 #[derive(serde::Deserialize, Default)]
-struct EditItem {
+pub(crate) struct EditItem {
     new_string: Option<String>,
     old_string: Option<String>,
     #[serde(default)]
@@ -129,6 +130,18 @@ pub(crate) enum ContentResolution {
     NotApplicable,
 }
 
+impl ContentResolution {
+    /// The reconstructed full content, or `None` when the resolution degraded or
+    /// did not apply. The invariant gate compares against full content only; a
+    /// degraded resolution is surfaced as a note elsewhere, not silently fed in.
+    pub(crate) fn as_full_str(&self) -> Option<&str> {
+        match self {
+            Self::Full(content) => Some(content),
+            _ => None,
+        }
+    }
+}
+
 /// Where the before-edit content for the diff-aware pass comes from.
 /// - `Retained`: Edit/MultiEdit resolution already read the file; reuse it.
 /// - `OnDisk`: Write never reads the target; read lazily only when needed.
@@ -147,6 +160,13 @@ pub(crate) struct ResolvedTarget {
     pub(crate) is_js: bool,
     pub(crate) degraded: Option<DegradedReason>,
     pub(crate) before: BeforeSource,
+    /// Full post-edit content for the invariant gate, resolved only for
+    /// `.json` (`is_structured_config`) targets. `content` stays the snippet for
+    /// non-JS Edits so existing content-scan rules are unaffected; the invariant
+    /// pass reads `Full` content from here. A `Degraded` resolution carries the
+    /// reason so the gate can surface a note instead of silently skipping a
+    /// pinned file; `NotApplicable` is non-`.json` or a tool that writes no body.
+    pub(crate) structured_full: ContentResolution,
 }
 
 pub(crate) fn get_file_and_content(
@@ -204,13 +224,61 @@ pub(crate) fn get_file_and_content(
         return None;
     }
 
+    let structured_full = reconstruct_structured_full(input, &file_path, project_root);
+
     Some(ResolvedTarget {
         file_path,
         content,
         is_js,
         degraded,
         before,
+        structured_full,
     })
+}
+
+/// Full post-edit content for the invariant gate, computed only for `.json`
+/// targets. Non-`.json` paths return `NotApplicable` before any disk read
+/// (NFR-001). Reuses the Edit/MultiEdit resolution with the read gate forced
+/// open so a `.json` Edit (which `is_js=false` would otherwise leave as a
+/// snippet) is reconstructed in full. A degraded resolution is returned as
+/// `Degraded(reason)` rather than collapsed to `NotApplicable`, so the gate can
+/// note a skipped pin instead of silently passing it. `content` on the target is
+/// untouched, so existing rules keep seeing the snippet.
+fn reconstruct_structured_full(
+    input: &ToolInput,
+    file_path: &str,
+    project_root: Option<&Path>,
+) -> ContentResolution {
+    if !is_structured_config(file_path) {
+        return ContentResolution::NotApplicable;
+    }
+    match &input.tool_name {
+        ToolName::Write => match input.tool_input.content.clone() {
+            Some(content) => ContentResolution::Full(content),
+            None => ContentResolution::NotApplicable,
+        },
+        ToolName::Edit => {
+            let Some(new_string) = input.tool_input.new_string.as_deref() else {
+                return ContentResolution::NotApplicable;
+            };
+            resolve_edit_content(
+                file_path,
+                input.tool_input.old_string.as_deref(),
+                new_string,
+                input.tool_input.replace_all,
+                project_root,
+                true,
+            )
+            .0
+        }
+        ToolName::MultiEdit => {
+            let Some(edits) = input.tool_input.edits.as_ref() else {
+                return ContentResolution::NotApplicable;
+            };
+            resolve_multi_edit_content(file_path, edits, project_root, true).0
+        }
+        ToolName::Other(_) => ContentResolution::NotApplicable,
+    }
 }
 
 fn join_new_strings(edits: &[EditItem]) -> String {

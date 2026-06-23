@@ -2,7 +2,7 @@ use super::{
     classify, demote_preexisting, demotion_eligible, read_failure_phrase, DEMOTABLE_RULES,
 };
 use crate::config::Config;
-use crate::content::{BeforeSource, DegradedReason, ResolvedTarget};
+use crate::content::{BeforeSource, ContentResolution, DegradedReason, ResolvedTarget};
 use crate::hook::collect_violations;
 use crate::rules::{Severity, Violation};
 use std::collections::BTreeSet;
@@ -133,6 +133,7 @@ fn keeps_all_when_project_root_is_unresolved() {
         is_js: true,
         degraded: None,
         before: BeforeSource::OnDisk,
+        structured_full: ContentResolution::NotApplicable,
     };
 
     let outcome = demote_preexisting(vec![violation("eval", Some(1))], target, &config, None);
@@ -159,7 +160,7 @@ fn allowlisted_rules_report_every_occurrence() {
     config.rules.oxlint = false;
 
     for (rule, path, content) in TWO_OCCURRENCE_FIRES {
-        let (violations, notes) = collect_violations(path, content, &config, None, true);
+        let (violations, notes) = collect_violations(path, content, &config, None, true, None);
         assert!(notes.is_empty(), "{rule}: notes must be empty: {notes:?}");
         let lines: Vec<u32> = violations
             .iter()
