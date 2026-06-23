@@ -5,6 +5,7 @@ mod download;
 mod hook;
 mod hook_exit;
 mod import_map;
+mod invariant;
 mod io;
 mod regex_compile;
 mod resolve;

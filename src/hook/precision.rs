@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use super::collect_violations;
 use crate::config::{Config, RulesConfig};
-use crate::rules::rule_id::RULE_ID_CATALOG;
+use crate::rules::rule_id::{self, RULE_ID_CATALOG};
 use crate::rules::RE_JS_FILE;
 
 /// Whether a sample must trigger its rule (`Fire`) or stay silent (`Clean`).
@@ -69,7 +69,7 @@ fn harness_config() -> Config {
 /// which would silently downgrade fire samples to FN, so notes fail loudly.
 fn detected_rules(path: &str, content: &str, config: &Config) -> BTreeSet<String> {
     let (violations, notes) =
-        collect_violations(path, content, config, None, RE_JS_FILE.is_match(path));
+        collect_violations(path, content, config, None, RE_JS_FILE.is_match(path), None);
     assert!(
         notes.is_empty(),
         "pipeline notes for {path}: {notes:?} (fixture no longer parses?)"
@@ -117,7 +117,7 @@ fn median_latency_us(path: &str, content: &str, config: &Config) -> u64 {
     let mut elapsed: Vec<u128> = (0..LATENCY_ITERATIONS)
         .map(|_| {
             let start = Instant::now();
-            let _ = collect_violations(path, content, config, None, is_js);
+            let _ = collect_violations(path, content, config, None, is_js, None);
             start.elapsed().as_micros()
         })
         .collect();
@@ -183,6 +183,7 @@ toggle_isolation! {
     cors_wildcard => "corsWildcard": ["cors-wildcard"];
     service_worker => "serviceWorker": ["service-worker-scope-root"];
     jwt_client => "jwtClient": ["jwt-client-decode"];
+    invariant => "invariant": ["invariant"];
 }
 
 /// Worst (max) fire-sample median per toggle under its isolation config.
@@ -326,10 +327,25 @@ fn missing_corpus_coverage(catalog: &[&str], samples: &[CorpusSample]) -> Vec<St
     missing
 }
 
+/// Rules whose firing cannot be exercised through the `(path, content)` corpus
+/// harness, so the coverage gate below excludes them. `invariant` is stateful:
+/// it fires only with a reconstructed `structured_full` document and an
+/// `.invariants.json` on disk at the git root, neither of which the corpus model
+/// supplies (`detected_rules` passes `structured_full = None`). Its coverage
+/// lives in `invariant/tests.rs` (T-1..T-21, disk-backed + pure conformance) and
+/// the end-to-end `hook/tests.rs::json_edit_fires_invariant_violation_end_to_end`
+/// (T-22), not here. Same allowlist precedent as `UNREGISTERED_RULE_IDS`.
+const CORPUS_EXEMPT: &[&str] = &[rule_id::INVARIANT];
+
 // T-266: 全 first-party rule_id に should-fire / should-not-fire 両 sample が存在する (corpus 網羅 gate)。
 #[test]
 fn corpus_covers_every_rule_with_fire_and_clean_samples() {
-    let missing = missing_corpus_coverage(RULE_ID_CATALOG, corpus::SAMPLES);
+    let covered: Vec<&str> = RULE_ID_CATALOG
+        .iter()
+        .copied()
+        .filter(|rule| !CORPUS_EXEMPT.contains(rule))
+        .collect();
+    let missing = missing_corpus_coverage(&covered, corpus::SAMPLES);
     assert!(
         missing.is_empty(),
         "rules missing corpus samples: {missing:?}"

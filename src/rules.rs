@@ -91,6 +91,7 @@ pub(crate) mod rule_id {
         POSTMESSAGE_ORIGIN_MISSING = "postmessage-origin-missing",
         EXCESSIVE_NESTING = "excessive-nesting",
         TEST_ENDPOINT_PROD_GUARD = "test-endpoint-prod-guard",
+        INVARIANT = "invariant",
     }
 }
 

@@ -341,6 +341,18 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
         why_ja: r"AST ベースの集約。各 sub-rule にそれぞれの脅威がある（下記 sub-rule 表を参照）",
         when_to_disable_ja: Some("Node.js以外のプロジェクト"),
     },
+    RuleDoc {
+        table: Table::Rules,
+        key: "invariant",
+        rule_id: Some(rule_id::INVARIANT),
+        severity: "High",
+        description: r"Blocks an edit that drifts a `.json` value away from the scalar pinned for it in `.invariants.json` (feature flags, i18n strings, design tokens)",
+        why: r"A pinned value is a contract the rest of the app depends on; a silent edit that changes it ships a behavior change no human approved",
+        when_to_disable: Some("Projects that do not pin invariant values"),
+        description_ja: r"`.invariants.json` で固定したスカラー値から `.json` の値がずれる編集をブロック（feature flag、i18n 文言、design token）",
+        why_ja: r"固定値はアプリ全体が依存する契約で、無言で変える編集は誰も承認していない挙動変更を出荷する",
+        when_to_disable_ja: Some("不変値を固定しないプロジェクト"),
+    },
     // ----- ### Security Rules (`security`) (rule_id-level, 4 columns) -----
     RuleDoc {
         table: Table::Security,

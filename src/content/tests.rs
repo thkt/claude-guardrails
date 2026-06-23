@@ -99,6 +99,42 @@ fn multi_edit_join_preserves_separator_before_empty_string() {
     assert_eq!(content, "\nkept");
 }
 
+// T-16: a `.json` Edit reconstructs the full post-edit file into
+// `structured_full` (for the invariant gate) while `content` keeps the
+// new_string snippet, so existing content-scan rules see unchanged `.json`
+// behavior (AC8). This wiring is already implemented; the test guards it
+// against regression rather than driving a Red phase.
+#[test]
+fn json_edit_supplies_structured_full_but_content_stays_snippet() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // Canonicalize so the macOS `/var` -> `/private/var` symlink does not trip
+    // the `starts_with(project_root)` path-traversal guard.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{\n  \"checkout\": { \"v2\": false }\n}\n").unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path_str.clone()),
+            old_string: Some("\"v2\": false".to_owned()),
+            new_string: Some("\"v2\": true".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root)).unwrap();
+
+    // content-scan rules keep seeing the snippet, not the full file.
+    assert_eq!(target.content, "\"v2\": true");
+    // invariant gate gets the full reconstructed post-edit JSON.
+    assert_eq!(
+        target.structured_full.as_full_str(),
+        Some("{\n  \"checkout\": { \"v2\": true }\n}\n")
+    );
+}
+
 #[test]
 fn multi_edit_empty_edits_returns_none() {
     let input = ToolInput {

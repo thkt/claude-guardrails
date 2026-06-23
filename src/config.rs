@@ -79,6 +79,7 @@ define_rule_config! {
     cors_wildcard     => "corsWildcard",
     service_worker    => "serviceWorker",
     jwt_client        => "jwtClient",
+    invariant         => "invariant",
 }
 
 #[derive(Debug, Clone, PartialEq)]
