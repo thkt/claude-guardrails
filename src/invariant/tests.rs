@@ -511,3 +511,68 @@ fn degraded_note_surfaces_corrupt_pin_file() {
         "corrupt pin file must surface a note even when the edited file is degraded"
     );
 }
+
+// T-30: an absent `.invariants.json` (nothing pinned anywhere) means a degraded
+// post-edit read has nothing to verify, so `degraded_note` stays silent (None)
+// rather than reporting a skip for an unpinned repo.
+#[test]
+fn degraded_note_absent_pin_file_is_silent() {
+    let tmp = TempDir::new().unwrap();
+    let any_json = tmp.path().join("src/config/flags.json");
+
+    let note = degraded_note(&any_json.to_string_lossy(), Some(tmp.path()));
+
+    assert!(
+        note.is_none(),
+        "absent .invariants.json must not surface a degraded note"
+    );
+}
+
+// T-31: a `.invariants.json` entry whose value is a scalar (not an object of
+// pinned-path -> scalar) is a config error, yielding one violation. Distinct from
+// T-17, which rejects a non-scalar pinned *value* inside a well-formed entry;
+// here the per-file entry itself is malformed.
+#[test]
+fn scalar_file_entry_is_config_error() {
+    let tmp = TempDir::new().unwrap();
+    let rel = "src/config/flags.json";
+    let abs = setup_invariants(
+        tmp.path(),
+        r#"{ "src/config/flags.json": "not an object" }"#,
+        rel,
+    );
+    let post_edit = r#"{ "checkout": { "v2": true } }"#;
+
+    let violations = run_invariant_pass(&abs, Some(post_edit), Some(tmp.path()));
+
+    assert_eq!(invariant_count(&violations), 1);
+    assert!(
+        violations[0].fix.contains("must be an object"),
+        "expected malformed-entry config error, got: {}",
+        violations[0].fix
+    );
+}
+
+// T-32: a file whose parent directory exists but lies outside git_root canonicalizes
+// successfully (unlike T-14's non-existent `/elsewhere` parent), so key resolution
+// reaches the canonical pair, its strip_prefix fails, and the raw-path fallback also
+// fails. The pin lookup misses and the gate fails open with no violation.
+#[test]
+fn file_with_resolvable_parent_outside_root_is_skipped() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("repo");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        root.join(".invariants.json"),
+        r#"{ "flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+    let abs = outside.join("flags.json").to_string_lossy().into_owned();
+    let post_edit = r#"{ "checkout": { "v2": true } }"#;
+
+    let violations = run_invariant_pass(&abs, Some(post_edit), Some(&root));
+
+    assert_eq!(invariant_count(&violations), 0);
+}

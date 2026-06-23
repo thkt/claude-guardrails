@@ -112,6 +112,54 @@ fn json_edit_fires_invariant_violation_end_to_end() {
     );
 }
 
+// T-29: a `.json` Edit whose on-disk content cannot be reconstructed (here
+// non-UTF8 bytes) reaches `run_hook_with_input` as a Degraded structured_full.
+// When the file is pinned, the gate must fail open (exit 0, advisory note) rather
+// than block, exercising the degraded-note wiring around the invariant pass.
+#[test]
+fn json_edit_degraded_content_fails_open_with_note() {
+    use crate::content::{ToolInput, ToolInputData, ToolName};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    // Invalid UTF-8 on disk -> reconstruct_structured_full returns Degraded.
+    fs::write(&path, [0xff, 0xfe, 0x00]).unwrap();
+    fs::write(
+        root.join(".invariants.json"),
+        r#"{ "flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("checkout".to_owned()),
+            new_string: Some("checkout-edited".to_owned()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let root_for_config = root.clone();
+    let exit = run_hook_with_input(
+        &input,
+        Ok(root.clone()),
+        || {
+            Ok(Config {
+                git_root: Some(root_for_config),
+                ..Config::default()
+            })
+        },
+        false,
+    );
+
+    assert_eq!(
+        exit, 0,
+        "degraded pinned .json edit must fail open (advisory), not block"
+    );
+}
+
 #[test]
 fn collect_violations_clean_code() {
     let config = Config::default();
