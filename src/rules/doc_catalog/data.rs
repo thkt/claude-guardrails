@@ -1,7 +1,7 @@
 //! Authoritative content for the README rule tables (Issue #257).
 //!
 //! Rows are declared in README display order, grouped by table: `Rules` (26),
-//! then `Security` (2), then `AstSecurity` (13). `severity` is shared by both
+//! then `Security` (2), then `AstSecurity` (14). `severity` is shared by both
 //! languages; the `*_ja` fields hold the README.ja.md prose (a separate human
 //! translation, not a literal mirror). Severity / description / why are migrated
 //! verbatim from the README cells; `why` and `when_to_disable` are
@@ -461,6 +461,18 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
         when_to_disable: None,
         description_ja: r"`process.env.X \|\| 'default'` 形式 — ハードコードされたフォールバックでシークレットが漏洩する",
         why_ja: r"env var が未設定だとハードコードされたデフォルトが本物の credential として動き、しかもソース内に永遠に残る",
+        when_to_disable_ja: None,
+    },
+    RuleDoc {
+        table: Table::AstSecurity,
+        key: "test-endpoint-prod-guard",
+        rule_id: Some(rule_id::TEST_ENDPOINT_PROD_GUARD),
+        severity: "Medium",
+        description: r"Test-named route file (`app/api/test-*/route.ts`, `pages/api/seed.ts`, …) with no `process.env.NODE_ENV === 'production'` guard in the file",
+        why: r"A test-only endpoint shipped without a production guard exposes data seeding, deletion, or debug surfaces in production; this advisory prompts an in-file guard, or confirmation the route is excluded another way",
+        when_to_disable: None,
+        description_ja: r"本番ガード (`process.env.NODE_ENV === 'production'`) を持たないテスト用ルートファイル (`app/api/test-*/route.ts`、`pages/api/seed.ts` など)",
+        why_ja: r"本番ガード無しのテスト専用エンドポイントは本番でデータ投入・削除・デバッグ面を露出させる。同一ファイル内のガード追加か他経路での除外確認を促す advisory",
         when_to_disable_ja: None,
     },
     RuleDoc {

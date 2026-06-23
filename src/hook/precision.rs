@@ -176,7 +176,7 @@ toggle_isolation! {
         "env-var-fallback", "err-stack-exposure", "excessive-nesting",
         "math-random-insecure", "non-literal-fs-path", "non-literal-require",
         "postmessage-origin-missing", "prototype-pollution", "ssr-secret-bleed",
-        "unsafe-html-injection", "unsafe-regex",
+        "test-endpoint-prod-guard", "unsafe-html-injection", "unsafe-regex",
     ];
     cot_leakage_marker => "cotLeakageMarker": ["cot-leakage-marker"];
     sqli_concat => "sqliConcat": ["sqli-concat"];
