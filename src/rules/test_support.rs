@@ -47,6 +47,7 @@ pub(crate) const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::POSTMESSAGE_ORIGIN_MISSING, // ast_security::postmessage::check_{postmessage,onmessage}_origin_missing
     rule_id::PROTOTYPE_POLLUTION, // ast_security::prototype_pollution::check_{prototype_pollution,merge_pollution_sinks}
     rule_id::SSR_SECRET_BLEED,    // ast_security::ssr_env::check_ssr_secret_*
+    rule_id::TEST_ENDPOINT_PROD_GUARD, // ast_security::test_route_guard (walk-after emit)
     rule_id::UNSAFE_HTML_INJECTION, // ast_security::html::check_{html_assignment,document_write}
     rule_id::UNSAFE_REGEX,        // ast_security::unsafe_regex::check_unsafe_regex
     rule_id::CORS_WILDCARD,       // main.rs から cors_wildcard::check_program を直接呼ぶ

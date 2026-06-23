@@ -1,11 +1,14 @@
 use crate::analysis::{ast, scanner};
 #[cfg(test)]
 use crate::rules::ast_fail_open_check;
-use crate::rules::{rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE};
+use crate::rules::{
+    rule_id, Severity, Violation, RE_API_FILE, RE_API_OR_ROUTE_FILE, RE_TEST_FILE,
+    RE_TEST_ROUTE_SEGMENT,
+};
 use oxc_ast::ast::{
-    ArrowFunctionExpression, AssignmentExpression, BindingPattern, CallExpression, Expression,
-    Function, LogicalExpression, MethodDefinition, ObjectProperty, Program, RegExpLiteral,
-    ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
+    ArrowFunctionExpression, AssignmentExpression, BinaryExpression, BindingPattern,
+    CallExpression, Expression, Function, LogicalExpression, MethodDefinition, ObjectProperty,
+    Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{Scoping, SemanticBuilder};
@@ -19,6 +22,7 @@ mod postmessage;
 mod prototype_pollution;
 mod server_io;
 mod ssr_env;
+mod test_route_guard;
 mod unsafe_regex;
 
 const USE_SERVER_DIRECTIVE: &str = "use server";
@@ -141,6 +145,11 @@ pub fn check_program(
         line_offsets,
         is_test_file: RE_TEST_FILE.is_match(file_path),
         is_api_or_route: RE_API_OR_ROUTE_FILE.is_match(file_path),
+        // A route file (not a `.test.ts` unit test) whose path names a test segment.
+        is_test_route: RE_API_OR_ROUTE_FILE.is_match(file_path)
+            && !RE_TEST_FILE.is_match(file_path)
+            && RE_TEST_ROUTE_SEGMENT.is_match(file_path),
+        prod_env_guard_seen: false,
         is_server_context: is_api_file || has_top_level_use_server,
         has_top_level_use_server,
         use_server_depth: 0,
@@ -152,6 +161,7 @@ pub fn check_program(
         cp_named_aliases: server_io::collect_cp_named_aliases(program),
     };
     visitor.visit_program(program);
+    test_route_guard::emit_if_unguarded(&mut visitor);
     dedup_math_random_insecure(visitor.violations)
 }
 
@@ -239,6 +249,11 @@ struct SecurityVisitor<'s> {
     line_offsets: &'s [usize],
     is_test_file: bool,
     is_api_or_route: bool,
+    // Test-named route file (`app/api/test-setup/route.ts` etc). When true and no
+    // production guard is seen by walk's end, `test_route_guard::emit_if_unguarded`
+    // pushes one advisory violation.
+    is_test_route: bool,
+    prod_env_guard_seen: bool,
     is_server_context: bool,
     has_top_level_use_server: bool,
     use_server_depth: u32,
@@ -398,6 +413,11 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
     fn visit_logical_expression(&mut self, it: &LogicalExpression<'a>) {
         self.check_env_var_fallback(it);
         walk::walk_logical_expression(self, it);
+    }
+
+    fn visit_binary_expression(&mut self, it: &BinaryExpression<'a>) {
+        self.note_prod_guard(it);
+        walk::walk_binary_expression(self, it);
     }
 
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {

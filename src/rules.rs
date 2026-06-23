@@ -90,6 +90,7 @@ pub(crate) mod rule_id {
         SSR_SECRET_BLEED = "ssr-secret-bleed",
         POSTMESSAGE_ORIGIN_MISSING = "postmessage-origin-missing",
         EXCESSIVE_NESTING = "excessive-nesting",
+        TEST_ENDPOINT_PROD_GUARD = "test-endpoint-prod-guard",
     }
 }
 
@@ -103,6 +104,23 @@ pub static RE_ALL_FILES: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_ALL
 
 pub static RE_REACT_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_REACT_FILE", r"\.(tsx|jsx)$"));
+
+// A path segment whose name is, or starts with `<keyword>-`, one of the test
+// route keywords: `app/api/test-setup/route.ts`, `pages/api/seed.ts`, `app/api/dev/route.ts`.
+// The trailing `[-./]|$` boundary stops substring over-match on production paths
+// like `developers` / `device` / `seedlings` / `testimonials` (#358 critic finding).
+// `dev` / `debug` as bare segments can still match a real dev dashboard route; kept
+// per the Issue scope because the rule is advisory (Medium), so a stray hit is a
+// non-blocking note, not a rejected edit.
+// `(?i)`: route folder casing is author-controlled and case-sensitive filesystems
+// keep `Test` / `Debug` as distinct routable endpoints, so the keyword match is
+// case-insensitive; the boundary still blocks `Testimonials` / `Development`.
+pub static RE_TEST_ROUTE_SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
+    regex_or_die(
+        "RE_TEST_ROUTE_SEGMENT",
+        r"(?i)(^|/)(test|seed|dev|debug|fixture)([-./]|$)",
+    )
+});
 
 pub const API_PREFIX_PAT: &str = r"(^|/)(app|pages)/api/";
 

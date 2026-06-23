@@ -71,4 +71,5 @@ samples! {
     "ssr-secret-bleed" => fire: "/pages/dashboard.tsx", clean: "/pages/dashboard.tsx";
     "postmessage-origin-missing" => fire: "/src/page.ts", clean: "/src/page.ts";
     "excessive-nesting" => fire: "/src/app.ts", clean: "/src/app.ts";
+    "test-endpoint-prod-guard" => fire: "/app/api/test-setup/route.ts", clean: "/app/api/test-setup/route.ts";
 }
