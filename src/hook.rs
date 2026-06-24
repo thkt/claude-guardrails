@@ -67,7 +67,7 @@ fn lint_with_ast(
     file_path: &str,
     config: &Config,
 ) -> (Vec<Violation>, Option<String>) {
-    // The parse fires whenever ANY of the six AST rules is on. `AstRuleFlags`
+    // The parse fires whenever ANY of the seven AST rules is on. `AstRuleFlags`
     // is the single source for that set, so the early-return, the child request,
     // and the in-process call cannot drift apart (the lockstep that motivated
     // removing the old outer `has_ast_rules` guard).
