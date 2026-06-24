@@ -204,3 +204,25 @@ security check は止めない。snippet 単独でも false positive が出る�
 - `tests/cli/edit.rs` (RC-001 / TC-004 / issue #59 シナリオ)
 - ADR-0004 (Fail-mode policy) — `Degraded` は環境失敗軸に該当
 - `README.md` の "Known Limitations" / "JSON Output Mode" (degraded notes 例示)
+
+## Amendment 2026-06-24: invariant gate の `.json` full content は共有 resolution を read-gate 強制 open で再利用
+
+2026-06-24 census で新規 ADR 昇格を見送った判断 (I6) を記録する。#359 の invariant gate が本 ADR の content resolution contract をどう再利用するかの cross-module seam を確定する。
+
+invariant gate は post-edit の full content を必要とする (pin した scalar と突き合わせるため)。新しい resolution logic を起こさず、`content.rs` の `reconstruct_structured_full` が本 ADR の `resolve_edit_content` / `resolve_multi_edit_content` をそのまま再利用する。通常 `is_js` が担う read gate を強制 open にして呼ぶことで、`is_js=false` の `.json` Edit も snippet でなく full に再構築される。
+
+| 性質                       | 挙動                                                                                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| gate predicate             | `reconstruct_structured_full` は `is_structured_config` を gate にする。非 `.json` は disk read 前に `NotApplicable` を返す              |
+| 共有する resolution        | 既存の Edit / MultiEdit resolution を read gate 強制 open で呼ぶ。実効 read gate は `is_js` または `is_structured_config`                |
+| 既存 content-scan への影響 | target の snippet `content` は触らない。full は別値 `structured_full` として返り、既存 content-scan rule (JS 向け regex 群) には渡さない |
+| 非対象 file のコスト       | 非 `.json` かつ非 JS の Edit (`.css` / `.md` 等) はどちらの predicate も false で再構築せず、NFR-001 のとおりコスト 0                    |
+
+新 logic を起こさず既存 resolution に相乗りさせたのは、本 ADR の `ContentResolution` / `DegradedReason` 契約をそのまま継承するため。reconstruction 失敗時は本 ADR の `Degraded(reason)` 経路に乗り、`NotApplicable` に潰さない。invariant pass は full content を受け取れず skip し、`degraded_note` が human に手動再検証を促す。NFR-001 の「非対象 file はコスト 0」は `run_invariant_pass` 側で `structured_full` が None なら disk read 前に短絡することで担保する。
+
+### Related (I6)
+
+- `src/content.rs` (`reconstruct_structured_full`, `resolve_edit_content` / `resolve_multi_edit_content` の read-gate 強制 open)
+- `src/invariant.rs` (`is_structured_config`, `run_invariant_pass` の NFR-001 短絡)
+- ADR-0016 Amendment (invariant gate の `.json` scope)
+- ADR-0023 (stateless path-consistent invariant gate)

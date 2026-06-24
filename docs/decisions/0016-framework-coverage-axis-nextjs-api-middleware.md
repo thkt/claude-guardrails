@@ -140,3 +140,44 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/src/routes/users.t
 - ADR-0012: SSR target scope (Pages Router + `'use server'`)
 - ADR-0013: client-env-public-leak allow-list philosophy
 - ADR-0014: ssr-secret-bleed shape-based carve-outs
+
+## Amendment 2026-06-24: invariant gate の coverage scope は `.json` runtime config
+
+2026-06-24 census で新規 ADR 昇格を見送った判断 (I2) を、本 coverage-axis ADR への amendment として記録する。#359 で追加した semantic invariant gate (`src/invariant.rs`) が本 ADR の coverage 上どこに位置するかを確定する。
+
+invariant gate は frontend runtime config/data の `.json` を対象とする (feature-flag bool, i18n string, design token, public app config)。scope の境界は 2 段で、mechanism と convention を取り違えないことが要点。
+
+| 軸                   | 境界                                                                                                                                                                             | 種別       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 拡張子               | `is_structured_config` が `.json` のみ true。YAML / CIDR 等の infra 設定は false で機械的に除外                                                                                  | mechanism  |
+| `.json` 内の発火対象 | `.invariants.json` に human が宣言した pin を持つ file だけが検査される                                                                                                          | mechanism  |
+| build config の扱い  | tsconfig.json / package.json は `.json` なので `is_structured_config` は true。機械的には除外されず、OUTCOME Non-goals「ビルド設定の監査」に従い human が pin しない運用で外れる | convention |
+
+YAML 対応は後続 increment であり OUTCOME 判断ではない。build config が外れるのは OUTCOME 非対象という convention であって `is_structured_config` の機械的除外ではない。この 2 つを混同すると、後に YAML 対応を足す際の判断や、build config を誤って pin した場合の挙動を読み違える。
+
+### Related (I2)
+
+- `src/invariant.rs` (`is_structured_config`, `run_invariant_pass`, module doc)
+- OUTCOME `.claude/OUTCOME.md` Non-goals 節 (ビルド設定の監査、独立 Node.js バックエンド)
+- ADR-0007 (content resolution) — `is_structured_config` を `is_js` read gate に OR する seam
+- ADR-0023 (stateless path-consistent invariant gate)
+
+## Amendment 2026-06-24: test-endpoint-prod-guard は single-file / fail-open / advisory
+
+2026-06-24 census で新規 ADR 昇格を見送った判断 (R1) を記録する。#358 の `test-endpoint-prod-guard` (`src/analysis/ast_security/test_route_guard.rs`) が本 ADR の server-side route 監査軸の上で取る posture を確定する。
+
+posture は 3 点で、いずれも意図的に弱く据える。
+
+| 性質        | 内容                                                                            | 受容する欠落                                                  |
+| ----------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| single-file | hook が受け取る 1 file の content だけで判定。cross-file の import 追跡はしない | test util が別 file 経由で prod route に混ざる false negative |
+| fail-open   | 判定不能なら通す。advisory severity に留め block しない                         | in-file でも shape が外れた test endpoint の見落とし          |
+| advisory    | Medium severity。ADR-0018 の `block_threshold` を超えず編集を止めない           | 確信度の低い検出で編集サイクルを止めない代わりに強制力なし    |
+
+cross-file FN と in-file blind spot は意図的に受容する。cross-file 解決への昇格や blocking severity への引き上げはしない。理由は本 ADR の framework coverage 方針 (single-file static, 確信度の低い検出は advisory) と整合させ、guardrails の責務境界 (1 file content) を越えないため。block しない方向は ADR-0004 の fail-open 軸、advisory severity は ADR-0018 の `block_threshold` 体系に従う。
+
+### Related (R1)
+
+- `src/analysis/ast_security/test_route_guard.rs` (module doc に single-file / fail-open / advisory の根拠)
+- ADR-0004 (fail-mode policy) — 判定不能時 fail-open
+- ADR-0018 (`Ord` on `Severity` と `block_threshold`) — advisory は閾値未満で block しない

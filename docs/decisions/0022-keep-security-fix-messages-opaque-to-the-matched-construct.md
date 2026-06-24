@@ -49,3 +49,25 @@ Human review only. No repo-wide gate forbids a future security message from nami
 
 - A mechanical check over rule fix-message literals that flags construct-naming becomes feasible: add it and downgrade the human-review-only clause.
 - A rule appears where construct-opacity measurably lowers fix success and carries no adversarial incentive: narrow the convention's scope.
+
+## Amendment 2026-06-24: the invariant gate's degraded-skip note omits the degraded reason for the same reason
+
+This records a 2026-06-24 census judgment (I4) that did not warrant a new ADR. The #359 invariant gate produces a second instance of this message-opacity policy, so it belongs here rather than in a separate decision.
+
+When a pinned `.json` cannot be reconstructed after an edit (oversize, non-UTF8, IO error), `degraded_note` in `src/invariant.rs` reports that the pinned values were not verified this edit, but deliberately omits the degraded reason. The omission is the same anti-bypass move this ADR records for security fix messages, applied to a different surface.
+
+| Surface                        | What is hidden                               | The bypass it would otherwise hand an agent                                          |
+| ------------------------------ | -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| security / guard fix message   | the matched construct or threshold           | a recipe to rewrite the construct just under the rule                                |
+| invariant gate `degraded_note` | the degraded trigger (e.g. an oversize file) | a lever to pad a file past the read cap so a pinned-value change slips past the skip |
+
+The note points the human at `.invariants.json` to re-verify by hand rather than naming the trigger to the agent. This ADR is human-facing documentation, so it states the bypass lever in full. The constraint is on the agent-visible note, not on this rationale: the source-inline `//` comment at `degraded_note` carries the same reasoning, and the note text itself stays reason-free.
+
+### Confirmation (I4)
+
+Human review only, the same as the base policy: no gate forbids a future degraded or skip note from naming its trigger. A reviewer checks each new note that reports a non-verification against this amendment.
+
+### Related (I4)
+
+- `src/invariant.rs` (`degraded_note`, doc comment with the anti-bypass rationale)
+- ADR-0023 (stateless path-consistent invariant gate, of which `degraded_note` is the degraded-read branch)
