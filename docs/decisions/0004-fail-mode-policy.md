@@ -136,3 +136,23 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 - `src/main.rs` (`install_panic_hook`)
 - `src/config.rs` (`with_project_overrides`, `find_git_root`)
 - ADR-0005 (JSON envelope と exit code 体系)
+
+## Amendment 2026-06-24: `.invariants.json` の読み込みは split fail-mode (Skip fail-open / Corrupt fail-closed)
+
+2026-06-24 census で新規 ADR 昇格を見送った判断 (I3) を記録する。#359 の invariant gate が pin 宣言 file `.invariants.json` を読む際の fail-mode を、本 ADR の 4 軸の上に位置づける。
+
+`.invariants.json` は rule の挙動を決める config ではなく、何を pin するかの data である。よって本 ADR の config error 軸 (壊れた config は defaults で fail-open) には乗らない、新しい fail point として記録する。要点は、1 つの読み込み地点 (`load_invariant_table`) が tamper signal をキーに 2 つの policy を分岐させること。
+
+| 読み込み結果 | 条件                                                               | fail-mode                | 理由                                                                  |
+| ------------ | ------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------- |
+| Skip         | file 不在、または read 失敗 (権限 / IO error)、または空 / 空白のみ | fail-open (検査せず通す) | 何も pin されていない状態。空 file で repo 全 `.json` edit を止めない |
+| Corrupt      | 非空だが JSON object として parse できない                         | fail-closed (1 件 block) | tamper signal。pin file を壊して gate を黙って無効化させない          |
+| Table        | 非空かつ JSON object                                               | 宣言に従い検査           | 正常系                                                                |
+
+非対称の核心は、read 失敗 (権限 / IO error) すら Skip に倒して fail-open にすること。これは「pin file が読めない = 何も pin されていない」と扱い、repo 全体の `.json` edit を巻き込む false-block を避けるため。一方 Corrupt だけ fail-closed にするのは、攻撃者が pin file を非空のゴミで上書きして gate を無効化する経路を塞ぐため。Skip と Corrupt の境界は「空かどうか」ではなく「非空で object でないか」に置く。
+
+### Related (I3)
+
+- `src/invariant.rs` (`load_invariant_table`, `InvariantLoad`, `run_invariant_pass`)
+- ADR-0004 本文 4 軸 (環境失敗 fail-open / config error fail-open-with-defaults との対比)
+- ADR-0023 (stateless path-consistent invariant gate)

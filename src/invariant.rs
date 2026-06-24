@@ -6,8 +6,11 @@
 //! drifts a pinned value is rejected in the same cycle. (#359)
 //!
 //! Scope is frontend runtime config/data JSON only (feature-flag / i18n /
-//! design-token / public app config). Build config (tsconfig/package.json) and
-//! infra (CIDR/YAML) are OUTCOME non-goals and stay out via `is_structured_config`.
+//! design-token / public app config). `.json`-only is the mechanical scope:
+//! infra (CIDR/YAML) is not `.json`, so `is_structured_config` rejects it
+//! (deferred increment). Build config (tsconfig/package.json) is itself `.json`
+//! and is not mechanically excluded; it stays out by convention, an OUTCOME
+//! non-goal a human should not pin in `.invariants.json`.
 
 use crate::rules::{rule_id, Severity, Violation};
 use serde_json::{Map, Value};
@@ -32,10 +35,13 @@ fn violation(fix: String, file_path: &str) -> Violation {
 }
 
 /// True when `path` names a structured-config file the invariant gate audits.
-/// `.json` only: YAML and other formats are a later increment, build/infra
-/// configs are OUTCOME non-goals. The reconstruction path in `content.rs` ORs
-/// this into the `is_js` read gate so `.json` Edits get full post-edit content
-/// without exposing existing content-scan rules to it.
+/// `.json` only: YAML and other formats are a later increment, mechanically
+/// rejected here. Build config (tsconfig/package.json) is itself `.json` and
+/// passes this gate; it stays out only by convention (an OUTCOME non-goal a
+/// human should not pin), not by this check. `reconstruct_structured_full` in
+/// `content.rs` gates on this and reuses the Edit/MultiEdit resolution with the
+/// read gate forced open, so a `.json` Edit gets full post-edit content while
+/// `is_js` stays false and existing content-scan rules keep seeing the snippet.
 pub(crate) fn is_structured_config(path: &str) -> bool {
     Path::new(path)
         .extension()
