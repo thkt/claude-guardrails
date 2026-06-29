@@ -40,9 +40,8 @@ Exit codes (hook mode). Per the PreToolUse contract only exit 2 blocks the tool
 call; 0 allows and 1/64/70 are non-blocking (stderr shown to AI, tool proceeds):
   0   Pass — no violations
   1   Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI
-  2   Blocked — violations at or above severity.blockThreshold (default: high), or oversized stdin (fail-closed), tool halted
+  2   Blocked — violations at or above severity.blockThreshold (default: high), oversized stdin, or an internal panic mid-check (all fail-closed), tool halted
   64  Hook input error — invalid JSON, stdin read failure, or clap usage failure (non-blocking)
-  70  Internal error — panic / invariant violation (non-blocking; exit-2 routing tracked separately)
 
 Exit codes (prefetch subcommand):
   0   Success
@@ -96,15 +95,32 @@ fn run_prefetch(json_mode: bool) -> i32 {
     }
 }
 
-fn install_panic_hook() {
-    panic::set_hook(Box::new(|info| {
+fn install_panic_hook(exit: HookExitCode) {
+    let code = i32::from(exit.code());
+    panic::set_hook(Box::new(move |info| {
         eprintln!("guardrails: internal error: {info}");
-        process::exit(i32::from(HookExitCode::Internal.code()));
+        process::exit(code);
     }));
 }
 
+/// Exit code a panic should carry, by subcommand. Hook mode (`None`) fails
+/// closed (`Blocking`, exit 2): a panic mid-check means the security pass did
+/// not complete, and only exit 2 blocks the `PreToolUse` call, so any other
+/// code would let the unchecked edit through. The AST child keeps `Internal`
+/// (its abort already maps to a parent-side block in `spawn_ast_child`), and
+/// prefetch keeps `Internal` (sysexits scheme, not a hook). #379 — ADR-0004
+/// invariant axis.
+fn panic_exit_code(command: Option<&Commands>) -> HookExitCode {
+    match command {
+        None => HookExitCode::Blocking,
+        Some(_) => HookExitCode::Internal,
+    }
+}
+
 fn main() {
-    install_panic_hook();
+    // Cover CLI-parse and prefetch/ast-child panics with the internal-error
+    // code; hook mode upgrades to Blocking once the subcommand is known.
+    install_panic_hook(HookExitCode::Internal);
 
     let cli = match Cli::try_parse() {
         Ok(c) => c,
@@ -118,6 +134,8 @@ fn main() {
             process::exit(code);
         }
     };
+
+    install_panic_hook(panic_exit_code(cli.command.as_ref()));
 
     let exit_code = match cli.command {
         Some(Commands::Prefetch) => run_prefetch(cli.json),
@@ -165,5 +183,27 @@ mod tests {
         let e = download::OxlintError::CacheDirUnavailable;
         let (code, _) = e.classify();
         assert_eq!(code, ErrorCode::IoError);
+    }
+
+    #[test]
+    fn hook_mode_panic_fails_closed_with_blocking_exit() {
+        // #379: a panic mid-check in hook mode must carry exit 2 so the
+        // PreToolUse call is blocked; exit 70 was non-blocking and let the
+        // unchecked edit through.
+        assert_eq!(panic_exit_code(None), HookExitCode::Blocking);
+    }
+
+    #[test]
+    fn subcommand_panic_keeps_internal_exit() {
+        // Prefetch (sysexits) and the ast-child (abort already blocks via the
+        // parent) keep the internal-error code.
+        assert_eq!(
+            panic_exit_code(Some(&Commands::Prefetch)),
+            HookExitCode::Internal
+        );
+        assert_eq!(
+            panic_exit_code(Some(&Commands::AstChild)),
+            HookExitCode::Internal
+        );
     }
 }

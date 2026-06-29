@@ -31,12 +31,12 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 
 採用: 軸ごとに固定 policy。4 つの失敗カテゴリと exit code mapping は次表の通り。
 
-| カテゴリ                               | Policy                    | exit code                           | 理由                                                                                                                                                                         |
-| -------------------------------------- | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 環境失敗                               | fail-open + degraded note | 0 / 1 / 2 (violation の有無で確定)  | guardrails 不可用で AI 作業を止めると UX 悪化。残存ルールでカバーし、note で degradation を AI に伝える                                                                      |
-| リソース境界 / DoS 防御 (敵対入力含む) | fail-closed               | 2 (block)                           | 上限超は legitimate でも処理しない。silent truncate は false negative を生む。stdin oversized は exit 2 で block (PreToolUse で止まるのは 2 のみ。Amendment 2026-06-30 #375) |
-| invariant 違反                         | fail-closed (意図)        | 70 (internal error)                 | コードの bug は速やかに通知。ただし exit 70 は block しないため現状 fail-open。exit 2 への是正は別 issue #379 で追跡 (Amendment 2026-06-30 #375)                             |
-| config エラー                          | fail-open with defaults   | 0 / 1 / 2 (defaults で実行後の結果) | 壊れた config で security check を止めない。default で全 rule 有効・block_threshold=High ([ADR-0018](0018-severity-ord-and-block-threshold.md))                              |
+| カテゴリ                               | Policy                    | exit code                           | 理由                                                                                                                                                                                                                            |
+| -------------------------------------- | ------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 環境失敗                               | fail-open + degraded note | 0 / 1 / 2 (violation の有無で確定)  | guardrails 不可用で AI 作業を止めると UX 悪化。残存ルールでカバーし、note で degradation を AI に伝える                                                                                                                         |
+| リソース境界 / DoS 防御 (敵対入力含む) | fail-closed               | 2 (block)                           | 上限超は legitimate でも処理しない。silent truncate は false negative を生む。stdin oversized は exit 2 で block (PreToolUse で止まるのは 2 のみ。Amendment 2026-06-30 #375)                                                    |
+| invariant 違反                         | fail-closed               | 2 (hook) / 70 (subcommand)          | コードの bug は速やかに通知。hook mode の panic は検査未完了を意味するため exit 2 で block (fail-closed 達成、Amendment 2026-06-30 #379)。prefetch / ast-child の panic は exit 70 (sysexits / 親側 `spawn_ast_child` が block) |
+| config エラー                          | fail-open with defaults   | 0 / 1 / 2 (defaults で実行後の結果) | 壊れた config で security check を止めない。default で全 rule 有効・block_threshold=High ([ADR-0018](0018-severity-ord-and-block-threshold.md))                                                                                 |
 
 `degraded note` は `SuccessEnvelope.notes` に文字列で積み、stderr にも eprintln する。AI agent は note を読んで「何がスキップされたか」を把握できる。
 
@@ -44,17 +44,17 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 
 `src/hook.rs` (`lint_with_external_tools` / `lint_with_ast` / `run_hook`)、`src/io/stdin.rs` (`parse_stdin`)、`src/config.rs` (`Config::with_project_overrides` / `Config::find_git_root`)、`src/main.rs` (`install_panic_hook`) の call site (関数名で grep 可能):
 
-| 関数                                           | 軸             | Policy 実装                                                                                  |
-| ---------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------- |
-| `lint_with_external_tools` (oxlint 不在)       | 環境失敗       | `"oxlint not found, JS lint skipped"` を note に積み、violations 空で返す                    |
-| `lint_with_external_tools` (oxlint check 失敗) | 環境失敗       | `"oxlint check failed, JS lint skipped"` を note に積み、violations 空で返す                 |
-| `lint_with_ast` (AST parse 失敗)               | 環境失敗       | `"AST parse failed, structural rules skipped"` を note に積む                                |
-| `parse_stdin` (oversized)                      | リソース境界   | `MAX_INPUT_SIZE + 1` で `take`、超過時 exit 2 (block) + `DATA_ERROR` envelope                |
-| `parse_stdin` (malformed JSON / stdin read)    | 環境失敗       | exit 64 + envelope。envelope は Claude Code が生成するため bug / schema drift 側 (fail-open) |
-| `run_hook` (cwd canonicalize 失敗)             | 環境失敗       | warning を stderr に書き、project_root を `None` で先に進む (path-traversal boundary 無効)   |
-| `Config::with_project_overrides` (parse error) | config エラー  | `eprintln!` で警告し `Config::default()` で続行                                              |
-| `Config::find_git_root` (`.git` 不在)          | 環境失敗       | unchanged Config を返す (silent skip)                                                        |
-| `install_panic_hook` (panic)                   | invariant 違反 | stderr に書き、`process::exit(70)`                                                           |
+| 関数                                           | 軸             | Policy 実装                                                                                     |
+| ---------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------- |
+| `lint_with_external_tools` (oxlint 不在)       | 環境失敗       | `"oxlint not found, JS lint skipped"` を note に積み、violations 空で返す                       |
+| `lint_with_external_tools` (oxlint check 失敗) | 環境失敗       | `"oxlint check failed, JS lint skipped"` を note に積み、violations 空で返す                    |
+| `lint_with_ast` (AST parse 失敗)               | 環境失敗       | `"AST parse failed, structural rules skipped"` を note に積む                                   |
+| `parse_stdin` (oversized)                      | リソース境界   | `MAX_INPUT_SIZE + 1` で `take`、超過時 exit 2 (block) + `DATA_ERROR` envelope                   |
+| `parse_stdin` (malformed JSON / stdin read)    | 環境失敗       | exit 64 + envelope。envelope は Claude Code が生成するため bug / schema drift 側 (fail-open)    |
+| `run_hook` (cwd canonicalize 失敗)             | 環境失敗       | warning を stderr に書き、project_root を `None` で先に進む (path-traversal boundary 無効)      |
+| `Config::with_project_overrides` (parse error) | config エラー  | `eprintln!` で警告し `Config::default()` で続行                                                 |
+| `Config::find_git_root` (`.git` 不在)          | 環境失敗       | unchanged Config を返す (silent skip)                                                           |
+| `install_panic_hook` (panic)                   | invariant 違反 | stderr に書く。hook mode は exit 2 (block)、prefetch / ast-child は exit 70 (`panic_exit_code`) |
 
 ### Consequences
 
@@ -72,7 +72,7 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | 環境失敗 (oxlint 不在)   | `tests/cli/` の oxlint 不在経路                                                                                                                      | violations 空 + note 出力 + exit 0     |
 | リソース境界 (oversized) | `tests/cli/dispatch.rs` の `oversized_input_blocks_with_exit_two` (`x.repeat(10_000_000)` ケース)                                                    | exit 2 (block) + `DATA_ERROR` envelope |
-| invariant 違反           | `tests/cli/` の panic hook ケース                                                                                                                    | exit 70 + stderr 出力                  |
+| invariant 違反           | `src/main.rs` の `hook_mode_panic_fails_closed_with_blocking_exit` / `subcommand_panic_keeps_internal_exit`                                          | hook → exit 2、subcommand → exit 70    |
 | config エラー            | `with_project_overrides_malformed_tools_json_returns_error` / `with_project_overrides_malformed_legacy_config_returns_error` (`src/config/tests.rs`) | parse error の Result<Err> 経路        |
 
 新規 fail point を追加する PR では、軸判定 + 対応テスト追加を description に明示する。
@@ -172,7 +172,7 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 
 `InvalidJson` / `Io` を fail-open に残すのは、これらを block すると Claude Code 側の envelope schema drift で全編集が止まる自滅 DoS を招くため。リソース境界軸の中でも「agent が制御可能か」で fail-closed / fail-open を分ける。
 
-invariant 違反軸 (`install_panic_hook`, exit 70) も同じ契約で block しない。本文表で「fail-closed (意図)」と注記した通り現状は fail-open である。exit 2 への是正は stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue #379 で追跡する。
+invariant 違反軸 (`install_panic_hook`, exit 70) も同じ契約で block しない。本文表で「fail-closed (意図)」と注記した通り現状は fail-open である (本軸は後述 Amendment 2026-06-30 #379 で fail-closed 化済み)。exit 2 への是正は stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue #379 で追跡する。
 
 ### Related (Amendment 2026-06-30)
 
@@ -180,3 +180,25 @@ invariant 違反軸 (`install_panic_hook`, exit 70) も同じ契約で block し
 - `src/hook.rs` (`run_hook` の exit code 振り分け)
 - ADR-0005 Amendment 2026-06-30 (exit code table の block 列訂正と envelope 対応)
 - 公式 PreToolUse hooks 契約 (https://code.claude.com/docs/en/hooks.md): 「only exit code 2 blocks the action」
+
+## Amendment 2026-06-30: invariant 違反軸を fail-closed に倒す、hook mode panic は exit 2 (#379)
+
+#375 Amendment は invariant 違反軸 (`install_panic_hook`, exit 70) を「意図は fail-closed だが exit 70 は block しないため現状 fail-open」と記録し、是正を #379 に委ねた。本 Amendment でその是正を実装し、軸の意図と実装を一致させる。
+
+hook mode の panic は検査が途中で落ちたことを意味し、その content に対し security pass が完了していない。exit 70 (non-blocking) のままだと未検査の編集が素通りする。これは security guard が crash 時に黙って保護を外す挙動であり、OUTCOME B1 (禁止パターンは止める) に反する。よって hook mode の panic を exit 2 (block) に倒し、crash を可視化して fail-closed を達成する。
+
+panic の exit code は subcommand 別に分岐する (`panic_exit_code`)。
+
+| 経路             | exit code     | 理由                                                                               |
+| ---------------- | ------------- | ---------------------------------------------------------------------------------- |
+| hook mode (None) | 2 (block)     | 検査未完了の編集を通さない。PreToolUse で止まるのは exit 2 のみ                    |
+| `prefetch`       | 70 (sysexits) | hook ではなく cache warming。block に意味がなく、内部エラーを 70 で表す            |
+| `__ast-child`    | 70            | 親の `spawn_ast_child` が child の非 0/1 exit を `Overflow` → block に倒すため不要 |
+
+self-DoS リスク (panic bug が common content で起き全編集が block) は受容する。security tool では silent bypass より loud failure が安全で、block + 可視エラーが bug を即座に露出させる。AST child の overflow/panic が既に親側で fail-closed である内部 precedent とも整合する。
+
+### Related (Amendment 2026-06-30 #379)
+
+- `src/main.rs` (`panic_exit_code`, `install_panic_hook`)
+- `src/hook.rs` (`spawn_ast_child` の child exit code 振り分け)
+- ADR-0005 Amendment 2026-06-30 #379 (exit code table の hook mode panic 行)
