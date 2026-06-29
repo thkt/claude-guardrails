@@ -35,7 +35,7 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 | -------------------------------------- | ------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 環境失敗                               | fail-open + degraded note | 0 / 1 / 2 (violation の有無で確定)  | guardrails 不可用で AI 作業を止めると UX 悪化。残存ルールでカバーし、note で degradation を AI に伝える                                                                      |
 | リソース境界 / DoS 防御 (敵対入力含む) | fail-closed               | 2 (block)                           | 上限超は legitimate でも処理しない。silent truncate は false negative を生む。stdin oversized は exit 2 で block (PreToolUse で止まるのは 2 のみ。Amendment 2026-06-30 #375) |
-| invariant 違反                         | fail-closed (意図)        | 70 (internal error)                 | コードの bug は速やかに通知。ただし exit 70 は block しないため現状 fail-open。exit 2 への是正は別 issue で追跡 (Amendment 2026-06-30 #375)                                  |
+| invariant 違反                         | fail-closed (意図)        | 70 (internal error)                 | コードの bug は速やかに通知。ただし exit 70 は block しないため現状 fail-open。exit 2 への是正は別 issue #379 で追跡 (Amendment 2026-06-30 #375)                             |
 | config エラー                          | fail-open with defaults   | 0 / 1 / 2 (defaults で実行後の結果) | 壊れた config で security check を止めない。default で全 rule 有効・block_threshold=High ([ADR-0018](0018-severity-ord-and-block-threshold.md))                              |
 
 `degraded note` は `SuccessEnvelope.notes` に文字列で積み、stderr にも eprintln する。AI agent は note を読んで「何がスキップされたか」を把握できる。
@@ -172,7 +172,7 @@ OUTCOME.md Behavior B1 (禁止パターンは blocking signal で止める) と 
 
 `InvalidJson` / `Io` を fail-open に残すのは、これらを block すると Claude Code 側の envelope schema drift で全編集が止まる自滅 DoS を招くため。リソース境界軸の中でも「agent が制御可能か」で fail-closed / fail-open を分ける。
 
-invariant 違反軸 (`install_panic_hook`, exit 70) も同じ契約で block しない。本文表で「fail-closed (意図)」と注記した通り現状は fail-open である。exit 2 への是正は stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue で追跡する。
+invariant 違反軸 (`install_panic_hook`, exit 70) も同じ契約で block しない。本文表で「fail-closed (意図)」と注記した通り現状は fail-open である。exit 2 への是正は stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue #379 で追跡する。
 
 ### Related (Amendment 2026-06-30)
 
