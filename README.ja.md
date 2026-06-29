@@ -233,17 +233,16 @@ Options:
 
 ## 終了コード
 
-Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警告を見せる / 停止する を決めます。PreToolUse 契約で呼び出しを止めるのは exit `2` のみ。`0` は通過、`1` / `64` / `70` は非 blocking (stderr を AI に出して tool は続行) です。
+Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警告を見せる / 停止する を決めます。PreToolUse 契約で呼び出しを止めるのは exit `2` のみ。`0` は通過、`1` / `64` は非 blocking (stderr を AI に出して tool は続行) です。検査の途中で panic した場合も exit `2` を返し、検査未完了の編集を素通りさせず fail-closed にします。
 
 ### hook モード (サブコマンドなし)
 
-| コード | 意味                                                                                                      |
-| ------ | --------------------------------------------------------------------------------------------------------- |
-| 0      | 合格 — 違反なし                                                                                           |
-| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される                       |
-| 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、またはサイズ超過 stdin、tool を停止 |
-| 64     | hook 入力エラー — JSON 不正、stdin read 失敗、または clap usage 失敗 (非 blocking)                        |
-| 70     | 内部エラー — panic / invariant 違反 (非 blocking。exit `2` への是正は別途追跡)                            |
+| コード | 意味                                                                                                                                               |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0      | 合格 — 違反なし                                                                                                                                    |
+| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される                                                                |
+| 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、サイズ超過 stdin、または検査途中の panic (いずれも fail-closed)、tool を停止 |
+| 64     | hook 入力エラー — JSON 不正、stdin read 失敗、または clap usage 失敗 (非 blocking)                                                                 |
 
 ### サブコマンド (`prefetch`)
 
@@ -257,6 +256,8 @@ Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警
 > **BREAKING (v0.16+)**: 非 blocking severity 違反 (`severity.blockThreshold` 未満) は exit `1` を返すようになりました (旧 `0`)。hook stdin / JSON / サイズ超過 失敗は exit `64` (旧 `1` または `2`)。内部 panic は exit `70`。JSON の `decision` フィールド (`allow` / `block`) は変わりません — 引き続き blocking 違反のみを判定します。
 
 > **BREAKING (v0.21+)**: サイズ超過 stdin (10 MB 上限超) は exit `64` でなく `2` (block) を返すようになりました。exit `64` は PreToolUse 呼び出しを止めないため、旧 `64` ではサイズ超過 payload が素通りしていました。`2` でリソース境界 guard が fail-closed になります。JSON 不正と stdin read 失敗は `64` のまま (非 blocking、設計上の fail-open) です。
+
+> **BREAKING (v0.21+)**: hook モードの検査中の panic は exit `70` でなく `2` (block) を返すようになりました。exit `70` は PreToolUse 呼び出しを止めないため、旧 `70` では検査途中の panic が未検査の編集を素通りさせていました。`2` で fail-closed になります。exit `70` は `prefetch` と隠し AST-child サブコマンドの内部 panic に残ります。
 
 > **BREAKING (v0.17+)**: `severity.blockOn` (配列) は `severity.blockThreshold` (単一の severity) に置き換わりました。閾値以上の違反が blocking、未満が警告になります。デフォルト `"high"` は旧 `["critical", "high"]` と等価です。未知の `blockOn` キーは silent に無視されるため、`medium` や `low` を列挙していた config は `"blockThreshold": "medium"` / `"low"` に移行してください。まれな `blockOn: []` (何もブロックしない) に代替はありません。
 

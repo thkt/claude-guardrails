@@ -82,13 +82,13 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 
 `HookExitCode` (`src/hook_exit.rs`) が定義する。`SUCCESS` 経路の violation 有無で 0/1/2 が決まり、advisory (1) と blocking (2) の境界は `severity.blockThreshold` ([ADR-0018](0018-severity-ord-and-block-threshold.md)) で決まる。
 
-| Exit | Const (`HookExitCode`) | JSON `error.code`                         | 意味                                                                                        | Claude Code hook 挙動                    |
-| ---- | ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| 0    | `Pass`                 | (none)                                    | pass — violation なし                                                                       | allow                                    |
-| 1    | `Advisory`             | (none)                                    | advisory — `severity.blockThreshold` 未満の violation                                       | warn (AI に stderr 表示、tool 続行)      |
-| 2    | `Blocking`             | (none)                                    | blocking — `severity.blockThreshold` 以上の violation、または oversized stdin (fail-closed) | block (AI に stderr 表示、tool 停止)     |
-| 64   | `InputError`           | `USAGE_ERROR` / `DATA_ERROR` / `IO_ERROR` | hook 入力契約違反 (malformed JSON / stdin read failure / clap parse failure)                | non-block (AI に stderr 表示、tool 続行) |
-| 70   | `Internal`             | (envelope なし、stderr のみ)              | panic / invariant violation                                                                 | non-block (AI に stderr 表示、tool 続行) |
+| Exit | Const (`HookExitCode`) | JSON `error.code`                         | 意味                                                                                                            | Claude Code hook 挙動                    |
+| ---- | ---------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 0    | `Pass`                 | (none)                                    | pass — violation なし                                                                                           | allow                                    |
+| 1    | `Advisory`             | (none)                                    | advisory — `severity.blockThreshold` 未満の violation                                                           | warn (AI に stderr 表示、tool 続行)      |
+| 2    | `Blocking`             | (none)                                    | blocking — `severity.blockThreshold` 以上の violation、oversized stdin、または hook mode の panic (fail-closed) | block (AI に stderr 表示、tool 停止)     |
+| 64   | `InputError`           | `USAGE_ERROR` / `DATA_ERROR` / `IO_ERROR` | hook 入力契約違反 (malformed JSON / stdin read failure / clap parse failure)                                    | non-block (AI に stderr 表示、tool 続行) |
+| 70   | `Internal`             | (envelope なし、stderr のみ)              | panic (prefetch / ast-child のみ。hook mode の panic は 2)                                                      | non-block (AI に stderr 表示、tool 続行) |
 
 PreToolUse 契約で tool 呼び出しを止めるのは exit 2 のみ。0 は allow、1/64/70 は non-block (stderr を AI に出して tool は続行)。oversized stdin を 64 でなく 2 に倒すのはこのため。詳細は末尾 Amendment 2026-06-30 (#375)。
 
@@ -239,3 +239,17 @@ envelope schema と exit code は次のテストで pin されている。
 exit 2 はこれまで blocking violation (`SuccessEnvelope`, `decision=block`) 専用だった。`Oversized` を 2 に倒すことで、exit 2 は「閾値超過の violation」または「fail-closed な input error (`ErrorEnvelope`, `DATA_ERROR`)」のいずれかを運ぶ。`ErrorEnvelope` は引き続き stdout に乗り、exit code のみ 64 から 2 へ変わる。`error.code` ↔ exit code の 1:1 対応は崩れる (DATA_ERROR が 64 と 2 の両方に現れうる) が、これは fail-mode を exit code の真実源とする設計判断を優先した結果である。
 
 `Internal` (70, panic / invariant 違反) も同じ契約で block しない。ADR-0004 invariant 軸が意図する fail-closed と乖離するが、これは stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue #379 で追跡する。`pin` は `tests/cli/dispatch.rs` `oversized_input_blocks_with_exit_two` / `tests/cli/json_envelope.rs` `json_mode_oversized_input_emits_error_envelope` / `src/io/stdin.rs` `oversized_is_fail_closed_blocking_exit` / `invalid_json_and_io_are_fail_open_input_error_exit`。
+
+## Amendment 2026-06-30: hook mode の panic を exit 2 に倒す (#379)
+
+#375 Amendment が残した invariant 違反軸の fail-open を是正する。hook mode の panic は検査が途中で落ちたことを意味し、その content の security pass が完了していない。exit 70 (non-block) のままだと未検査の編集が素通りするため、hook mode の panic を exit 2 (block) に倒す。これで上表 row 70 の「panic / invariant violation」は hook mode では成立せず、exit 70 は subcommand (prefetch / ast-child) の内部 panic 専用になる。
+
+panic の exit code は subcommand 別に分岐する (`src/main.rs` `panic_exit_code`)。
+
+| 経路             | exit code       | 根拠                                                                               |
+| ---------------- | --------------- | ---------------------------------------------------------------------------------- |
+| hook mode (None) | 2 (`Blocking`)  | 検査未完了の編集を block。PreToolUse で止まるのは 2 のみ                           |
+| `prefetch`       | 70 (`Internal`) | hook ではなく cache warming。block に意味がなく内部エラーを 70 で表す              |
+| `__ast-child`    | 70 (`Internal`) | 親 `spawn_ast_child` が child の非 0/1 exit を block に倒すため child 側は 70 で可 |
+
+`pin` は `src/main.rs` `hook_mode_panic_fails_closed_with_blocking_exit` / `subcommand_panic_keeps_internal_exit`。詳細根拠は ADR-0004 Amendment 2026-06-30 #379。
