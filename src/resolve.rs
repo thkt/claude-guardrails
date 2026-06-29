@@ -171,6 +171,15 @@ pub enum ResolveError {
 /// (e.g. `ensure_oxlint`) to the caller. No PATH fallback — a globally
 /// installed `oxlint` could sit outside any project root. `None` disables the
 /// boundary and is reserved for tests over tempdirs.
+///
+/// Deliberate divergence from the sibling resolvers (formatter, gates), which
+/// are independent copies sharing one guard skeleton: bounded depth, a `.git`
+/// fence, a `$HOME` fence, and an exec-bit check. This copy adopts none of them
+/// on purpose. The `canonicalize` + `project_root` boundary is a stronger
+/// implementation of the same goal, and the fences would regress it: a `.git`
+/// or `$HOME` fence stops the walk before an outside bin is reached, turning the
+/// forensic `OutsideProjectRoot` signal into a silent `NotFound`. So the guard
+/// sets are intentionally not unified — keep this boundary, do not add fences.
 pub fn try_resolve_bin(
     name: &str,
     file_path: &str,
