@@ -304,8 +304,9 @@ pub(crate) fn run_hook(json_mode: bool) -> i32 {
     let input = match parse_stdin() {
         Ok(v) => v,
         Err(e) => {
+            let exit = e.hook_exit_code();
             render_error(json_mode, e.into_payload());
-            return i32::from(HookExitCode::InputError.code());
+            return i32::from(exit.code());
         }
     };
     run_hook_with_input(

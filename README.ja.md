@@ -233,17 +233,17 @@ Options:
 
 ## 終了コード
 
-Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警告を見せる / 停止する を決めます。
+Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警告を見せる / 停止する を決めます。PreToolUse 契約で呼び出しを止めるのは exit `2` のみ。`0` は通過、`1` / `64` / `70` は非 blocking (stderr を AI に出して tool は続行) です。
 
 ### hook モード (サブコマンドなし)
 
-| コード | 意味                                                                                |
-| ------ | ----------------------------------------------------------------------------------- |
-| 0      | 合格 — 違反なし                                                                     |
-| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される |
-| 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、tool を停止   |
-| 64     | hook 入力エラー — JSON 不正、サイズ超過、または clap usage 失敗                     |
-| 70     | 内部エラー — panic / invariant 違反 (fail-closed)                                   |
+| コード | 意味                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------- |
+| 0      | 合格 — 違反なし                                                                                           |
+| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される                       |
+| 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、またはサイズ超過 stdin、tool を停止 |
+| 64     | hook 入力エラー — JSON 不正、stdin read 失敗、または clap usage 失敗 (非 blocking)                        |
+| 70     | 内部エラー — panic / invariant 違反 (非 blocking。exit `2` への是正は別途追跡)                            |
 
 ### サブコマンド (`prefetch`)
 
@@ -255,6 +255,8 @@ Claude Code は終了コードを見て、tool 呼び出しを通す / AI に警
 | 74     | I/O エラー (ネットワーク / 展開 / キャッシュ失敗) |
 
 > **BREAKING (v0.16+)**: 非 blocking severity 違反 (`severity.blockThreshold` 未満) は exit `1` を返すようになりました (旧 `0`)。hook stdin / JSON / サイズ超過 失敗は exit `64` (旧 `1` または `2`)。内部 panic は exit `70`。JSON の `decision` フィールド (`allow` / `block`) は変わりません — 引き続き blocking 違反のみを判定します。
+
+> **BREAKING (v0.21+)**: サイズ超過 stdin (10 MB 上限超) は exit `64` でなく `2` (block) を返すようになりました。exit `64` は PreToolUse 呼び出しを止めないため、旧 `64` ではサイズ超過 payload が素通りしていました。`2` でリソース境界 guard が fail-closed になります。JSON 不正と stdin read 失敗は `64` のまま (非 blocking、設計上の fail-open) です。
 
 > **BREAKING (v0.17+)**: `severity.blockOn` (配列) は `severity.blockThreshold` (単一の severity) に置き換わりました。閾値以上の違反が blocking、未満が警告になります。デフォルト `"high"` は旧 `["critical", "high"]` と等価です。未知の `blockOn` キーは silent に無視されるため、`medium` や `low` を列挙していた config は `"blockThreshold": "medium"` / `"low"` に移行してください。まれな `blockOn: []` (何もブロックしない) に代替はありません。
 
@@ -303,7 +305,7 @@ guardrails --json < tool-call.json
 
 ### Error envelope
 
-`--json` 設定時に stdin が不正 (malformed JSON / oversized / IO 失敗) な場合、stdout に `ErrorEnvelope` が出力され、終了コード `64` (hook input error) で終了します。
+`--json` 設定時に stdin が不正な場合、stdout に `ErrorEnvelope` が出力されます。malformed JSON / IO 失敗は終了コード `64` (hook input error、非 blocking)、oversized (10 MB 上限超) は終了コード `2` (block、fail-closed) で終了します。
 
 ```json
 {

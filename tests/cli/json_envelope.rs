@@ -185,12 +185,14 @@ fn json_mode_invalid_json_emits_error_envelope() {
 
 #[test]
 fn json_mode_oversized_input_emits_error_envelope() {
+    // #375: oversized blocks via exit 2 (fail-closed). The ErrorEnvelope still
+    // rides stdout with DATA_ERROR — only the exit code differs from 64.
     let huge = vec![b'a'; 10_000_001];
     let output = run_guardrails_with_args(&huge, &["--json"]);
     assert_eq!(
         output.status.code(),
-        Some(64),
-        "expected 64 for oversized hook input"
+        Some(2),
+        "expected 2 (block) for oversized hook input"
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);

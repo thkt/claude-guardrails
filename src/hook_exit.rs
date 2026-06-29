@@ -1,12 +1,17 @@
 //! Process exit codes for hook mode per Group 3 (Hook tool) convention.
 //!
-//! | Exit | Source       | Meaning                                   |
-//! |------|--------------|-------------------------------------------|
-//! | 0    | `EX_OK`        | allow (lint pass)                         |
-//! | 1    | convention   | advisory failure (severity=warn)          |
-//! | 2    | convention   | blocking failure (severity=error)         |
-//! | 64   | `EX_USAGE`     | hook input JSON malformed                 |
-//! | 70   | `EX_SOFTWARE`  | internal panic / invariant violation      |
+//! | Exit | Source       | Meaning                                   | Blocks? |
+//! |------|--------------|-------------------------------------------|---------|
+//! | 0    | `EX_OK`        | allow (lint pass)                         | no      |
+//! | 1    | convention   | advisory failure (severity=warn)          | no      |
+//! | 2    | convention   | blocking failure (severity=error)         | yes     |
+//! | 64   | `EX_USAGE`     | hook input error (malformed JSON / stdin read failure / clap usage) | no |
+//! | 70   | `EX_SOFTWARE`  | internal panic / invariant violation      | no      |
+//!
+//! Per the `PreToolUse` contract, only exit 2 blocks the tool call; 0 allows and
+//! 1 / 64 / 70 are non-blocking errors (stderr surfaced, tool proceeds). An
+//! oversized payload is therefore routed to `Blocking` (2), not `InputError`
+//! (64), so the resource-boundary guard stays fail-closed (ADR-0004 / ADR-0005).
 //!
 //! `ErrorCode` (in `envelope.rs`) covers the JSON `error.code` field for
 //! human/agent-readable diagnostics; this enum maps to the process exit code
