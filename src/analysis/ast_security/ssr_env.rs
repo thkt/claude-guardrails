@@ -168,8 +168,19 @@ fn chain_contains_sensitive_env(expr: &Expression) -> bool {
 }
 
 fn is_sensitive_env_access(expr: &Expression) -> bool {
-    process_env_access_name(expr)
-        .is_some_and(|name| SENSITIVE_ENV_KEYWORDS.iter().any(|kw| name.contains(kw)))
+    process_env_access_name(expr).is_some_and(is_sensitive_env_name)
+}
+
+/// A `process.env.<NAME>` reference names a sensitive value. `NEXT_PUBLIC_*` is
+/// browser-exposed by Next.js, so it is public by definition and carved out
+/// before the keyword scan (`NEXT_PUBLIC_STRIPE_API_KEY` contains `API_KEY`).
+/// Shared by env-var-fallback and ssr-secret-bleed; mirrors the `NEXT_PUBLIC_`
+/// allowance already in `check_client_env_public_leak`.
+fn is_sensitive_env_name(name: &str) -> bool {
+    if name.starts_with(NEXT_PUBLIC_PREFIX) {
+        return false;
+    }
+    SENSITIVE_ENV_KEYWORDS.iter().any(|kw| name.contains(kw))
 }
 
 fn process_env_access_name<'a>(expr: &'a Expression) -> Option<&'a str> {

@@ -4,7 +4,7 @@
 //! call sites resolve unchanged.
 
 use super::rule_id;
-use super::{non_comment_lines, Rule, Violation};
+use super::{comment_masked_source, non_comment_lines, Rule, Violation};
 use crate::analysis::ast::with_parsed_program;
 use oxc_ast::ast::Program;
 use std::time::Instant;
@@ -60,7 +60,8 @@ pub(crate) const UNREGISTERED_RULE_IDS: &[&str] = &[
 ];
 
 pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) -> Vec<Violation> {
-    rule.check(content, file_path, &non_comment_lines(content))
+    let masked = comment_masked_source(content);
+    rule.check(content, file_path, &non_comment_lines(&masked))
 }
 
 /// Test helper for valid fixtures. Panics when no AST is produced (the file

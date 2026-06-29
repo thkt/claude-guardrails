@@ -93,29 +93,57 @@ fn is_pollution_key(s: &str) -> bool {
 fn assignment_target_has_pollution_segment(target: &AssignmentTarget) -> bool {
     match target {
         AssignmentTarget::StaticMemberExpression(sme) => {
-            is_pollution_key(sme.property.name.as_str())
-                || expression_has_pollution_segment(&sme.object)
+            is_pollution_key(sme.property.name.as_str()) || object_chain_is_pollution(&sme.object)
         }
         AssignmentTarget::ComputedMemberExpression(cme) => {
-            computed_key_is_pollution(&cme.expression)
-                || expression_has_pollution_segment(&cme.object)
+            computed_key_is_pollution(&cme.expression) || object_chain_is_pollution(&cme.object)
         }
         _ => false,
     }
 }
 
-fn expression_has_pollution_segment(expr: &Expression) -> bool {
+#[derive(Default)]
+struct ChainSegments {
+    proto: bool,
+    constructor: bool,
+    prototype: bool,
+}
+
+fn mark_segment(name: &str, seg: &mut ChainSegments) {
+    match name {
+        "__proto__" => seg.proto = true,
+        "constructor" => seg.constructor = true,
+        "prototype" => seg.prototype = true,
+        _ => {}
+    }
+}
+
+fn collect_chain_segments(expr: &Expression, seg: &mut ChainSegments) {
     match expr {
         Expression::StaticMemberExpression(sme) => {
-            is_pollution_key(sme.property.name.as_str())
-                || expression_has_pollution_segment(&sme.object)
+            mark_segment(sme.property.name.as_str(), seg);
+            collect_chain_segments(&sme.object, seg);
         }
         Expression::ComputedMemberExpression(cme) => {
-            computed_key_is_pollution(&cme.expression)
-                || expression_has_pollution_segment(&cme.object)
+            if let Expression::StringLiteral(s) = &cme.expression {
+                mark_segment(s.value.as_str(), seg);
+            }
+            collect_chain_segments(&cme.object, seg);
         }
-        _ => false,
+        _ => {}
     }
+}
+
+/// True when the assignment's object chain (everything left of the final write
+/// key) is exploit-shaped. `__proto__` anywhere reaches the live prototype, so
+/// it always fires. A lone `prototype` or lone `constructor` segment is benign:
+/// `X.prototype.method = ...` and polyfills (`Array.prototype.flat = ...`)
+/// define methods, not pollute. The classic gadget needs `constructor` AND
+/// `prototype` together (`obj.constructor.prototype.x = ...`), so require both.
+fn object_chain_is_pollution(expr: &Expression) -> bool {
+    let mut seg = ChainSegments::default();
+    collect_chain_segments(expr, &mut seg);
+    seg.proto || (seg.constructor && seg.prototype)
 }
 
 fn computed_key_is_pollution(expr: &Expression) -> bool {
@@ -356,5 +384,22 @@ mod tests {
         let v = check_js(r#"Object["assign"](target, JSON["parse"](input));"#);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-045: prototype_pollution_method_definition_allowed
+    // A write whose final key is an ordinary method name does not pollute even
+    // when `prototype` sits mid-chain: `X.prototype.method = ...` is the standard
+    // way to define methods and polyfills (`Array.prototype.flat = ...`). Only a
+    // pollution key as the final write target, a `__proto__` segment, or a
+    // `constructor`+`prototype` gadget is exploit-shaped.
+    #[test]
+    fn prototype_pollution_method_definition_allowed() {
+        for code in [
+            "MyClass.prototype.render = function () {};",
+            "Array.prototype.flat = function () {};",
+            "Foo.prototype.bar = () => {};",
+        ] {
+            assert!(check_js(code).is_empty(), "false positive for: {code}");
+        }
     }
 }
