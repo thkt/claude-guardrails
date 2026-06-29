@@ -22,7 +22,8 @@ use std::panic;
 use std::process;
 
 /// 10 MB upper bound for stdin and on-disk reads (Claude Code hook stdin cap +
-/// `DoS` / OOM guard). See ADR-0004 resource boundary axis (fail-closed exit 64).
+/// `DoS` / OOM guard). See ADR-0004 resource boundary axis (fail-closed: stdin
+/// oversized blocks via exit 2).
 pub(crate) const MAX_INPUT_SIZE: u64 = 10_000_000;
 const SYSEXIT_USAGE: i32 = 64;
 
@@ -35,12 +36,13 @@ const SYSEXIT_USAGE: i32 = 64;
 Hook mode (no subcommand): reads tool input JSON from stdin and emits violations.
 With --json: emits a structured JSON report on stdout, human-readable on stderr.
 
-Exit codes (hook mode):
+Exit codes (hook mode). Per the PreToolUse contract only exit 2 blocks the tool
+call; 0 allows and 1/64/70 are non-blocking (stderr shown to AI, tool proceeds):
   0   Pass — no violations
   1   Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI
-  2   Blocked — violations at or above severity.blockThreshold (default: high), tool halted
-  64  Hook input error — invalid JSON, oversized payload, or clap usage failure
-  70  Internal error — panic / invariant violation, fail-closed
+  2   Blocked — violations at or above severity.blockThreshold (default: high), or oversized stdin (fail-closed), tool halted
+  64  Hook input error — invalid JSON, stdin read failure, or clap usage failure (non-blocking)
+  70  Internal error — panic / invariant violation (non-blocking; exit-2 routing tracked separately)
 
 Exit codes (prefetch subcommand):
   0   Success

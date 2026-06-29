@@ -231,17 +231,17 @@ Calling `guardrails` with no subcommand enters **hook mode** (reads tool input J
 
 ## Exit Codes
 
-Claude Code reads the exit code to decide whether to pass, surface a warning to the AI, or halt the tool call.
+Claude Code reads the exit code to decide whether to pass, surface a warning to the AI, or halt the tool call. Per the PreToolUse contract only exit `2` halts the call; `0` allows and `1` / `64` / `70` are non-blocking (stderr is surfaced to the AI, the tool proceeds).
 
 ### Hook mode (no subcommand)
 
-| Code | Meaning                                                                                   |
-| ---- | ----------------------------------------------------------------------------------------- |
-| 0    | Pass — no violations                                                                      |
-| 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI        |
-| 2    | Blocked — violations at or above `severity.blockThreshold` (default: `high`), tool halted |
-| 64   | Hook input error — malformed JSON, oversized payload, or clap usage failure               |
-| 70   | Internal error — panic or invariant violation (fail-closed)                               |
+| Code | Meaning                                                                                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------- |
+| 0    | Pass — no violations                                                                                          |
+| 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI                            |
+| 2    | Blocked — violations at or above `severity.blockThreshold` (default: `high`), or oversized stdin, tool halted |
+| 64   | Hook input error — malformed JSON, stdin read failure, or clap usage failure (non-blocking)                   |
+| 70   | Internal error — panic or invariant violation (non-blocking; exit-`2` routing tracked separately)             |
 
 ### Subcommands (`prefetch`)
 
@@ -253,6 +253,8 @@ Claude Code reads the exit code to decide whether to pass, surface a warning to 
 | 74   | I/O error (network / extract / cache failure) |
 
 > **BREAKING (v0.16+)**: Non-blocking severity violations (below `severity.blockThreshold`) now exit `1` (was `0`). Hook stdin / JSON / oversized input failures now exit `64` (was `1` or `2`). Internal panics now exit `70`. The JSON `decision` field (`allow` / `block`) is unchanged — it still tracks blocking violations only.
+
+> **BREAKING (v0.21+)**: Oversized stdin (over the 10 MB cap) now exits `2` (block), not `64`. Exit `64` does not block a PreToolUse call, so the prior `64` let oversized payloads pass through; `2` makes the resource-boundary guard fail-closed. Malformed JSON and stdin read failures stay at `64` (non-blocking, fail-open by design).
 
 > **BREAKING (v0.17+)**: `severity.blockOn` (an array) is replaced by `severity.blockThreshold` (a single severity). Violations at or above the threshold block; below it warn. The default `"high"` matches the old `["critical", "high"]`. Unknown `blockOn` keys are silently ignored, so a config that listed `medium` or `low` must switch to `"blockThreshold": "medium"` / `"low"`; the rare `blockOn: []` (block nothing) has no replacement.
 

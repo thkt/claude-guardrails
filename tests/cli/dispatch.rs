@@ -226,7 +226,11 @@ fn non_js_file_skips_js_rules() {
 }
 
 #[test]
-fn oversized_input_exits_input_error() {
+fn oversized_input_blocks_with_exit_two() {
+    // #375: exit 64 does not block a PreToolUse call (only exit 2 does), so an
+    // oversized payload routed to 64 would silently pass through. Oversized is
+    // the agent-controllable bypass the resource-boundary axis must close, so it
+    // exits 2 (block) — the security-correct fail-closed behavior.
     let content = "x".repeat(10_000_000);
     let json = format!(
         r#"{{"tool_name":"Write","tool_input":{{"file_path":"/src/app.ts","content":"{content}"}}}}"#
@@ -234,8 +238,8 @@ fn oversized_input_exits_input_error() {
     let output = run_guardrails(json.as_bytes());
     assert_eq!(
         output.status.code(),
-        Some(64),
-        "expected 64 for oversized hook input; stderr: {}",
+        Some(2),
+        "expected 2 (block) for oversized hook input; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);

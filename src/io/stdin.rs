@@ -1,16 +1,18 @@
-//! Fail-closed stdin parsing: reads the `PreToolUse` payload, enforces the
-//! size cap, and deserializes into `ToolInput`. Failures map to typed
-//! `ParseStdinError` variants the caller renders.
+//! Stdin parsing for the `PreToolUse` payload: reads bytes, enforces the size
+//! cap, and deserializes into `ToolInput`. Failures map to typed
+//! `ParseStdinError` variants. `Oversized` is fail-closed (exit 2, blocks the
+//! tool call); `InvalidJson` / `Io` are fail-open (exit 64, non-blocking). See
+//! `hook_exit_code` and ADR-0004.
 
 use crate::content::{length_within_cap, ToolInput};
+use crate::hook_exit::HookExitCode;
 use crate::io::envelope::{ErrorCode, ErrorPayload};
 use crate::io::output::build_payload;
 use crate::MAX_INPUT_SIZE;
 use std::io::{self, Read};
 
-// Fail-closed input parsing. Errors carry the cause as a typed variant; the
-// exit code (always 64, hook input contract per ADR-0005) and rendering are
-// the caller's responsibility.
+// Typed parse failures. The cause is carried as a variant; `hook_exit_code`
+// selects the process exit and `into_payload` the rendered envelope.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ParseStdinError {
     #[error("failed to read stdin: {0}")]
@@ -22,6 +24,21 @@ pub(crate) enum ParseStdinError {
 }
 
 impl ParseStdinError {
+    /// Selects the hook exit code for this failure. Only `Oversized` is
+    /// fail-closed via `Blocking` (exit 2): exit 2 is the sole `PreToolUse` code
+    /// that halts the tool call, so routing oversized payloads there closes the
+    /// bypass the resource-boundary axis targets (ADR-0004). `InvalidJson` / `Io`
+    /// stay non-blocking (`InputError`, exit 64): Claude Code builds the
+    /// envelope, so a malformed or unreadable payload signals its bug or schema
+    /// drift, not an agent-controllable lever — blocking them would halt every
+    /// edit the day the envelope schema drifts past the serde model.
+    pub(crate) fn hook_exit_code(&self) -> HookExitCode {
+        match self {
+            Self::Oversized { .. } => HookExitCode::Blocking,
+            Self::Io(_) | Self::InvalidJson(_) => HookExitCode::InputError,
+        }
+    }
+
     pub(crate) fn into_payload(self) -> ErrorPayload {
         let (code, next_step) = match &self {
             Self::Io(_) => (
@@ -129,6 +146,36 @@ mod tests {
             Err(e) => assert!(matches!(e, ParseStdinError::Io(_)), "got {e:?}"),
             Ok(_) => panic!("expected Err for invalid UTF-8 input"),
         }
+    }
+
+    #[test]
+    fn oversized_is_fail_closed_blocking_exit() {
+        // #375: only Oversized blocks (exit 2). Exit 2 is the sole PreToolUse
+        // code that halts the tool call, so the resource-boundary bypass closes.
+        assert_eq!(
+            ParseStdinError::Oversized {
+                cap: MAX_INPUT_SIZE
+            }
+            .hook_exit_code(),
+            HookExitCode::Blocking
+        );
+    }
+
+    #[test]
+    fn invalid_json_and_io_are_fail_open_input_error_exit() {
+        // InvalidJson / Io stay non-blocking (exit 64): Claude Code owns the
+        // envelope, so these are its bug or schema drift, not an agent bypass.
+        assert_eq!(
+            ParseStdinError::InvalidJson(
+                serde_json::from_str::<serde_json::Value>("nope").unwrap_err()
+            )
+            .hook_exit_code(),
+            HookExitCode::InputError
+        );
+        assert_eq!(
+            ParseStdinError::Io(io::Error::other("x")).hook_exit_code(),
+            HookExitCode::InputError
+        );
     }
 
     #[test]

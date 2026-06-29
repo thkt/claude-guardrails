@@ -82,13 +82,15 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 
 `HookExitCode` (`src/hook_exit.rs`) が定義する。`SUCCESS` 経路の violation 有無で 0/1/2 が決まり、advisory (1) と blocking (2) の境界は `severity.blockThreshold` ([ADR-0018](0018-severity-ord-and-block-threshold.md)) で決まる。
 
-| Exit | Const (`HookExitCode`) | JSON `error.code`                         | 意味                                                                                             | Claude Code hook 挙動                |
-| ---- | ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------ |
-| 0    | `Pass`                 | (none)                                    | pass — violation なし                                                                            | allow                                |
-| 1    | `Advisory`             | (none)                                    | advisory — `severity.blockThreshold` 未満の violation                                            | warn (AI に stderr 表示、tool 続行)  |
-| 2    | `Blocking`             | (none)                                    | blocking — `severity.blockThreshold` 以上の violation                                            | block (AI に stderr 表示、tool 停止) |
-| 64   | `InputError`           | `USAGE_ERROR` / `DATA_ERROR` / `IO_ERROR` | hook 入力契約違反 (malformed JSON / oversized payload / stdin read failure / clap parse failure) | block                                |
-| 70   | `Internal`             | (envelope なし、stderr のみ)              | panic / invariant violation (fail-closed)                                                        | block                                |
+| Exit | Const (`HookExitCode`) | JSON `error.code`                         | 意味                                                                                        | Claude Code hook 挙動                    |
+| ---- | ---------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 0    | `Pass`                 | (none)                                    | pass — violation なし                                                                       | allow                                    |
+| 1    | `Advisory`             | (none)                                    | advisory — `severity.blockThreshold` 未満の violation                                       | warn (AI に stderr 表示、tool 続行)      |
+| 2    | `Blocking`             | (none)                                    | blocking — `severity.blockThreshold` 以上の violation、または oversized stdin (fail-closed) | block (AI に stderr 表示、tool 停止)     |
+| 64   | `InputError`           | `USAGE_ERROR` / `DATA_ERROR` / `IO_ERROR` | hook 入力契約違反 (malformed JSON / stdin read failure / clap parse failure)                | non-block (AI に stderr 表示、tool 続行) |
+| 70   | `Internal`             | (envelope なし、stderr のみ)              | panic / invariant violation                                                                 | non-block (AI に stderr 表示、tool 続行) |
+
+PreToolUse 契約で tool 呼び出しを止めるのは exit 2 のみ。0 は allow、1/64/70 は non-block (stderr を AI に出して tool は続行)。oversized stdin を 64 でなく 2 に倒すのはこのため。詳細は末尾 Amendment 2026-06-30 (#375)。
 
 ### Prefetch subcommand exit code (4 種)
 
@@ -219,3 +221,21 @@ envelope schema と exit code は次のテストで pin されている。
 - dotclaude ADR-0065 "scout JSON output schema and sysexits exit code policy" (inspiration; lives in a private dotclaude store, not navigable from this repo)
 - dotclaude ADR-0066 "CLI exit code policy grouped by error topology" (inspiration; private dotclaude store) — guardrails is a hook tool consuming stdin JSON and emitting violations on stderr; its exit code map follows the hook-tool grouping defined there.
 - Standards: sysexits.h (`man 3 sysexits`)
+
+## Amendment 2026-06-30: exit 64/70 は block しない、oversized stdin は exit 2 に倒す (#375)
+
+本 ADR 初版は hook mode exit code table の「Claude Code hook 挙動」列で 64 (`InputError`) と 70 (`Internal`) を block と記録していた。これは PreToolUse 契約の誤読である。公式 hooks ドキュメント (https://code.claude.com/docs/en/hooks.md) によれば、PreToolUse で tool 呼び出しを止めるのは exit 2 のみ。0 は allow、それ以外の非ゼロ (1 / 64 / 70) は non-blocking error として stderr を transcript に出しつつ tool を続行させる。
+
+帰結として、初版の意図 (oversized payload を 64 で fail-closed にして bypass を塞ぐ、ADR-0004 リソース境界軸) は実際には fail-open になっていた。10 MB 超の stdin は exit 64 を返しても tool が通り、guardrails の検査を素通りできた。
+
+修正は variant 単位で行う。
+
+| `ParseStdinError` variant | exit code         | fail-mode   | 根拠                                                                                                        |
+| ------------------------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `Oversized`               | 2 (`Blocking`)    | fail-closed | agent が制御可能な bypass 経路。exit 2 のみが block するため 2 に倒す (ADR-0004 リソース境界軸の本来の意図) |
+| `InvalidJson`             | 64 (`InputError`) | fail-open   | envelope は Claude Code が生成する。malformed JSON はその bug か schema drift で、agent の梃子ではない      |
+| `Io`                      | 64 (`InputError`) | fail-open   | stdin read failure も同様に環境失敗側。block すると envelope drift 時に全編集を止める自滅 DoS リスク        |
+
+exit 2 はこれまで blocking violation (`SuccessEnvelope`, `decision=block`) 専用だった。`Oversized` を 2 に倒すことで、exit 2 は「閾値超過の violation」または「fail-closed な input error (`ErrorEnvelope`, `DATA_ERROR`)」のいずれかを運ぶ。`ErrorEnvelope` は引き続き stdout に乗り、exit code のみ 64 から 2 へ変わる。`error.code` ↔ exit code の 1:1 対応は崩れる (DATA_ERROR が 64 と 2 の両方に現れうる) が、これは fail-mode を exit code の真実源とする設計判断を優先した結果である。
+
+`Internal` (70, panic / invariant 違反) も同じ契約で block しない。ADR-0004 invariant 軸が意図する fail-closed と乖離するが、これは stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue で追跡する。`pin` は `tests/cli/dispatch.rs` `oversized_input_blocks_with_exit_two` / `tests/cli/json_envelope.rs` `json_mode_oversized_input_emits_error_envelope` / `src/io/stdin.rs` `oversized_is_fail_closed_blocking_exit` / `invalid_json_and_io_are_fail_open_input_error_exit`。
