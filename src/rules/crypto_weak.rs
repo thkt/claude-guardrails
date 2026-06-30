@@ -133,4 +133,11 @@ mod tests {
         ";
         assert!(check(content).is_empty());
     }
+
+    #[test]
+    fn ignores_weak_algorithm_in_inline_comment() {
+        // FP #376: an inline comment trailing live code must not be scanned.
+        let content = "const h = crypto.createHash('sha256'); // replaced createHash('md5')";
+        assert!(check(content).is_empty());
+    }
 }

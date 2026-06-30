@@ -240,7 +240,8 @@ fn collect_first_party_violations(
     let mut violations = Vec::new();
     let mut notes = Vec::new();
 
-    let lines = non_comment_lines(content);
+    let masked = rules::comment_masked_source(content);
+    let lines = non_comment_lines(&masked);
     let rules = rules::load_rules(config);
     for rule in &rules {
         if !rule.file_pattern.is_match(file_path) {

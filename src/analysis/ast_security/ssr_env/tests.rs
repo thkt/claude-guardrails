@@ -55,6 +55,16 @@ fn env_var_fallback_public_and_sort_keys_allowed() {
     }
 }
 
+// T-024: env_var_fallback_next_public_allowed
+// NEXT_PUBLIC_* env vars are exposed to the browser by Next.js, so they are
+// public by definition; a hardcoded fallback for one is not a leaked secret
+// even though the name carries an API_KEY substring.
+#[test]
+fn env_var_fallback_next_public_allowed() {
+    let v = check_js(r#"const k = process.env.NEXT_PUBLIC_STRIPE_API_KEY || "pk_test_default";"#);
+    assert_eq!(v.len(), 0, "NEXT_PUBLIC_ fallback is public, not a secret");
+}
+
 // T-006: env_var_fallback_multiline_logical_expression_blocked
 #[test]
 fn env_var_fallback_multiline_logical_expression_blocked() {
@@ -340,6 +350,19 @@ fn ssr_secret_bleed_silent_on_safe_property_names() {
     assert!(
         v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
         "non-secret property names are silent: {v:?}"
+    );
+}
+
+#[test]
+fn ssr_secret_bleed_silent_on_next_public_env_value() {
+    // A NEXT_PUBLIC_* value is browser-exposed by Next.js, so returning it from
+    // SSR is not a secret bleed even though the name carries an API_KEY substring.
+    // Shares the NEXT_PUBLIC_ carve-out with env-var-fallback (is_sensitive_env_access).
+    let code = "export async function getServerSideProps() { return { props: { publishableKey: process.env.NEXT_PUBLIC_API_KEY } }; }";
+    let v = check(code, "/pages/dashboard.tsx");
+    assert!(
+        v.iter().all(|x| x.rule != rule_id::SSR_SECRET_BLEED),
+        "NEXT_PUBLIC_ value is public, not an SSR secret bleed: {v:?}"
     );
 }
 

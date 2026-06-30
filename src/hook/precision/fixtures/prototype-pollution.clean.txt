@@ -1,3 +1,5 @@
 function setName(target) {
   target.name = 'x';
 }
+MyClass.prototype.render = function () {};
+Array.prototype.flat = function () {};

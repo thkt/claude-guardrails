@@ -161,6 +161,30 @@ fn line_number(idx: usize) -> u32 {
 /// own parse) plus a `Vec<bool>`/`Vec<u8>` of `content.len()`. Input is bounded
 /// by `MAX_INPUT_SIZE` (10 MB) and the NFR budget is <10 ms/file, so the extra
 /// pass stays well inside budget; revisit only if dogfooding shows latency.
+/// Returns `content` with every comment byte (but not the newlines that
+/// terminate line comments) replaced by an ASCII space, so line-regex rules
+/// scan code only and never an inline comment (`createHash('sha256'); //
+/// createHash('md5')` must not fire crypto-weak). String literals are preserved
+/// on purpose: rules like crypto-weak and hardcoded-secret match on string
+/// *content* (`'md5'`), so blanking strings (`code_visible`) would defeat them —
+/// only the `comment` mask is applied. Newlines are exempt so `.lines()` keeps
+/// the original line numbering.
+///
+/// Callers in the line-regex pipeline (`hook::lint`, `check_rule`) feed the
+/// result to [`non_comment_lines`]; AST/byte rules (parse, bidi, cot-leakage)
+/// still see raw `content`.
+pub(crate) fn comment_masked_source(content: &str) -> String {
+    let comment = build_source_masks(content).comment;
+    let mut bytes = content.as_bytes().to_vec();
+    for (i, &hidden) in comment.iter().enumerate() {
+        if hidden && bytes[i] != b'\n' && bytes[i] != b'\r' {
+            bytes[i] = b' ';
+        }
+    }
+    // Only single-byte ASCII spaces overwrite comment bytes, so UTF-8 stays valid.
+    String::from_utf8(bytes).expect("ASCII-space substitution preserves UTF-8")
+}
+
 pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
     let comment = build_source_masks(content).comment;
     let base = content.as_ptr() as usize;
