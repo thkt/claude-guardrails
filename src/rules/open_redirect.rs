@@ -85,10 +85,8 @@ fn is_location_target(target: &AssignmentTarget) -> bool {
         AssignmentTarget::StaticMemberExpression(sme) => {
             matches_location_member(&sme.object, sme.property.name.as_str())
         }
-        AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
-            Expression::StringLiteral(s) => matches_location_member(&cme.object, &s.value),
-            _ => false,
-        },
+        AssignmentTarget::ComputedMemberExpression(cme) => ast::static_key(&cme.expression)
+            .is_some_and(|name| matches_location_member(&cme.object, name)),
         _ => false,
     }
 }
@@ -221,6 +219,21 @@ mod tests {
     fn detects_bracket_notation_window_location() {
         let v = check(r#"window["location"] = target;"#, "/src/auth.ts");
         assert_eq!(v.len(), 1);
+    }
+
+    // T-383-8 (#383): a substitution-free template-literal computed key resolves
+    // like the string-literal form; the assignment target arm previously matched
+    // only StringLiteral, leaving `location[`href`] = x` an undetected redirect.
+    #[test]
+    fn detects_template_key_href() {
+        let v = check("location[`href`] = userInput;", "/src/auth.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::OPEN_REDIRECT);
+    }
+
+    #[test]
+    fn ignores_template_key_non_location_member() {
+        assert!(check("location[`pathname`] = userInput;", "/src/auth.ts").is_empty());
     }
 
     #[test]

@@ -54,16 +54,15 @@ impl SecurityVisitor<'_> {
     }
 }
 
-/// The assigned property name for `el.innerHTML = x` and `el["innerHTML"] = x`.
-/// Only a string-literal computed key resolves — a dynamic key (`el[prop] = x`)
-/// is not a statically known HTML sink, so it returns `None` (FN-2 #377).
-fn assignment_target_property<'a>(target: &'a AssignmentTarget) -> Option<&'a str> {
+/// The assigned property name for `el.innerHTML = x` and `el[key] = x`. The
+/// computed key resolves through `ast::static_key`, so a string literal or a
+/// substitution-free template literal key both resolve; a dynamic key
+/// (`el[prop] = x`) is not a statically known HTML sink and returns `None`
+/// (FN-2 #377, #383).
+fn assignment_target_property<'a>(target: &'a AssignmentTarget<'a>) -> Option<&'a str> {
     match target {
         AssignmentTarget::StaticMemberExpression(sme) => Some(sme.property.name.as_str()),
-        AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
-            Expression::StringLiteral(s) => Some(s.value.as_str()),
-            _ => None,
-        },
+        AssignmentTarget::ComputedMemberExpression(cme) => ast::static_key(&cme.expression),
         _ => None,
     }
 }

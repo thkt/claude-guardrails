@@ -172,6 +172,30 @@ fn member_expression_callee_variants() {
     assert!(check_js("cp.exec('ls -la');").is_empty());
 }
 
+// T-383-4 (#383): substitution-free template-literal callee keys resolve like
+// string-literal keys across all three server-io computed sinks.
+#[test]
+fn member_expression_template_key_callee_variants() {
+    for (code, rule) in [
+        ("cp[`exec`](userInput);", rule_id::CHILD_PROCESS_INJECTION),
+        (
+            "fs[`readFile`](userInput, cb);",
+            rule_id::NON_LITERAL_FS_PATH,
+        ),
+        (
+            "res[`json`]({ stack: err.stack });",
+            rule_id::ERR_STACK_EXPOSURE,
+        ),
+    ] {
+        let v = check_js(code);
+        assert_eq!(v.len(), 1, "failed for: {code}");
+        assert_eq!(v[0].rule, rule, "failed for: {code}");
+    }
+    // A benign template-literal key resolves but matches no sink.
+    assert!(check_js("cp[`exec`]('ls -la');").is_empty());
+    assert!(check_js("fs[`readFile`]('./config.json', cb);").is_empty());
+}
+
 #[test]
 fn fs_boundary_conditions() {
     let v = check_js("fs.readFile(__dirname + userInput, cb);");

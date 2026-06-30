@@ -313,3 +313,19 @@ fn math_random_keyword_var_short_word_bridge_fires() {
         "expected underscore-bridged salt match to fire, got: {v:?}"
     );
 }
+
+// T-383-6 (#383): the crypto-sink callee resolves through member_name, so a
+// substitution-free template-literal method key fires like the dot form. Guards
+// the member_name -> static_key wiring at this consumer; benign source stays silent.
+#[test]
+fn math_random_crypto_sink_template_callee_blocked() {
+    let v = check_js("crypto[`createHmac`]('sha256', Math.random());");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::MATH_RANDOM_INSECURE);
+    assert_eq!(v[0].severity, Severity::High);
+}
+
+#[test]
+fn math_random_crypto_sink_template_callee_safe_source_allowed() {
+    assert!(check_js("crypto[`createHmac`]('sha256', key);").is_empty());
+}

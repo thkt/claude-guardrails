@@ -68,6 +68,22 @@ fn ignores_inner_html_dynamic_computed_key() {
     assert!(check_js("el[prop] = userInput;").is_empty());
 }
 
+// T-383-2 (#383): a substitution-free template-literal computed key resolves
+// like a string-literal key, so `el[`innerHTML`] = userInput` fires.
+#[test]
+fn detects_inner_html_computed_template_key() {
+    let v = check_js("el[`innerHTML`] = userInput;");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
+    assert_eq!(v[0].severity, Severity::High);
+}
+
+// T-383-2 (#383): a template-literal key that is not an HTML sink stays benign.
+#[test]
+fn ignores_benign_computed_template_key() {
+    assert!(check_js("el[`foo`] = userInput;").is_empty());
+}
+
 // T-020 (FN-2 #377): outerHTML via computed string-literal key.
 #[test]
 fn detects_outer_html_computed_string_key() {
