@@ -8,13 +8,13 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-The project outcome demands that violation-detection precision and the agent-facing experience improve continuously, yet nothing measures either. There is no corpus of known violations or near-misses, no false-positive tracking, and the `<10ms/file` latency assertion (`assert_under_10ms`) covers 4 of the 39 first-party rule_ids. Rule improvements land on gut feeling, and a precision regression would reach `main` undetected (Issue #255).
+The project outcome demands that violation-detection precision and the agent-facing experience improve continuously, yet nothing measures either. There is no corpus of known violations or near-misses, no false-positive tracking, and the `<10ms/file` latency assertion (`assert_under_10ms`) covers 5 of the 42 first-party rule_ids. Rule improvements land on gut feeling, and a precision regression would reach `main` undetected (Issue #255).
 
 Three structural constraints shape any solution.
 
 1. **Binary crate visibility.** guardrails has no `lib.rs`; integration tests under `tests/` can only spawn the binary. In-process access to the production pipeline (`hook::collect_violations`) is possible only from `#[cfg(test)]` modules inside `src/`.
 2. **Self-hooking repository.** This repo runs guardrails as its own PreToolUse hook. Should-fire samples are, by definition, content the hook blocks (secrets, CoT markers, injection sinks). Editing such samples as Rust string literals in `src/` triggers the very rules they exercise. `tests/rule_smoke.rs` worked around this with per-fixture escaping (hex escapes, runtime `format!`), which does not scale to a corpus of 80+ samples.
-3. **Toggle granularity is coarser than rule granularity.** `RulesConfig` exposes 27 toggles for 39 rule_ids; the `ast_security` toggle alone gates 13 rule_ids that always run together in production. A "latency per rule_id with only that rule enabled" measurement is unrepresentable for those 13.
+3. **Toggle granularity is coarser than rule granularity.** `RulesConfig` exposes 29 toggles for 42 rule_ids; the `ast_security` toggle alone gates 13 rule_ids that always run together in production. A "latency per rule_id with only that rule enabled" measurement is unrepresentable for those 13.
 
 ## Decision Drivers
 
@@ -46,11 +46,11 @@ Chosen: **Option D**, as `#[cfg(test)] mod precision;` under `src/hook/` (a sibl
 - **The harness test never fails on FN/FP counts** (only on corpus coverage gaps and latency). Known false negatives are banked in the corpus first; the fix and the recall improvement land in later PRs with the delta visible in numbers.
 - **CI gates FP only, as a rate, in integer arithmetic.** The precision job compares base vs head per rule: fail when `head.fp * base.clean_count > base.fp * head.clean_count`. Cross-multiplication avoids float rounding entirely and normalizes for corpus growth. Recall is intentionally not gated (the asymmetry above); precision is derivable and reported but not separately gated, because with FP rate held, precision can only drop via recall-side changes that the asymmetry deliberately allows. Adding a clean sample that exposes a new FP therefore fails the gate, which is the intended workflow: an FP-exposing sample must ship with the rule fix in the same PR.
 - **Bootstrap and rule churn skip.** When base metrics are absent (first PR), empty, or lack a rule_id (new rule), the comparison for that scope is skipped.
-- **Latency semantics: NFR-001 measures the check pipeline** (parse + rule dispatch via `collect_violations` with all 39 first-party rules on, oxlint off), excluding process spawn and config resolution. The measurement boundary matches the existing `assert_under_10ms`, but the statistic is stricter: `assert_under_10ms` asserts the mean of its iterations, while the harness asserts the median of ≥50 iterations per sample, which tolerates CI runner spikes. A per-rule_id breakdown is impossible for the 13 `ast_security` rule_ids (constraint 3), so per-toggle latency is recorded as diagnostics without an assertion.
+- **Latency semantics: NFR-001 measures the check pipeline** (parse + rule dispatch via `collect_violations` with all 42 first-party rules on, oxlint off), excluding process spawn and config resolution. The measurement boundary matches the existing `assert_under_10ms`, but the statistic is stricter: `assert_under_10ms` asserts the mean of its iterations, while the harness asserts the median of ≥50 iterations per sample, which tolerates CI runner spikes. A per-rule_id breakdown is impossible for the 13 `ast_security` rule_ids (constraint 3), so per-toggle latency is recorded as diagnostics without an assertion.
 
 ### Scope
 
-- The corpus covers exactly the 39 first-party rule_ids. oxlint-delegated rules are excluded: upstream precision is upstream's responsibility, and the harness must not depend on an oxlint binary.
+- The corpus covers exactly the 42 first-party rule_ids. oxlint-delegated rules are excluded: upstream precision is upstream's responsibility, and the harness must not depend on an oxlint binary.
 - `tests/rule_smoke.rs` stays as the spawn-path wiring check. Unifying its fixtures with the corpus (`include_str!` from both sides) is a follow-up; until then the corpus coverage gate (every rule_id needs fire + clean samples) is the drift backstop.
 - The CI precision job runs plain `cargo test` rather than nextest: the metrics test is a single named test whose env-driven JSON output path must behave identically on base and head checkouts, and the test job's nextest profile adds nothing there.
 - `.github/workflows/ci.yml` adds `src/hook/precision` to the coverage job's `--ignore-filename-regex`, the established treatment for `#[cfg(test)]` modules not named `tests.rs` (doc_catalog precedent), so the C0 delta gate is unaffected.
