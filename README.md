@@ -304,7 +304,7 @@ guardrails --json < tool-call.json
 
 ### Error envelope
 
-When `--json` is set and stdin is invalid (malformed JSON, oversized payload, IO failure), guardrails emits an `ErrorEnvelope` on stdout and exits `64` (hook input error).
+When `--json` is set and stdin is invalid, guardrails emits an `ErrorEnvelope` on stdout. Malformed JSON and IO failures exit `64` (hook input error, non-blocking). An oversized payload (over the 10 MB cap) exits `2` (block, fail-closed) since v0.21 — see [Exit Codes](#exit-codes).
 
 ```json
 {
