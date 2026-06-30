@@ -125,8 +125,8 @@ fn collect_chain_segments(expr: &Expression, seg: &mut ChainSegments) {
             collect_chain_segments(&sme.object, seg);
         }
         Expression::ComputedMemberExpression(cme) => {
-            if let Expression::StringLiteral(s) = &cme.expression {
-                mark_segment(s.value.as_str(), seg);
+            if let Some(key) = ast::static_key(&cme.expression) {
+                mark_segment(key, seg);
             }
             collect_chain_segments(&cme.object, seg);
         }
@@ -147,7 +147,7 @@ fn object_chain_is_pollution(expr: &Expression) -> bool {
 }
 
 fn computed_key_is_pollution(expr: &Expression) -> bool {
-    matches!(expr, Expression::StringLiteral(s) if is_pollution_key(s.value.as_str()))
+    ast::static_key(expr).is_some_and(is_pollution_key)
 }
 
 fn is_json_parse_call(expr: &Expression) -> bool {
@@ -193,6 +193,30 @@ mod tests {
         let v = check_js("obj.__proto__ = x;");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-383-3 (#383): substitution-free template-literal pollution keys resolve
+    // like string-literal keys — both the final write key and a chain segment.
+    #[test]
+    fn prototype_pollution_template_key_blocked() {
+        for code in [
+            "target[`__proto__`] = v;",
+            "o[`constructor`][`prototype`].admin = true;",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::PROTOTYPE_POLLUTION,
+                "failed for: {code}"
+            );
+        }
+    }
+
+    // T-383-3 (#383): a benign template-literal key does not fire.
+    #[test]
+    fn prototype_pollution_benign_template_key_allowed() {
+        assert!(check_js("o[`bar`] = v;").is_empty());
     }
 
     // T-024: prototype_pollution_constructor_prototype_assignment_blocked
@@ -446,6 +470,16 @@ mod tests {
     #[test]
     fn prototype_pollution_bracket_form_blocked() {
         let v = check_js(r#"Object["assign"](target, JSON["parse"](input));"#);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
+    }
+
+    // T-383-5 (#383): the merge-sink callee resolves through member_name, so a
+    // substitution-free template-literal method key fires like the bracket-string
+    // form (T-044). Guards the member_name -> static_key wiring at this consumer.
+    #[test]
+    fn prototype_pollution_template_callee_blocked() {
+        let v = check_js("Object[`assign`](target, JSON.parse(input));");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].rule, rule_id::PROTOTYPE_POLLUTION);
     }

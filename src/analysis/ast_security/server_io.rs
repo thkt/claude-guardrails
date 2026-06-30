@@ -84,10 +84,9 @@ impl SecurityVisitor<'_> {
             Expression::StaticMemberExpression(sme) => {
                 CHILD_PROCESS_FNS.contains(&sme.property.name.as_str())
             }
-            Expression::ComputedMemberExpression(cme) => match &cme.expression {
-                Expression::StringLiteral(s) => CHILD_PROCESS_FNS.contains(&s.value.as_str()),
-                _ => return,
-            },
+            Expression::ComputedMemberExpression(cme) => {
+                ast::static_key(&cme.expression).is_some_and(|key| CHILD_PROCESS_FNS.contains(&key))
+            }
             _ => return,
         };
         if !is_child_process {
@@ -116,9 +115,9 @@ impl SecurityVisitor<'_> {
             // default or namespace import renamed away from `fs` (e.g. `import f
             // from 'node:fs'; f.readFile(x)`) needs the module binding resolved,
             // which the named-import alias set does not cover.
-            Expression::ComputedMemberExpression(cme) => match &cme.expression {
-                Expression::StringLiteral(_) => &cme.object,
-                _ => return,
+            Expression::ComputedMemberExpression(cme) => match ast::static_key(&cme.expression) {
+                Some(_) => &cme.object,
+                None => return,
             },
             _ => return,
         };
@@ -165,9 +164,9 @@ impl SecurityVisitor<'_> {
 fn is_response_call(callee: &Expression) -> bool {
     let (object, method) = match callee {
         Expression::StaticMemberExpression(sme) => (&sme.object, sme.property.name.as_str()),
-        Expression::ComputedMemberExpression(cme) => match &cme.expression {
-            Expression::StringLiteral(s) => (&cme.object, s.value.as_str()),
-            _ => return false,
+        Expression::ComputedMemberExpression(cme) => match ast::static_key(&cme.expression) {
+            Some(key) => (&cme.object, key),
+            None => return false,
         },
         _ => return false,
     };

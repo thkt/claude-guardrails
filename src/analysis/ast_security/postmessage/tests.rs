@@ -83,6 +83,17 @@ fn postmessage_origin_missing_silent_on_computed_origin_access() {
     );
 }
 
+// T-383-9 (#383): a substitution-free template-literal computed key resolves like
+// the string-literal form, so an `event[`origin`]` guard counts as an origin
+// check. The finder previously matched only StringLiteral, so this guarded
+// listener fired a false POSTMESSAGE_ORIGIN_MISSING.
+#[test]
+fn postmessage_origin_missing_silent_on_computed_template_origin_access() {
+    assert_postmessage_silent(
+        "window.addEventListener('message', (event) => { if (event[`origin`] !== 'https://x') return; });",
+    );
+}
+
 #[test]
 fn postmessage_origin_missing_silent_on_body_destructure() {
     assert_postmessage_silent(
@@ -532,6 +543,14 @@ fn postmessage_wildcard_fires_on_template_literal_star() {
 #[test]
 fn postmessage_wildcard_silent_on_interpolated_template() {
     assert_wildcard_silent("window.postMessage(data, `${origin}`);");
+}
+
+// T-383-7 (#383): the postMessage callee resolves through member_name, so a
+// substitution-free template-literal method key fires like the dot form. Guards
+// the member_name -> static_key wiring at this consumer.
+#[test]
+fn postmessage_wildcard_fires_on_template_literal_callee() {
+    assert_wildcard_fires("window[`postMessage`](data, '*');");
 }
 
 // Worker postMessage(msg, [transferable]) has an array 2nd arg, not the '*'

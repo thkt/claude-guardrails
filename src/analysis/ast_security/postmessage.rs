@@ -352,11 +352,9 @@ impl<'a> Visit<'a> for OriginReferenceFinder<'_> {
         if self.found {
             return;
         }
-        if let Expression::StringLiteral(s) = &it.expression {
-            if s.value == "origin" && self.refers_to_param(&it.object) {
-                self.found = true;
-                return;
-            }
+        if ast::static_key(&it.expression) == Some("origin") && self.refers_to_param(&it.object) {
+            self.found = true;
+            return;
         }
         walk::walk_computed_member_expression(self, it);
     }
