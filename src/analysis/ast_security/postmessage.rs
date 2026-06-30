@@ -1,4 +1,5 @@
 use super::SecurityVisitor;
+use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,
@@ -31,6 +32,29 @@ impl SecurityVisitor<'_> {
         );
     }
 
+    /// Send-side `x.postMessage(payload, '*')`: a literal `'*'` target origin
+    /// broadcasts to any document. AST matching (2nd argument is the wildcard
+    /// `"*"`, written as a string or a substitution-free `` `*` `` template)
+    /// replaces the former regex that broke when the first argument contained a
+    /// comma, e.g. an object-literal payload (FN-4 #377).
+    pub(super) fn check_post_message_wildcard(&mut self, call: &CallExpression<'_>) {
+        let Some((_, "postMessage")) = ast::member_name(&call.callee) else {
+            return;
+        };
+        let Some(second) = call.arguments.get(1).and_then(|a| a.as_expression()) else {
+            return;
+        };
+        if !is_wildcard_origin(second) {
+            return;
+        }
+        self.push_violation(
+            rule_id::SECURITY,
+            Severity::High,
+            "Specify exact target origin instead of '*'",
+            call.span,
+        );
+    }
+
     pub(super) fn check_onmessage_origin_missing(&mut self, expr: &AssignmentExpression<'_>) {
         let Some(handler) = message_assignment_handler(expr) else {
             return;
@@ -50,6 +74,20 @@ impl SecurityVisitor<'_> {
             "Validate event.origin against an allowlist before handling postMessage. Drop messages from unexpected origins.",
             expr.span,
         );
+    }
+}
+
+/// 2nd postMessage argument が `"*"` ワイルドカード origin か。string literal の
+/// `'*'` / `"*"` と、置換を持たない backtick template literal `` `*` `` を同一視
+/// する。旧 regex の quote 文字クラスが single / double / backtick の 3 種を許容
+/// していた挙動を維持し、template literal での bypass を防ぐ (FN-4 #377)。
+fn is_wildcard_origin(expr: &Expression) -> bool {
+    match expr {
+        Expression::StringLiteral(s) => s.value == "*",
+        Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
+            matches!(tl.quasis.as_slice(), [only] if only.value.cooked.as_deref() == Some("*"))
+        }
+        _ => false,
     }
 }
 

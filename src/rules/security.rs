@@ -7,12 +7,6 @@ static RE_SET_TIMEOUT_STR: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_SET_TIMEOUT_STR", r#"setTimeout\s*\(\s*['"`]"#));
 static RE_SET_INTERVAL_STR: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_SET_INTERVAL_STR", r#"setInterval\s*\(\s*['"`]"#));
-static RE_POST_MESSAGE_STAR: LazyLock<Regex> = LazyLock::new(|| {
-    regex_or_die(
-        "RE_POST_MESSAGE_STAR",
-        r#"\.postMessage\s*\([^,]+,\s*['"`]\*['"`]\s*\)"#,
-    )
-});
 static RE_LOCAL_STORAGE_SENSITIVE: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_LOCAL_STORAGE_SENSITIVE",
@@ -40,7 +34,7 @@ struct SecurityIssue {
     severity: Severity,
 }
 
-static SECURITY_ISSUES: [SecurityIssue; 6] = [
+static SECURITY_ISSUES: [SecurityIssue; 5] = [
     SecurityIssue {
         pattern: &RE_SET_TIMEOUT_STR,
         file_pattern: &RE_JS_FILE,
@@ -53,13 +47,6 @@ static SECURITY_ISSUES: [SecurityIssue; 6] = [
         file_pattern: &RE_JS_FILE,
         rule_id: rule_id::SECURITY,
         fix: "Use function reference: setInterval(() => { ... }, delay)",
-        severity: Severity::High,
-    },
-    SecurityIssue {
-        pattern: &RE_POST_MESSAGE_STAR,
-        file_pattern: &RE_JS_FILE,
-        rule_id: rule_id::SECURITY,
-        fix: "Specify exact target origin instead of '*'",
         severity: Severity::High,
     },
     SecurityIssue {
@@ -126,12 +113,6 @@ mod tests {
         for content in cases {
             assert_eq!(check(content, "/src/utils.ts").len(), 1);
         }
-    }
-
-    #[test]
-    fn detects_insecure_postmessage() {
-        let content = r"window.postMessage(data, '*');";
-        assert_eq!(check(content, "/src/messenger.ts").len(), 1);
     }
 
     #[test]

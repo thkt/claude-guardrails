@@ -5,17 +5,17 @@ use oxc_ast::ast::{AssignmentExpression, AssignmentTarget, CallExpression, Expre
 
 /// (object identifier alternatives, method name alternatives, fix message).
 /// Each row registers an assignment-style merge sink that pollutes its target
-/// when the source is untrusted (`JSON.parse(...)`).
+/// when the source is untrusted (see `is_untrusted_source`).
 const POLLUTION_MERGE_SINKS: &[(&[&str], &[&str], &str)] = &[
     (
         &["Object"],
         &["assign"],
-        "Object.assign with JSON.parse() source can pollute prototype. Use Object.create(null) target (a plain {} still inherits __proto__).",
+        "Object.assign with an untrusted source can pollute prototype. Use Object.create(null) target (a plain {} still inherits __proto__).",
     ),
     (
         &["_", "lodash"],
         &["merge", "defaultsDeep"],
-        "lodash merge/defaultsDeep with JSON.parse() source can pollute prototype. Use Object.create(null) target.",
+        "lodash merge/defaultsDeep with an untrusted source can pollute prototype. Use Object.create(null) target.",
     ),
 ];
 
@@ -45,7 +45,7 @@ impl SecurityVisitor<'_> {
             .arguments
             .iter()
             .skip(1)
-            .any(|arg| arg.as_expression().is_some_and(is_json_parse_call));
+            .any(|arg| arg.as_expression().is_some_and(is_untrusted_source));
         if has_untrusted {
             self.push_violation(rule_id::PROTOTYPE_POLLUTION, Severity::High, fix, call.span);
         }
@@ -155,6 +155,22 @@ fn is_json_parse_call(expr: &Expression) -> bool {
         return false;
     };
     matches!(ast::member_name(&call.callee), Some((obj, "parse")) if ast::is_ident(obj, "JSON"))
+}
+
+/// An untrusted merge source: a `JSON.parse(...)` result, or a canonical Express
+/// request input (`req.body`/`query`/`params`, `request.*`). The bare-identifier
+/// allowance (T-031/T-036) stands — only these statically recognizable shapes are
+/// treated as untrusted (FN-3 #377).
+fn is_untrusted_source(expr: &Expression) -> bool {
+    is_json_parse_call(expr) || is_request_input(expr)
+}
+
+fn is_request_input(expr: &Expression) -> bool {
+    let Some((object, property)) = ast::member_name(expr) else {
+        return false;
+    };
+    matches!(property, "body" | "query" | "params")
+        && (ast::is_ident(object, "req") || ast::is_ident(object, "request"))
 }
 
 #[cfg(test)]
@@ -329,6 +345,54 @@ mod tests {
         ] {
             assert!(check_js(code).is_empty(), "false positive for: {code}");
         }
+    }
+
+    // T-046 (FN-3 #377): a canonical request-input source (`req.body`/`query`/
+    // `params`, `request.*`) is untrusted just like `JSON.parse(...)`. These
+    // slipped through when only `JSON.parse` counted as untrusted.
+    #[test]
+    fn prototype_pollution_object_assign_request_input_blocked() {
+        for code in [
+            "Object.assign(target, req.body);",
+            "Object.assign(target, req.query);",
+            "Object.assign(target, req.params);",
+            "Object.assign(target, request.body);",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::PROTOTYPE_POLLUTION,
+                "failed for: {code}"
+            );
+            assert_eq!(v[0].severity, Severity::High, "failed for: {code}");
+        }
+    }
+
+    // T-047 (FN-3 #377): lodash merge sinks fed a request-input source.
+    #[test]
+    fn prototype_pollution_lodash_merge_request_input_blocked() {
+        for code in [
+            "_.merge(target, req.body);",
+            "lodash.defaultsDeep(target, request.query);",
+        ] {
+            let v = check_js(code);
+            assert_eq!(v.len(), 1, "failed for: {code}");
+            assert_eq!(
+                v[0].rule,
+                rule_id::PROTOTYPE_POLLUTION,
+                "failed for: {code}"
+            );
+        }
+    }
+
+    // T-048 (FN-3 #377): an unrelated object's same-named property is not a
+    // request-input source, so the bare-identifier allowance (T-031/T-036) holds
+    // for it (`config.body` is not `req.body`).
+    #[test]
+    fn prototype_pollution_non_request_member_source_allowed() {
+        assert!(check_js("Object.assign(target, config.body);").is_empty());
+        assert!(check_js("_.merge(target, settings.params);").is_empty());
     }
 
     // T-039: prototype_pollution_no_call_no_assignment_allowed

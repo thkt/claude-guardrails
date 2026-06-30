@@ -333,6 +333,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
         self.check_document_write(it);
         self.check_merge_pollution_sinks(it);
         self.check_postmessage_origin_missing(it);
+        self.check_post_message_wildcard(it);
         walk::walk_call_expression(self, it);
     }
 

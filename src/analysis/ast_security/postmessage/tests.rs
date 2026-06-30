@@ -482,3 +482,61 @@ fn postmessage_origin_missing_silent_on_validating_handler_in_try_block() {
         "try { window.addEventListener('message', (event) => { if (event.origin !== 'https://x') return; handle(event.data); }); } catch (e) { report(e); }",
     );
 }
+
+fn assert_wildcard_fires(code: &str) {
+    let v = check(code, "/src/page.ts");
+    let hits: Vec<_> = v.iter().filter(|x| x.rule == rule_id::SECURITY).collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected wildcard fire for: {code}\nviolations: {v:?}"
+    );
+}
+
+fn assert_wildcard_silent(code: &str) {
+    let v = check(code, "/src/page.ts");
+    assert!(
+        v.iter().all(|x| x.rule != rule_id::SECURITY),
+        "expected no wildcard for: {code}\nviolations: {v:?}"
+    );
+}
+
+// FN-4 #377: send-side postMessage with a literal '*' target origin. The former
+// regex (`\.postMessage\s*\([^,]+,\s*'\*'\)`) could not span a comma in the first
+// argument, so an object-literal payload bypassed it.
+#[test]
+fn postmessage_wildcard_fires_on_object_literal_first_arg() {
+    assert_wildcard_fires("el.postMessage({ type: 'x', payload: y }, '*');");
+}
+
+#[test]
+fn postmessage_wildcard_fires_on_simple_first_arg() {
+    assert_wildcard_fires("window.postMessage(data, '*');");
+}
+
+#[test]
+fn postmessage_wildcard_silent_on_explicit_origin() {
+    assert_wildcard_silent("window.postMessage(data, 'https://trusted.example');");
+}
+
+// The removed regex's quote class `['"`]` also matched a backtick, so a
+// substitution-free `` `*` `` template literal target was caught. The AST check
+// keeps that coverage instead of regressing to a false negative (FN-4 #377).
+#[test]
+fn postmessage_wildcard_fires_on_template_literal_star() {
+    assert_wildcard_fires("window.postMessage(data, `*`);");
+}
+
+// A template literal with a substitution is not a static `"*"`, so it stays
+// silent — matching the string-literal-only intent without over-firing.
+#[test]
+fn postmessage_wildcard_silent_on_interpolated_template() {
+    assert_wildcard_silent("window.postMessage(data, `${origin}`);");
+}
+
+// Worker postMessage(msg, [transferable]) has an array 2nd arg, not the '*'
+// string literal, so it must not fire.
+#[test]
+fn postmessage_wildcard_silent_on_transfer_list() {
+    assert_wildcard_silent("worker.postMessage(buffer, [buffer]);");
+}
