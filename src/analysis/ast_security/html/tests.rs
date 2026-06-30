@@ -45,6 +45,38 @@ fn allows_inner_html_concat_of_literals() {
     assert!(check_js(r#"el.innerHTML = "<div>" + "static" + "</div>";"#).is_empty());
 }
 
+// T-019 (FN-2 #377): a computed string-literal key bypassed the static-member-only
+// arm (`el["innerHTML"] = userInput` slipped through).
+#[test]
+fn detects_inner_html_computed_string_key() {
+    let v = check_js(r#"el["innerHTML"] = userInput;"#);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
+    assert_eq!(v[0].severity, Severity::High);
+}
+
+// T-019 (FN-2 #377): a static literal through a computed key stays safe.
+#[test]
+fn allows_inner_html_computed_string_key_literal() {
+    assert!(check_js(r#"el["innerHTML"] = "<div>static</div>";"#).is_empty());
+}
+
+// T-019 (FN-2 #377): a dynamic (non-literal) computed key is not a known HTML sink,
+// so it must not fire (`el[prop] = x` where prop is a variable).
+#[test]
+fn ignores_inner_html_dynamic_computed_key() {
+    assert!(check_js("el[prop] = userInput;").is_empty());
+}
+
+// T-020 (FN-2 #377): outerHTML via computed string-literal key.
+#[test]
+fn detects_outer_html_computed_string_key() {
+    let v = check_js(r#"el["outerHTML"] = userInput;"#);
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule, rule_id::UNSAFE_HTML_INJECTION);
+    assert_eq!(v[0].severity, Severity::Medium);
+}
+
 // T-020: detects_outer_html_variable_assignment
 #[test]
 fn detects_outer_html_variable_assignment() {

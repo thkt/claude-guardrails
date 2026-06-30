@@ -7,10 +7,10 @@ use oxc_ast::ast::{
 
 impl SecurityVisitor<'_> {
     pub(super) fn check_html_assignment(&mut self, expr: &AssignmentExpression) {
-        let AssignmentTarget::StaticMemberExpression(sme) = &expr.left else {
+        let Some(property) = assignment_target_property(&expr.left) else {
             return;
         };
-        let (severity, fix) = match sme.property.name.as_str() {
+        let (severity, fix) = match property {
             "innerHTML" => (
                 Severity::High,
                 "Use el.textContent = x for plain text, or el.innerHTML = DOMPurify.sanitize(x) when HTML is required",
@@ -51,6 +51,20 @@ impl SecurityVisitor<'_> {
             "Use document.createElement(tag) + parent.appendChild(el) instead of document.write()",
             call.span,
         );
+    }
+}
+
+/// The assigned property name for `el.innerHTML = x` and `el["innerHTML"] = x`.
+/// Only a string-literal computed key resolves — a dynamic key (`el[prop] = x`)
+/// is not a statically known HTML sink, so it returns `None` (FN-2 #377).
+fn assignment_target_property<'a>(target: &'a AssignmentTarget) -> Option<&'a str> {
+    match target {
+        AssignmentTarget::StaticMemberExpression(sme) => Some(sme.property.name.as_str()),
+        AssignmentTarget::ComputedMemberExpression(cme) => match &cme.expression {
+            Expression::StringLiteral(s) => Some(s.value.as_str()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
