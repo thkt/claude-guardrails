@@ -67,13 +67,13 @@ struct ConcatParts {
 fn expression_is_dynamic_sql(expr: &Expression) -> bool {
     match expr {
         Expression::TemplateLiteral(tl) => {
-            !tl.expressions.is_empty() && template_has_sql_keyword(tl)
+            !tl.expressions.is_empty() && template_looks_like_sql(tl)
         }
         Expression::BinaryExpression(be) if be.operator == BinaryOperator::Addition => {
             let mut parts = ConcatParts::default();
             collect_concat_parts(&be.left, &mut parts);
             collect_concat_parts(&be.right, &mut parts);
-            parts.has_dynamic && contains_sql_keyword(&parts.literals)
+            parts.has_dynamic && looks_like_sql(&parts.literals)
         }
         _ => false,
     }
@@ -105,10 +105,14 @@ fn collect_concat_parts(expr: &Expression, parts: &mut ConcatParts) {
     }
 }
 
-fn template_has_sql_keyword(tl: &TemplateLiteral) -> bool {
-    tl.quasis
+fn template_looks_like_sql(tl: &TemplateLiteral) -> bool {
+    let joined = tl
+        .quasis
         .iter()
-        .any(|q| contains_sql_keyword(q.value.raw.as_str()))
+        .map(|q| q.value.raw.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    looks_like_sql(&joined)
 }
 
 fn is_console_member_call(call: &CallExpression) -> bool {
@@ -118,9 +122,21 @@ fn is_console_member_call(call: &CallExpression) -> bool {
     ast::is_ident(object, "console")
 }
 
-fn contains_sql_keyword(s: &str) -> bool {
-    s.split(|c: char| !c.is_ascii_alphabetic())
-        .any(|w| SQL_KEYWORDS.iter().any(|kw| w.eq_ignore_ascii_case(kw)))
+fn first_word(s: &str) -> &str {
+    s.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .find(|w| !w.is_empty())
+        .unwrap_or("")
+}
+
+/// SQL keywords double as ordinary English words (DROP, CREATE, DELETE, EXEC...), so
+/// matching a keyword anywhere false-positives on prose ("do not add, drop, or edit
+/// any ${x}"). A written SQL statement always leads with its statement keyword, so
+/// requiring the keyword to be the literal's first word narrows to actual SQL shape
+/// while still catching statements with no object/clause keyword (bare `EXEC proc`,
+/// `TRUNCATE t`, `DROP USER u`).
+fn looks_like_sql(s: &str) -> bool {
+    let word = first_word(s);
+    SQL_KEYWORDS.iter().any(|kw| word.eq_ignore_ascii_case(kw))
 }
 
 impl<'a> Visit<'a> for SqliVisitor<'_> {
@@ -249,6 +265,94 @@ mod tests {
         let v = check_js("db.query(`SELECT * FROM users WHERE id = ${id}` + suffix);");
         assert_eq!(v.len(), 1, "dynamic template in `+` chain must flag: {v:?}");
         assert_eq!(v[0].severity, Severity::High);
+    }
+
+    // T-019: bare EXEC (stored-proc call) with no clause keyword → blocked
+    // (reproduces a recall gap the clause-pairing heuristic introduced: real
+    // dynamic SQL doesn't always pair a statement keyword with a clause word)
+    #[test]
+    fn detects_bare_exec_without_clause_keyword() {
+        let v = check_js("db.query(`EXEC sp_delete_user ${userId}`);");
+        assert_eq!(v.len(), 1, "bare EXEC must flag: {v:?}");
+    }
+
+    // T-020: bare TRUNCATE with no clause keyword → blocked
+    #[test]
+    fn detects_bare_truncate_without_clause_keyword() {
+        let v = check_js("db.query(`TRUNCATE ${tableName}`);");
+        assert_eq!(v.len(), 1, "bare TRUNCATE must flag: {v:?}");
+    }
+
+    // T-021: DROP USER with no clause/object keyword pairing → blocked
+    #[test]
+    fn detects_drop_user_without_clause_keyword() {
+        let v = check_js("db.query(`DROP USER ${userName}`);");
+        assert_eq!(v.len(), 1, "DROP USER must flag: {v:?}");
+    }
+
+    // T-022: looks_like_sql direct unit coverage — leading keyword matches
+    // regardless of case, embedded keyword does not.
+    #[test]
+    fn looks_like_sql_requires_leading_keyword() {
+        assert!(looks_like_sql("select * from t"));
+        assert!(looks_like_sql("  TRUNCATE t"));
+        assert!(!looks_like_sql("please drop this"));
+        assert!(!looks_like_sql(""));
+    }
+
+    // T-023: cross-quasi co-occurrence — keyword split across a template's static
+    // parts is irrelevant; only the leading word of the joined literal text counts.
+    #[test]
+    fn ignores_keyword_appearing_only_in_a_later_quasi() {
+        let v = check_js("anchor(`User ${name} requested to drop their account, confirm: ${ok}`);");
+        assert!(
+            v.is_empty(),
+            "keyword in a non-leading quasi must not flag: {v:?}"
+        );
+    }
+
+    // T-024: `+`-concat prose with an embedded keyword (not leading) → allowed,
+    // pinning the same leading-word rule on the concat path as T-016 pins for
+    // template literals.
+    #[test]
+    fn ignores_concat_prose_with_embedded_keyword() {
+        let v = check_js(r#"log("Please drop the " + item + " from your cart");"#);
+        assert!(
+            v.is_empty(),
+            "embedded keyword in concat must not flag: {v:?}"
+        );
+    }
+
+    // T-016: prose containing a lone SQL statement keyword as an ordinary English
+    // word ("drop"), with no clause/object keyword alongside it → allowed
+    // (reproduces a false positive where an LLM-agent prompt template literal was
+    // misdetected as SQL)
+    #[test]
+    fn ignores_prose_with_lone_statement_keyword() {
+        let v = check_js(
+            "anchor(`Steps: (1) do not add, drop, or edit any ${preconditions.length} entries.`);",
+        );
+        assert!(v.is_empty(), "lone keyword in prose must not flag: {v:?}");
+    }
+
+    // T-017: dynamic SQL is still detected regardless of callee/sink name (no
+    // sink-name allowlist — this pins the exact recall gap a callee-name-based
+    // gate would reintroduce, e.g. sqlite3/better-sqlite3's `db.run`)
+    #[test]
+    fn detects_dynamic_sql_on_non_standard_sink_name() {
+        let v = check_js("db.run(`DELETE FROM users WHERE id = ${userId}`);");
+        assert_eq!(v.len(), 1, "db.run with dynamic SQL must flag: {v:?}");
+    }
+
+    // T-018: prose with an unrelated call name that happens to substring-match a
+    // former sink hint ("withdraw") but has no SQL clause/object keyword → allowed
+    #[test]
+    fn ignores_prose_on_unrelated_call_name() {
+        let v = check_js("withdraw(`Please drop your request if you change your mind, ${x}`);");
+        assert!(
+            v.is_empty(),
+            "unrelated call name with prose must not flag: {v:?}"
+        );
     }
 
     // T-015: NFR-001: AST parse + check < 10ms per file
