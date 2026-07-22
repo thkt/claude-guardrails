@@ -1,0 +1,3 @@
+const parts = ['<div>', userInput, '</div>'];
+const html = parts.join('');
+return html;

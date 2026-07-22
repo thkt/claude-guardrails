@@ -1,0 +1,2 @@
+const config = 1;
+const html = `<div>${userInput}</div>`;

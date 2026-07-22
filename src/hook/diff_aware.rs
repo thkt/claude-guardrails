@@ -15,7 +15,15 @@ use std::path::Path;
 /// properties are pinned per enrolled rule by
 /// `allowlisted_rules_report_every_occurrence` and the demotion-surface
 /// corpus tests, which fail when a rule enrolls without matching entries.
-pub(crate) const DEMOTABLE_RULES: &[&str] = &["eval"];
+///
+/// raw-html's bind+join branch decides from two lines (array literal +
+/// join receiver), so its identity is the join line's text with the array
+/// context erased. That widens identity, never the demotion count: the
+/// budget is still capped by before-edit occurrences, and treating an
+/// identical join line elsewhere as the same violation is the position
+/// independence the swap scenario already accepts. The join form is pinned
+/// by the raw-html swap fixture.
+pub(crate) const DEMOTABLE_RULES: &[&str] = &["eval", "raw-html"];
 
 /// Gate for the second pass: lint the before-edit content only when the
 /// toggle is on and at least one blocking violation could actually demote.

@@ -153,8 +153,14 @@ fn keeps_all_when_project_root_is_unresolved() {
 // accurate. The trailing set assert forces a table entry per enrolled rule.
 #[test]
 fn allowlisted_rules_report_every_occurrence() {
-    const TWO_OCCURRENCE_FIRES: &[(&str, &str, &str)] =
-        &[("eval", "/src/app.ts", "eval(alpha);\neval(beta);\n")];
+    const TWO_OCCURRENCE_FIRES: &[(&str, &str, &str)] = &[
+        ("eval", "/src/app.ts", "eval(alpha);\neval(beta);\n"),
+        (
+            "raw-html",
+            "/src/app.ts",
+            "const a = `<div>${alpha}</div>`;\nconst b = `<span>${beta}</span>`;\n",
+        ),
+    ];
 
     let mut config = Config::default();
     config.rules.oxlint = false;
