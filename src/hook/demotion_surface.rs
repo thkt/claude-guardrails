@@ -33,9 +33,12 @@ use crate::rules::{Violation, RE_JS_FILE};
 //
 // The demotion budget is keyed on trimmed line text, so enrollment assumes
 // text identity equals violation identity for a rule: the same line means the
-// same severity wherever it sits. eval (a flat substring match) satisfies that.
-// A future context-dependent rule (same text, severity varying by surrounding
-// scope) would break the assumption and needs its own before/after pinning
+// same severity wherever it sits. eval (a flat substring match) satisfies that,
+// as do raw-html's single-line branches (concat / template / inline-join).
+// raw-html's bind+join branch is context-dependent (a join line violates only
+// near an HTML-array bind), so its pinning is the raw-html swap fixture, which
+// uses the join form; the budget cap keeps the mismatch on the over-blocking
+// side. A future context-dependent rule needs the same before/after pinning
 // before it joins DEMOTABLE_RULES.
 const SCENARIOS: &[&str] = &["preserved", "added", "surplus-copy", "swap", "replaced"];
 
