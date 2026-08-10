@@ -2,8 +2,8 @@ use super::{ascii_fold_underscore_contains, unwrap_parenthesized, SecurityVisito
 use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
-    Expression, LogicalExpression, LogicalOperator, ObjectPropertyKind, ReturnStatement,
-    StaticMemberExpression,
+    ArrowFunctionExpression, Expression, LogicalExpression, LogicalOperator, ObjectPropertyKind,
+    ReturnStatement, StaticMemberExpression,
 };
 
 // SECRET_KEY / SESSION_SECRET 等は SECRET の substring match で網羅される。
@@ -110,6 +110,19 @@ impl SecurityVisitor<'_> {
             return;
         };
         self.check_ssr_secret_object(arg);
+    }
+
+    /// The other half of the rule: a concise arrow body (`() => ({ props })`)
+    /// returns its expression without a `ReturnStatement`, so the return-side
+    /// check above never sees it.
+    pub(super) fn check_ssr_secret_bleed_concise_arrow(&mut self, arrow: &ArrowFunctionExpression) {
+        if !self.in_direct_ssr_target {
+            return;
+        }
+        let Some(returned) = arrow.get_expression() else {
+            return;
+        };
+        self.check_ssr_secret_object(returned);
     }
 
     /// Walk an SSR return value: for each direct property of an `ObjectExpression`,

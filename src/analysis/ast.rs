@@ -93,6 +93,9 @@ impl<'a, 'b> CallbackBody<'a, 'b> {
     }
 
     /// A concise body always evaluates its expression, so it is never empty.
+    /// A directive-only block (`() => { 'use strict'; }`) counts as non-empty,
+    /// unlike `FunctionBody::is_empty` — it is not the placeholder form callers
+    /// exempt.
     pub fn is_empty(self) -> bool {
         matches!(self, Self::Block(body) if body.statements.is_empty())
     }

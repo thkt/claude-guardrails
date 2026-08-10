@@ -369,13 +369,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
             self.in_direct_ssr_target = false;
         }
         self.function_depth += 1;
-        // A concise body (`() => ({ secret })`) returns its expression directly,
-        // which is the only arrow form that can be an SSR payload literal.
-        if self.in_direct_ssr_target {
-            if let Some(returned) = arrow.get_expression() {
-                self.check_ssr_secret_object(returned);
-            }
-        }
+        self.check_ssr_secret_bleed_concise_arrow(arrow);
         walk::walk_arrow_function_expression(self, arrow);
         self.function_depth -= 1;
         self.in_direct_ssr_target = prev_target;
