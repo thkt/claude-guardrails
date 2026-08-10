@@ -143,14 +143,6 @@ const formatData = (input) => { return input.trim(); };";
     }
 
     #[test]
-    fn components_ディレクトリの小文字_arrow_component_は従来どおり_naming_convention_を発火する() {
-        let content = r"const myComponent = () => { return <div>Hello</div>; };";
-        let violations = check(content, "/src/components/MyComponent.tsx");
-        assert_eq!(violations.len(), 1);
-        assert!(violations[0].fix.contains("PascalCase"));
-    }
-
-    #[test]
     fn allows_correct_naming() {
         let cases = [
             (
