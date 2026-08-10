@@ -823,6 +823,26 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
     );
 }
 
+// T-425: hook 呼び出しと非 hook helper が同居する hooks ファイルは naming-convention を発火させない
+#[test]
+fn hook_呼び出しと非_hook_helper_が同居する_hooks_ファイルは_naming_convention_を発火させない() {
+    assert_rule_silent(
+        "naming-convention",
+        "/src/hooks/useFetch.ts",
+        "const useFetch = () => {\n  const [data] = useState(null);\n  return data;\n};\nconst formatData = (input) => {\n  return input.trim();\n};\n",
+    );
+}
+
+// T-426: 小文字 interface は naming-convention を発火する
+#[test]
+fn 小文字_interface_は_naming_convention_を発火する() {
+    assert_rule_fires(
+        "naming-convention",
+        "/src/hooks/types.ts",
+        "interface user { name: string; }",
+    );
+}
+
 // T-080: oxlint/eslint(no-new-func) fires on `new Function(...)` (DEFAULT_DENY_RULES wired end-to-end)
 #[test]
 fn oxlint_no_new_func_fires_on_new_function_ctor() {
