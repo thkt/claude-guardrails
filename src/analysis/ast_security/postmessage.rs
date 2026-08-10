@@ -3,8 +3,8 @@ use crate::analysis::ast;
 use crate::rules::{rule_id, Severity};
 use oxc_ast::ast::{
     Argument, AssignmentExpression, AssignmentTarget, AssignmentTargetProperty, BindingPattern,
-    CallExpression, ComputedMemberExpression, Expression, FormalParameters, FunctionBody, Program,
-    Statement, StaticMemberExpression, VariableDeclarator,
+    CallExpression, ComputedMemberExpression, Expression, FormalParameters, Program, Statement,
+    StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::Scoping;
@@ -59,7 +59,7 @@ impl SecurityVisitor<'_> {
         let Some(handler) = message_assignment_handler(expr) else {
             return;
         };
-        let Some((params, body)) = handler_signature_from_expression(handler) else {
+        let Some((params, body)) = ast::callable_signature(handler) else {
             return;
         };
         let Some(first_param) = params.items.first() else {
@@ -148,7 +148,7 @@ fn message_assignment_handler<'a, 'b>(
 /// object-pattern handler や handler の無いファイルでは構築を skip する。
 ///
 /// 検出は `message_listener_handler` / `message_assignment_handler` /
-/// `handler_signature_*` を消費側と共有する。仮に乖離して under-detect しても
+/// `handler_signature_from_argument` を消費側と共有する。仮に乖離して under-detect しても
 /// `scoping == None` → `handler_validates_origin` が false → violation が発火する
 /// (安全な over-fire であり、抑制された finding にはならない)。
 pub(super) fn requires_semantic(program: &Program) -> bool {
@@ -164,7 +164,7 @@ struct IdentifierHandlerFinder {
 impl IdentifierHandlerFinder {
     /// handler の第1引数が `BindingIdentifier` (= scoping を読む唯一の形) なら
     /// `found` を立てる。object/array pattern や引数なしは scoping 不要。
-    fn note_handler(&mut self, sig: Option<(&FormalParameters, &FunctionBody)>) {
+    fn note_handler(&mut self, sig: Option<(&FormalParameters, ast::CallbackBody)>) {
         if let Some((params, _)) = sig {
             if matches!(
                 params.items.first().map(|p| &p.pattern),
@@ -207,7 +207,7 @@ impl<'a> Visit<'a> for IdentifierHandlerFinder {
             return;
         }
         if let Some(handler) = message_assignment_handler(expr) {
-            self.note_handler(handler_signature_from_expression(handler));
+            self.note_handler(ast::callable_signature(handler));
             if self.found {
                 return;
             }
@@ -221,7 +221,7 @@ impl<'a> Visit<'a> for IdentifierHandlerFinder {
 /// その他 (`ArrayPattern`, rest 等) は経路なし扱いで保守的に fire。
 fn handler_validates_origin<'a>(
     pat: &BindingPattern<'a>,
-    body: &FunctionBody<'a>,
+    body: ast::CallbackBody<'a, '_>,
     scoping: Option<&Scoping>,
 ) -> bool {
     if let BindingPattern::BindingIdentifier(ident) = pat {
@@ -238,37 +238,19 @@ fn handler_validates_origin<'a>(
     OriginReferenceFinder::pattern_destructures_origin(pat)
 }
 
+/// A spread argument (`addEventListener('message', ...handlers)`) is the only
+/// `Argument` that is not an expression, and it carries no signature to read.
 fn handler_signature_from_argument<'a, 'b>(
     arg: &'b Argument<'a>,
-) -> Option<(&'b FormalParameters<'a>, &'b FunctionBody<'a>)> {
-    match arg {
-        Argument::ArrowFunctionExpression(arrow) => Some((&arrow.params, arrow.body.as_ref())),
-        Argument::FunctionExpression(func) => {
-            let body = func.body.as_deref()?;
-            Some((&func.params, body))
-        }
-        _ => None,
-    }
-}
-
-fn handler_signature_from_expression<'a, 'b>(
-    expr: &'b Expression<'a>,
-) -> Option<(&'b FormalParameters<'a>, &'b FunctionBody<'a>)> {
-    match expr {
-        Expression::ArrowFunctionExpression(arrow) => Some((&arrow.params, arrow.body.as_ref())),
-        Expression::FunctionExpression(func) => {
-            let body = func.body.as_deref()?;
-            Some((&func.params, body))
-        }
-        _ => None,
-    }
+) -> Option<(&'b FormalParameters<'a>, ast::CallbackBody<'a, 'b>)> {
+    ast::callable_signature(arg.as_expression()?)
 }
 
 /// `event.origin` / `event["origin"]` / `const { origin } = event` /
 /// `({ origin } = event)` のいずれかの形で param binding が `origin` プロパティへ
 /// 触っているかを callback body 内で走査する。
 fn has_origin_reference(
-    body: &FunctionBody<'_>,
+    body: ast::CallbackBody<'_, '_>,
     param_symbol_id: SymbolId,
     scoping: &Scoping,
 ) -> bool {
@@ -278,7 +260,7 @@ fn has_origin_reference(
         found: false,
         clobbered: false,
     };
-    finder.visit_function_body(body);
+    body.visit_with(&mut finder);
     finder.found
 }
 

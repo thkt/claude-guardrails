@@ -8,7 +8,7 @@ use crate::rules::{
 use oxc_ast::ast::{
     ArrowFunctionExpression, AssignmentExpression, BinaryExpression, BindingPattern,
     CallExpression, Expression, Function, LogicalExpression, MethodDefinition, ObjectProperty,
-    Program, RegExpLiteral, ReturnStatement, Statement, StaticMemberExpression, VariableDeclarator,
+    Program, RegExpLiteral, ReturnStatement, StaticMemberExpression, VariableDeclarator,
 };
 use oxc_ast_visit::{walk, Visit};
 use oxc_semantic::{Scoping, SemanticBuilder};
@@ -369,11 +369,7 @@ impl<'a> Visit<'a> for SecurityVisitor<'_> {
             self.in_direct_ssr_target = false;
         }
         self.function_depth += 1;
-        if self.in_direct_ssr_target && arrow.expression {
-            if let Some(Statement::ExpressionStatement(expr_stmt)) = arrow.body.statements.first() {
-                self.check_ssr_secret_object(&expr_stmt.expression);
-            }
-        }
+        self.check_ssr_secret_bleed_concise_arrow(arrow);
         walk::walk_arrow_function_expression(self, arrow);
         self.function_depth -= 1;
         self.in_direct_ssr_target = prev_target;
