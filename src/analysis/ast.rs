@@ -1,8 +1,9 @@
 use crate::analysis::scanner;
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{Expression, Program};
+use oxc_ast::ast::{ArrowFunctionExpression, Expression, FunctionBody, Program};
+use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
-use oxc_span::{SourceType, Span};
+use oxc_span::{GetSpan, SourceType, Span};
 
 /// Returns None on unsupported file type or parser panic (fail-open).
 pub fn with_parsed_program<R>(
@@ -62,6 +63,49 @@ pub fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, 
             static_key(&cme.expression).map(|name| (&cme.object, name))
         }
         _ => None,
+    }
+}
+
+/// A callback body in both of its arrow forms: the block `(e) => { ... }` and
+/// the concise `(e) => expr`. oxc 0.144 stores a concise body as an `Expression`
+/// variant of `ArrowFunctionBody`, where earlier versions wrapped it in a
+/// `FunctionBody` holding one `ExpressionStatement`. A caller that reads only
+/// `FunctionBody` therefore stops seeing concise callbacks; going through this
+/// type keeps both forms inspected.
+#[derive(Clone, Copy)]
+pub enum CallbackBody<'a, 'b> {
+    Block(&'b FunctionBody<'a>),
+    Concise(&'b Expression<'a>),
+}
+
+impl<'a, 'b> CallbackBody<'a, 'b> {
+    /// `None` when the arrow body is neither form, which a parsed arrow function
+    /// never is — the caller propagates it rather than panicking.
+    pub fn from_arrow(arrow: &'b ArrowFunctionExpression<'a>) -> Option<Self> {
+        match arrow.body.as_function_body() {
+            Some(body) => Some(Self::Block(body)),
+            None => arrow.body.as_expression().map(Self::Concise),
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Block(body) => body.span,
+            Self::Concise(expr) => expr.span(),
+        }
+    }
+
+    /// True for a body carrying no statement (an empty or comment-only block).
+    /// A concise body always evaluates its expression, so it is never empty.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Block(body) if body.statements.is_empty())
+    }
+
+    pub fn visit_with<V: Visit<'a>>(&self, visitor: &mut V) {
+        match self {
+            Self::Block(body) => visitor.visit_function_body(body),
+            Self::Concise(expr) => visitor.visit_expression(expr),
+        }
     }
 }
 

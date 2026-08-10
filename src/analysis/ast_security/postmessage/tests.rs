@@ -53,6 +53,29 @@ fn postmessage_origin_missing_fires_with_alternative_param_name() {
     assert_postmessage_fires("window.addEventListener('message', (msg) => { handle(msg.data); });");
 }
 
+// A concise arrow handler (`(e) => handle(e.data)`) carries no block body, so a
+// scan that only reads block bodies finds no `event.origin` reference in either
+// direction: the guarded form would fire and the unguarded one would fire for
+// the wrong reason.
+#[test]
+fn postmessage_origin_missing_fires_on_concise_arrow_handler() {
+    assert_postmessage_fires("window.addEventListener('message', (event) => handle(event.data));");
+}
+
+#[test]
+fn postmessage_origin_missing_silent_on_concise_arrow_origin_guard() {
+    assert_postmessage_silent(
+        "window.addEventListener('message', (event) => event.origin === 'https://x.example' && handle(event.data));",
+    );
+}
+
+#[test]
+fn postmessage_origin_missing_silent_on_concise_arrow_onmessage_origin_guard() {
+    assert_postmessage_silent(
+        "window.onmessage = (event) => event.origin === 'https://x.example' && handle(event.data);",
+    );
+}
+
 #[test]
 fn postmessage_origin_missing_silent_on_origin_guard() {
     assert_postmessage_silent(
