@@ -1,6 +1,5 @@
 use super::{rule_id, Severity, Violation, RE_TEST_FILE};
 use crate::analysis::ast;
-use crate::analysis::ast::CallbackBody;
 use crate::regex_compile::regex_or_die;
 use oxc_ast::ast::{CallExpression, Expression, Program};
 use oxc_ast_visit::{walk, Visit};
@@ -107,7 +106,7 @@ impl TestAssertionVisitor<'_> {
         if body.is_empty() {
             return;
         }
-        let Some((severity, fix)) = self.classify(name, &body) else {
+        let Some((severity, fix)) = self.classify(name, body) else {
             return;
         };
         self.violations.push(Violation {
@@ -124,7 +123,7 @@ impl TestAssertionVisitor<'_> {
     /// zero-assertion case keeps the original Medium finding; the three quality
     /// classes (tautological / mock-only / weak) layer only onto `expect()`
     /// chains, so a strong `assert.`/`should.` body is never downgraded.
-    fn classify(&self, name: &str, body: &CallbackBody) -> Option<(Severity, String)> {
+    fn classify(&self, name: &str, body: ast::CallbackBody) -> Option<(Severity, String)> {
         // The slice is lexical, so an assertion inside a nested `it`/`test`
         // callback also counts toward the outer test (the visitor still grades
         // the nested one on its own). Accepted: nested test definitions are
@@ -288,21 +287,16 @@ fn callee_root_is_test(callee: &Expression) -> bool {
 /// Pulls the test name (first string-literal arg) and the callback body (first
 /// arrow- or function-expression arg) out of a test call. Returns None when no
 /// callback is present (e.g. `it.todo('pending')`), so name-only calls never fire.
-fn extract_test<'b>(call: &'b CallExpression<'b>) -> Option<(&'b str, CallbackBody<'b, 'b>)> {
+fn extract_test<'b>(call: &'b CallExpression<'b>) -> Option<(&'b str, ast::CallbackBody<'b, 'b>)> {
     let mut name = "unknown";
-    let mut body: Option<CallbackBody> = None;
+    let mut body = None;
     for arg in &call.arguments {
         let Some(expr) = arg.as_expression() else {
             continue;
         };
         match expr {
             Expression::StringLiteral(s) if name == "unknown" => name = s.value.as_str(),
-            Expression::ArrowFunctionExpression(a) if body.is_none() => {
-                body = CallbackBody::from_arrow(a);
-            }
-            Expression::FunctionExpression(f) if body.is_none() => {
-                body = f.body.as_deref().map(CallbackBody::Block);
-            }
+            _ if body.is_none() => body = ast::callable_signature(expr).map(|(_, b)| b),
             _ => {}
         }
     }
@@ -351,9 +345,8 @@ mod tests {
         assert!(check(content).is_empty());
     }
 
-    // A concise arrow callback (`() => expect(...)`) holds its assertion in an
-    // expression instead of a statement list, so a body reader that only walks
-    // block bodies grades every concise test as assertion-free.
+    // A concise arrow callback holds its assertion in an expression, not in a
+    // statement list: the three cases below fail if only block bodies are read.
     #[test]
     fn allows_concise_arrow_test_with_expect() {
         assert!(
@@ -368,8 +361,6 @@ mod tests {
         assert!(violations[0].fix.contains("should do something"));
     }
 
-    // A concise body always evaluates its expression, so the weak-matcher grade
-    // applies there as it does to a block body.
     #[test]
     fn grades_concise_arrow_test_with_weak_matcher() {
         let violations = check("it('should return a value', () => expect(run()).toBeDefined());");

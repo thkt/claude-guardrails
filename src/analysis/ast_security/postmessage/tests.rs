@@ -53,10 +53,8 @@ fn postmessage_origin_missing_fires_with_alternative_param_name() {
     assert_postmessage_fires("window.addEventListener('message', (msg) => { handle(msg.data); });");
 }
 
-// A concise arrow handler (`(e) => handle(e.data)`) carries no block body, so a
-// scan that only reads block bodies finds no `event.origin` reference in either
-// direction: the guarded form would fire and the unguarded one would fire for
-// the wrong reason.
+// A concise arrow handler carries no block body. The three cases below fail if
+// only block bodies are scanned for `event.origin`.
 #[test]
 fn postmessage_origin_missing_fires_on_concise_arrow_handler() {
     assert_postmessage_fires("window.addEventListener('message', (event) => handle(event.data));");

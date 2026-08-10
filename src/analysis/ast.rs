@@ -1,6 +1,6 @@
 use crate::analysis::scanner;
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{ArrowFunctionExpression, Expression, FunctionBody, Program};
+use oxc_ast::ast::{ArrowFunctionExpression, Expression, FormalParameters, FunctionBody, Program};
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
@@ -67,11 +67,8 @@ pub fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, 
 }
 
 /// A callback body in both of its arrow forms: the block `(e) => { ... }` and
-/// the concise `(e) => expr`. oxc 0.144 stores a concise body as an `Expression`
-/// variant of `ArrowFunctionBody`, where earlier versions wrapped it in a
-/// `FunctionBody` holding one `ExpressionStatement`. A caller that reads only
-/// `FunctionBody` therefore stops seeing concise callbacks; going through this
-/// type keeps both forms inspected.
+/// the concise `(e) => expr`. A caller that reads only `FunctionBody` stops
+/// seeing concise callbacks; going through this type keeps both inspected.
 #[derive(Clone, Copy)]
 pub enum CallbackBody<'a, 'b> {
     Block(&'b FunctionBody<'a>),
@@ -88,24 +85,40 @@ impl<'a, 'b> CallbackBody<'a, 'b> {
         }
     }
 
-    pub fn span(&self) -> Span {
+    pub fn span(self) -> Span {
         match self {
             Self::Block(body) => body.span,
             Self::Concise(expr) => expr.span(),
         }
     }
 
-    /// True for a body carrying no statement (an empty or comment-only block).
     /// A concise body always evaluates its expression, so it is never empty.
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(self) -> bool {
         matches!(self, Self::Block(body) if body.statements.is_empty())
     }
 
-    pub fn visit_with<V: Visit<'a>>(&self, visitor: &mut V) {
+    pub fn visit_with<V: Visit<'a>>(self, visitor: &mut V) {
         match self {
             Self::Block(body) => visitor.visit_function_body(body),
             Self::Concise(expr) => visitor.visit_expression(expr),
         }
+    }
+}
+
+/// The parameter list and body of an inline callback, whether written as an
+/// arrow or a `function` expression. Returns `None` for any other expression,
+/// and for a body-less `function` form such as a TypeScript ambient declaration.
+pub fn callable_signature<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> Option<(&'b FormalParameters<'a>, CallbackBody<'a, 'b>)> {
+    match expr {
+        Expression::ArrowFunctionExpression(arrow) => {
+            Some((&arrow.params, CallbackBody::from_arrow(arrow)?))
+        }
+        Expression::FunctionExpression(func) => {
+            Some((&func.params, CallbackBody::Block(func.body.as_deref()?)))
+        }
+        _ => None,
     }
 }
 
