@@ -287,10 +287,10 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
         rule_id: Some(rule_id::NAMING_CONVENTION),
         severity: "Mixed",
         description: r"Naming conventions (components, interfaces, types)",
-        why: r"Inconsistent PascalCase naming for components, interfaces, and types defeats code search and the pattern recognition that picks them out",
+        why: r"Inconsistent PascalCase defeats code search and the pattern recognition that picks these out",
         when_to_disable: Some("Different naming conventions in team/project"),
         description_ja: r"命名規則（コンポーネント、interface、型）",
-        why_ja: r"コンポーネント・interface・型で PascalCase が一貫しないと code search と、それらを識別するパターン認識を破壊する",
+        why_ja: r"PascalCase が一貫しないと code search と、それらを識別するパターン認識を破壊する",
         when_to_disable_ja: Some("チーム/プロジェクトで異なる命名規則がある場合"),
     },
     RuleDoc {

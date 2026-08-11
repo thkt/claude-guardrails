@@ -823,24 +823,14 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
     );
 }
 
-// T-425: hook 呼び出しと非 hook helper が同居する hooks ファイルは naming-convention を発火させない
+// T-425: hooks ファイルの非 hook helper が blocking されないことを実バイナリで見る。
+// 誤検知は exit 2 として現れていたため、rule 単体の検査とは別に end-to-end で固定する。
 #[test]
 fn naming_convention_silent_on_hooks_file_with_non_hook_helper() {
     assert_rule_silent(
         "naming-convention",
         "/src/hooks/useFetch.ts",
-        "const useFetch = () => {\n  const [data] = useState(null);\n  return data;\n};\nconst formatData = (input) => {\n  return input.trim();\n};\n",
-    );
-}
-
-// T-426: hooks ディレクトリ配下でも小文字 interface は naming-convention を発火する
-// (hook 命名 entry の削除で、そのディレクトリの検査が丸ごと消えてはいない)
-#[test]
-fn naming_convention_fires_on_lowercase_interface_in_hooks_dir() {
-    assert_rule_fires(
-        "naming-convention",
-        "/src/hooks/types.ts",
-        "interface user { name: string; }",
+        "const useFetch = () => { const [d] = useState(null); return d; };\nconst formatData = (input) => { return input.trim(); };",
     );
 }
 

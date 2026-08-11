@@ -31,6 +31,9 @@ static RE_LOWERCASE_INTERFACE: LazyLock<Regex> =
 static RE_LOWERCASE_TYPE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_LOWERCASE_TYPE", r"type\s+[a-z][a-zA-Z]*\s*="));
 
+// hooks ファイル内の関数名は検査しない (#422)。hook かどうかは呼び出す先で決まり、
+// 行単位の regex では判定できないため、entry ごと削除した。この rule に High tier
+// は残っておらず、default の block_threshold では blocking を出さない。
 static NAMING_ISSUES: LazyLock<[NamingIssue; 3]> = LazyLock::new(|| {
     [
         NamingIssue {
@@ -121,30 +124,19 @@ mod tests {
         assert!(violations[0].fix.contains("type"));
     }
 
-    // T-422 (#422): hook を呼ばない helper は、同じファイルに hook があっても
-    // リネーム対象にならない。旧 entry は名前を行単位、hook 利用をファイル単位で
-    // 見ていたため、この helper に useXxx への改名を指示していた。
+    // T-422 (#422): 旧 entry はこの helper に useXxx への改名を指示していた。
     #[test]
     fn allows_non_hook_helper_beside_hook_in_hooks_file() {
         let content = r"const useFetch = () => { const [d] = useState(null); return d; };
 const formatData = (input) => { return input.trim(); };";
-        let violations = check(content, "/src/hooks/useFetch.ts");
-        assert!(
-            violations.is_empty(),
-            "expected no violations, got {violations:?}"
-        );
+        assert!(check(content, "/src/hooks/useFetch.ts").is_empty());
     }
 
-    // T-423 (#422): hook を呼ぶ関数も名前で咎めない。この向きの検出は oxlint への
-    // 委譲とセットで判断するため、今は hooks ファイルの命名検査を持たない。
+    // T-423 (#422): この向きの検出は oxlint への委譲とセットで判断する。
     #[test]
     fn allows_any_name_for_hook_calling_function_in_hooks_file() {
         let content = r"const fetchData = () => { const [d] = useState(null); return d; };";
-        let violations = check(content, "/src/hooks/useFetch.ts");
-        assert!(
-            violations.is_empty(),
-            "expected no violations, got {violations:?}"
-        );
+        assert!(check(content, "/src/hooks/useFetch.ts").is_empty());
     }
 
     #[test]
@@ -153,10 +145,6 @@ const formatData = (input) => { return input.trim(); };";
             (
                 "const MyComponent = () => { return <div/>; };",
                 "/src/components/MyComponent.tsx",
-            ),
-            (
-                "const useFetch = () => { const [d] = useState(); return d; };",
-                "/src/hooks/useFetch.ts",
             ),
             ("interface User { name: string; }", "/src/types.ts"),
             ("type UserRole = 'admin' | 'user';", "/src/types.ts"),
