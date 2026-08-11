@@ -823,6 +823,17 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
     );
 }
 
+// T-425: hooks ファイルの非 hook helper が blocking されないことを実バイナリで見る。
+// 誤検知は exit 2 として現れていたため、rule 単体の検査とは別に end-to-end で固定する。
+#[test]
+fn naming_convention_silent_on_hooks_file_with_non_hook_helper() {
+    assert_rule_silent(
+        "naming-convention",
+        "/src/hooks/useFetch.ts",
+        "const useFetch = () => { const [d] = useState(null); return d; };\nconst formatData = (input) => { return input.trim(); };",
+    );
+}
+
 // T-080: oxlint/eslint(no-new-func) fires on `new Function(...)` (DEFAULT_DENY_RULES wired end-to-end)
 #[test]
 fn oxlint_no_new_func_fires_on_new_function_ctor() {

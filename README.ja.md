@@ -171,7 +171,7 @@ guardrailsはAIコード生成で重要な以下のルールを `--deny` で有�
 | `flakyTest` | Low | テスト内の setTimeout、Math.random | 時刻と RNG で失敗が非決定的になり、原因究明より retry が選ばれて CI シグナルが劣化する | 意図的なタイミング/ランダムネスのテスト |
 | `generatedFile` | High | \*.generated.\*、\*.g.ts の編集を警告 | 手編集は次回生成で上書きされ、修正が消える | コード生成のないプロジェクト |
 | `testLocation` | Medium | src/ ディレクトリ内のテストファイル | `src/` 配下のテストは build 除外漏れで本番バンドルに混入する | コロケーションテスト戦略（ソースと同じ場所） |
-| `naming` | Mixed | 命名規則（hooks、コンポーネント、型） | 一貫性のない命名は code search と、hook / component を識別するパターン認識を破壊する | チーム/プロジェクトで異なる命名規則がある場合 |
+| `naming` | Mixed | 命名規則。コンポーネントは Medium、interface と型は Low なので、default の閾値ではこの rule は編集を止めない | PascalCase が一貫しないと code search と、それらを識別するパターン認識を破壊する | チーム/プロジェクトで異なる命名規則がある場合 |
 | `noUseEffect` | Medium | .tsx/.jsx内のuseEffectを検出し代替案を提示 | 派生 state に対する `useEffect` は余分な再 render を生み、依存配列が stale-data の罠になる | useEffectを意図的に使用するプロジェクト |
 | `serviceWorker` | Medium | ルートスコープ（`{ scope: '/' }`）での Service Worker 登録。特定パスへのスコープ絞り込みを提案 | ルートスコープはオリジンの全 navigation を傍受するので、一度の誤登録でサイト全体を乗っ取られる | サイト全体に worker を意図的に配信するプロジェクト |
 | `jwtClient` | Medium | クライアント側 JWT デコード（`jwtDecode`、`jwt_decode`、`atob(token.split('.'))`）。サーバー側 `jwtVerify` を推奨 | JWT payload は base64url で読めるが、署名検証なしには改竄も通る。クライアントで信用すると認可回避になる | サーバー専用 JWT デコード経路（Node 専用ファイル等） |
