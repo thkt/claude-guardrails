@@ -115,6 +115,38 @@ fn json_mode_warning_only_keeps_allow_decision() {
     );
 }
 
+// T-427 (#422): naming-convention は hook 命名 entry を失って High tier を持たない。
+// 発火しても decision は allow に留まる。severity は violation 単位でしか出ないため、
+// blocking するかどうかは envelope の decision でしか固定できない。
+#[test]
+fn json_mode_naming_convention_stays_allow() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/types.ts",
+            "content": "interface user { name: string; }\n"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    let violations = parsed["data"]["violations"]
+        .as_array()
+        .expect("violations array");
+    assert!(
+        violations.iter().any(|v| v["rule"] == "naming-convention"),
+        "expected naming-convention to fire for a lowercase interface: {parsed}"
+    );
+    assert_eq!(parsed["data"]["decision"], "allow");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "advisory only, so the edit is not stopped: {parsed}"
+    );
+}
+
 #[test]
 fn json_mode_unsupported_tool_emits_allow() {
     let json = serde_json::json!({
