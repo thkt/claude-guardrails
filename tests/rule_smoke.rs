@@ -843,3 +843,87 @@ fn oxlint_no_new_func_fires_on_new_function_ctor() {
         "const fn = new Function('return 1');",
     );
 }
+
+// #424 の seam。`--react-plugin` の gate は編集対象の最寄り package.json を読むので、
+// file_path が実在するディレクトリを指していないと開かない。テンポラリに package.json
+// を書き、その配下を指す path で hook を叩く。
+const RULES_OF_HOOKS: &str = "oxlint/eslint-plugin-react-hooks(rules-of-hooks)";
+const REACT_MANIFEST: &str = r#"{"dependencies": {"react": "^19.0.0"}}"#;
+const VUE_MANIFEST: &str = r#"{"dependencies": {"vue": "^3.5.0"}}"#;
+
+fn in_project(manifest: &str) -> (tempfile::TempDir, String) {
+    let root = tempfile::TempDir::new().unwrap();
+    std::fs::write(root.path().join("package.json"), manifest).unwrap();
+    let file_path = root
+        .path()
+        .join("src/hooks/useFetch.ts")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    (root, file_path)
+}
+
+// T-439
+#[test]
+fn rules_of_hooks_fires_on_arrow_function_calling_use_state_in_react_project() {
+    let (_root, path) = in_project(REACT_MANIFEST);
+    assert_rule_fires(
+        RULES_OF_HOOKS,
+        &path,
+        "import { useState } from 'react';\nexport const fetchData = () => { const [d] = useState(0); return d; };",
+    );
+}
+
+// T-440
+#[test]
+fn rules_of_hooks_fires_on_function_declaration_calling_use_state_in_react_project() {
+    let (_root, path) = in_project(REACT_MANIFEST);
+    assert_rule_fires(
+        RULES_OF_HOOKS,
+        &path,
+        "import { useState } from 'react';\nexport function fetchData() { const [d] = useState(null); return d; }",
+    );
+}
+
+// T-441
+#[test]
+fn rules_of_hooks_fires_on_arrow_function_returning_object_holding_use_state_in_react_project() {
+    let (_root, path) = in_project(REACT_MANIFEST);
+    assert_rule_fires(
+        RULES_OF_HOOKS,
+        &path,
+        "import { useState } from 'react';\nexport const fetchData = () => ({ d: useState(null) });",
+    );
+}
+
+// T-442: Vue/Nuxt の composable は .ts に住むので、拡張子では切り分けられない。
+#[test]
+fn rules_of_hooks_silent_on_same_code_in_project_without_react_dependency() {
+    let (_root, path) = in_project(VUE_MANIFEST);
+    assert_rule_silent(
+        RULES_OF_HOOKS,
+        &path,
+        "import { useState } from 'react';\nexport const fetchData = () => { const [d] = useState(0); return d; };",
+    );
+}
+
+// T-443: 未知フラグを渡すと oxlint は exit 1 で JSON を出さず、rules-of-hooks
+// だけでなく既存の oxlint 診断も全て消える。同一 content・同一 invocation で
+// 両方を assert することだけがこの経路を捕まえる。
+#[test]
+fn reports_both_rules_of_hooks_and_no_console_for_one_react_project_file() {
+    let (_root, path) = in_project(REACT_MANIFEST);
+    let content = "import { useState } from 'react';\nexport const fetchData = () => { const [d] = useState(0); console.log(d); return d; };";
+    let output = run_guardrails_json(hook_input(&path, content).as_bytes());
+    let envelope = parse_envelope(&output);
+    // no-console を先に見る。フラグ拒否は全診断を消すので、先に落ちたほうが
+    // 「既存の診断まで消えた」という失敗の形を直接示す。
+    for rule in ["oxlint/eslint(no-console)", RULES_OF_HOOKS] {
+        assert!(
+            !violations_for_rule(&envelope, rule).is_empty(),
+            "expected {rule} in the same run that enables the react plugin; \
+             an oxlint that rejects the flag exits 1 and drops every diagnostic. \
+             envelope: {envelope}"
+        );
+    }
+}
