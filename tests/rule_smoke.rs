@@ -825,7 +825,7 @@ fn postmessage_origin_missing_silent_on_origin_guarded_listener() {
 
 // T-425: hook 呼び出しと非 hook helper が同居する hooks ファイルは naming-convention を発火させない
 #[test]
-fn hook_呼び出しと非_hook_helper_が同居する_hooks_ファイルは_naming_convention_を発火させない() {
+fn naming_convention_silent_on_hooks_file_with_non_hook_helper() {
     assert_rule_silent(
         "naming-convention",
         "/src/hooks/useFetch.ts",
@@ -833,9 +833,10 @@ fn hook_呼び出しと非_hook_helper_が同居する_hooks_ファイルは_nam
     );
 }
 
-// T-426: 小文字 interface は naming-convention を発火する
+// T-426: hooks ディレクトリ配下でも小文字 interface は naming-convention を発火する
+// (hook 命名 entry の削除で、そのディレクトリの検査が丸ごと消えてはいない)
 #[test]
-fn 小文字_interface_は_naming_convention_を発火する() {
+fn naming_convention_fires_on_lowercase_interface_in_hooks_dir() {
     assert_rule_fires(
         "naming-convention",
         "/src/hooks/types.ts",

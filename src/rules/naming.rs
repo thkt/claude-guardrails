@@ -121,8 +121,11 @@ mod tests {
         assert!(violations[0].fix.contains("type"));
     }
 
+    // T-422 (#422): hook を呼ばない helper は、同じファイルに hook があっても
+    // リネーム対象にならない。旧 entry は名前を行単位、hook 利用をファイル単位で
+    // 見ていたため、この helper に useXxx への改名を指示していた。
     #[test]
-    fn hook_を呼ばない_helper_が同居する_hooks_ファイルは_naming_convention_を発火させない() {
+    fn allows_non_hook_helper_beside_hook_in_hooks_file() {
         let content = r"const useFetch = () => { const [d] = useState(null); return d; };
 const formatData = (input) => { return input.trim(); };";
         let violations = check(content, "/src/hooks/useFetch.ts");
@@ -132,8 +135,10 @@ const formatData = (input) => { return input.trim(); };";
         );
     }
 
+    // T-423 (#422): hook を呼ぶ関数も名前で咎めない。この向きの検出は oxlint への
+    // 委譲とセットで判断するため、今は hooks ファイルの命名検査を持たない。
     #[test]
-    fn hooks_ファイル内の_hook_呼び出し関数は名前によらず_naming_convention_を発火させない() {
+    fn allows_any_name_for_hook_calling_function_in_hooks_file() {
         let content = r"const fetchData = () => { const [d] = useState(null); return d; };";
         let violations = check(content, "/src/hooks/useFetch.ts");
         assert!(
