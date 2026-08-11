@@ -139,8 +139,6 @@ const formatData = (input) => { return input.trim(); };";
         assert!(check(content, "/src/hooks/useFetch.ts").is_empty());
     }
 
-    // 3 / 4 件目は component entry の絞り込みを固定する。file_pattern を外すと
-    // 3 件目が、additional_check を外すと 4 件目が発火する。
     #[test]
     fn allows_correct_naming() {
         let cases = [
@@ -149,10 +147,12 @@ const formatData = (input) => { return input.trim(); };";
                 "/src/components/MyComponent.tsx",
             ),
             ("interface User { name: string; }", "/src/types.ts"),
+            // file_pattern を外すと発火する
             (
                 "const myComponent = () => { return <div/>; };",
                 "/src/pages/index.tsx",
             ),
+            // additional_check を外すと発火する
             (
                 "const helper = (x) => { return x + 1; };",
                 "/src/components/util.tsx",

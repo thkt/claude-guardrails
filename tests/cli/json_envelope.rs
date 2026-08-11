@@ -115,9 +115,8 @@ fn json_mode_warning_only_keeps_allow_decision() {
     );
 }
 
-// T-427 (#422): naming-convention は hook 命名 entry を失って High tier を持たない。
-// 発火しても decision は allow に留まる。severity は violation 単位でしか出ないため、
-// blocking するかどうかは envelope の decision でしか固定できない。
+// T-427 (#422): 編集を止めるかどうかは violation の severity ではなく envelope の
+// decision にしか現れないため、advisory に留まることはここでしか固定できない。
 #[test]
 fn json_mode_naming_convention_stays_allow() {
     let json = serde_json::json!({
