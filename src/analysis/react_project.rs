@@ -1,25 +1,27 @@
-//! React プロジェクト判定 (#424)。oxlint の `react/rules-of-hooks` は `.ts` に
-//! 住む Vue/Nuxt の composable を React Hook と誤認して blocking するため、
-//! plugin の有効化を「編集対象が react に依存する package に属するか」で絞る。
-//! oxc は `.vue` / `.svelte` を拡張子で除外するが、composable は `.ts` に住むので
-//! その除外は効かない。判定できないときは false を返し、検出を諦める側に倒す。
+//! React プロジェクト判定 (#424)。oxlint の `react/rules-of-hooks` は Vue/Nuxt の
+//! composable を React Hook と誤認して blocking するため、plugin の有効化を
+//! 「編集対象が react に依存する package に属するか」で絞る。oxc 側にも carve-out は
+//! あるが `.vue` / `.svelte` の拡張子判定で、composable が住む `.ts` には届かない。
+//!
+//! 判定できないときは false を返し、検出を諦める側に倒す。react を宣言していない
+//! package で誤って blocking するほうが、hook 命名の見逃しより害が大きい。
 
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
-/// 編集対象から遡る階層数の上限。`src/resolve/tests.rs` の bench が深さ 10 の
-/// 全 miss を最悪ケースとして測っており、同じ 10 を採る。上限に当たると false を
-/// 返すので、これより深いファイルは検出を諦める側に倒れる。
+/// 編集対象から遡る階層数の上限。monorepo の深い配置
+/// (`packages/<pkg>/src/features/<f>/components/hooks/x.ts`) でも package.json は
+/// 6 階層上にあり、10 はその上に余裕を置いた値。
 const MAX_ANCESTOR_DEPTH: usize = 10;
 
 /// react への依存を宣言しうる package.json のキー。workspace が react を root に
 /// hoist し leaf は peer 宣言だけ持つ構成を落とさないため peerDependencies も見る。
 const DEPENDENCY_KEYS: [&str; 3] = ["dependencies", "devDependencies", "peerDependencies"];
 
-/// 最寄りの package.json ただ 1 個で判定する。上位に react を宣言する package.json
-/// があっても、最寄りが宣言していなければ false。monorepo で Vue の package を
-/// 編集したとき、root の react 依存で gate が開くのを防ぐ。
+/// 上位に react を宣言する package.json があっても、最寄りが宣言していなければ
+/// false。monorepo で Vue の package を編集したとき、root の react 依存で gate が
+/// 開くのを防ぐ。
 pub(crate) fn is_react_project(file_path: &str) -> bool {
     Path::new(file_path)
         .ancestors()

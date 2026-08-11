@@ -844,13 +844,13 @@ fn oxlint_no_new_func_fires_on_new_function_ctor() {
     );
 }
 
-// #424 の seam。`--react-plugin` の gate は編集対象の最寄り package.json を読むので、
-// file_path が実在するディレクトリを指していないと開かない。テンポラリに package.json
-// を書き、その配下を指す path で hook を叩く。
 const RULES_OF_HOOKS: &str = "oxlint/eslint-plugin-react-hooks(rules-of-hooks)";
 const REACT_MANIFEST: &str = r#"{"dependencies": {"react": "^19.0.0"}}"#;
 const VUE_MANIFEST: &str = r#"{"dependencies": {"vue": "^3.5.0"}}"#;
 
+// #424 の seam 用。`--react-plugin` の gate は編集対象の最寄り package.json を読むため、
+// 他のスモークテストのような架空の path では開かない。返す `TempDir` は呼び出し側が
+// 束縛したまま保持すること。捨てるとディレクトリごと消え、gate が閉じて空振りする。
 fn in_project(manifest: &str) -> (tempfile::TempDir, String) {
     let root = tempfile::TempDir::new().unwrap();
     std::fs::write(root.path().join("package.json"), manifest).unwrap();

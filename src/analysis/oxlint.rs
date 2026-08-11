@@ -12,16 +12,15 @@ const DEFAULT_DENY_RULES: &[&str] = &[
     "typescript/no-non-null-assertion",
     "eslint/no-console",
     "eslint/no-new-func",
-    // hook 命名の検出はこの rule に委譲する (#424)。`--react-plugin` と両方が
-    // 揃って初めて発火し、片方だけでは診断ゼロになる。直書きの `--deny` ではなく
-    // このリストに置くのは、`config.allow` が `--allow` を出さずこのリストから
-    // 差し引くだけなので、直書きでは利用者に無効化手段が残らないため。
+    // hook 命名の検出先 (#424)。直書きの `--deny` ではなくこのリストに置くのは、
+    // `config.allow` が `--allow` を出さずここから差し引くだけで、直書きだと
+    // 利用者に無効化手段が残らないため。
     "react/rules-of-hooks",
 ];
 
-// react plugin が correctness として道連れに有効化する rule。実測で 671 files 中
-// 71 件の診断のうち 69 件をこの 1 本が占めるため抑止する。severity は warning
-// なので blocking はしないが、1 file 編集ごとの advisory 量を押し上げる。
+// react plugin が道連れに有効化する rule のうち、advisory の量が目立つもの。
+// severity は warning なので blocking はしないが、実測した 671 files の診断 71 件
+// のうち 69 件をこの 1 本が占めた。
 const REACT_RULES_SUPPRESSED: &[&str] = &["react/exhaustive-deps"];
 
 // oxlint default で発火するが guardrails の AST rule が同一 file:line を
@@ -35,14 +34,16 @@ const OXLINT_RULES_OWNED_BY_CUSTOM: &[&str] = &["eslint/no-eval"];
 const RULES_OF_HOOKS_CODE: &str = "eslint-plugin-react-hooks(rules-of-hooks)";
 
 // rules-of-hooks は `help` を持たず、message は arrow 形の関数を
-// `in function "Anonymous"` と呼ぶ。狙いの 3 形のうち 2 形が arrow なので、
-// そのまま流すと agent は存在しない Anonymous を改名しようとする。差し替え文は
-// 同じ message の末尾 2 文で、改名先の形だけを述べている部分。
-const RULES_OF_HOOKS_FIX: &str = "React component names must start with an uppercase letter. \
-     React Hook names must start with the word \"use\".";
+// `in function "Anonymous"` と呼ぶ。狙う 3 形のうち 2 形が arrow なので、そのまま
+// 流すと agent は存在しない Anonymous を改名しようとする。差し替え文は同じ
+// message の末尾 2 文で、改名先の形だけを述べている部分。
+const RULES_OF_HOOKS_FIX: &str = concat!(
+    "React component names must start with an uppercase letter. ",
+    "React Hook names must start with the word \"use\"."
+);
 
-// rules-of-hooks の labels[0] は hook の呼び出し行で、改名する宣言行ではない。
-// 宣言行はこのラベルが指す。
+// rules-of-hooks の宣言行を指すラベル。`labels[0]` は hook の呼び出し行で、
+// 改名する宣言行ではない。
 const OUTER_FUNCTION_LABEL: &str = "Outer function";
 
 #[derive(Debug, Deserialize)]
@@ -111,16 +112,17 @@ pub fn check(
     Some(convert_diagnostics(output, file_path))
 }
 
-fn build_args(config: &OxlintConfig, react_project: bool) -> Vec<String> {
+fn build_args(config: &OxlintConfig, enable_react_plugin: bool) -> Vec<String> {
     let mut args = vec!["--format".to_owned(), "json".to_owned()];
 
-    // react plugin は default off で、`--deny react/rules-of-hooks` だけでは
-    // 診断ゼロの無言通過になる。抑止は deny ループより「前」に置く。oxlint は
-    // rule 同士では last-wins なので、後ろに置くと利用者自身の
-    // `oxlint.deny` を上書きしてしまう。下の OXLINT_RULES_OWNED_BY_CUSTOM が
-    // deny の「後」なのは逆の意図 (利用者の deny に勝たせる) による。
-    if react_project {
+    // react plugin は default off。`--deny react/rules-of-hooks` だけを渡すと
+    // 診断ゼロの無言通過になるので、この flag と対で出す。
+    if enable_react_plugin {
         args.push("--react-plugin".to_owned());
+        // 抑止は deny ループより「前」。oxlint は rule 同士で last-wins なので、
+        // 後ろだと利用者自身の `oxlint.deny` を上書きしてしまう。下の
+        // OXLINT_RULES_OWNED_BY_CUSTOM が deny の「後」なのは、逆に利用者の deny
+        // に勝たせる意図による。
         for rule in REACT_RULES_SUPPRESSED {
             args.push("--allow".to_owned());
             args.push((*rule).to_owned());
@@ -158,15 +160,12 @@ fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> 
             let severity = Severity::from_linter_str(&d.severity);
             let is_rules_of_hooks = code == RULES_OF_HOOKS_CODE;
 
-            let line = if is_rules_of_hooks {
-                d.labels
-                    .iter()
-                    .find(|l| l.label.as_deref() == Some(OUTER_FUNCTION_LABEL))
-                    .or_else(|| d.labels.first())
-                    .map(|l| l.span.line)
-            } else {
-                d.labels.first().map(|l| l.span.line)
-            };
+            let line = d
+                .labels
+                .iter()
+                .find(|l| is_rules_of_hooks && l.label.as_deref() == Some(OUTER_FUNCTION_LABEL))
+                .or_else(|| d.labels.first())
+                .map(|l| l.span.line);
 
             let fix = if is_rules_of_hooks {
                 RULES_OF_HOOKS_FIX.to_owned()
@@ -309,24 +308,23 @@ mod tests {
     #[test]
     fn replaces_the_rules_of_hooks_fix_text_so_it_never_names_the_function_anonymous() {
         let violations = parse_diagnostics(RULES_OF_HOOKS_JSON, "/src/hooks/useFetch.ts");
-        assert!(
-            !violations[0].fix.contains("Anonymous"),
-            "arrow 形では oxlint が関数名を Anonymous と呼ぶ; got: {}",
-            violations[0].fix
+        // agent が読む文面そのものなので完全一致で固定する。部分一致だと連結時の
+        // 余分な空白や欠けた文が素通りする。
+        assert_eq!(
+            violations[0].fix,
+            "React component names must start with an uppercase letter. \
+             React Hook names must start with the word \"use\"."
         );
-        assert!(violations[0]
-            .fix
-            .contains("must start with the word \"use\""));
     }
 
-    // T-437 (#424): labels[0] は hook の呼び出し行で、改名する宣言行ではない。
+    // T-437 (#424)
     #[test]
     fn takes_the_rules_of_hooks_line_from_the_outer_function_label_instead_of_the_first_label() {
         let violations = parse_diagnostics(RULES_OF_HOOKS_JSON, "/src/hooks/useFetch.ts");
         assert_eq!(violations[0].line, Some(3));
     }
 
-    // T-438 (#424): 差し替えは rules-of-hooks 限定。
+    // T-438 (#424)
     #[test]
     fn keeps_the_first_label_line_and_the_help_then_message_fallback_for_every_other_rule() {
         let json = r#"{"diagnostics": [{
@@ -402,7 +400,7 @@ mod tests {
         );
     }
 
-    // T-434 (#424): 利用者に無効化手段が残っていること。
+    // T-434 (#424)
     #[test]
     fn omits_deny_rules_of_hooks_when_the_user_allows_that_rule_in_config() {
         let config = OxlintConfig {
@@ -418,8 +416,7 @@ mod tests {
         );
     }
 
-    // T-435 (#424): 抑止は deny ループより前。後ろに置くと利用者自身の
-    // `oxlint.deny` を last-wins で上書きする。
+    // T-435 (#424)
     #[test]
     fn emits_allow_exhaustive_deps_before_the_first_deny_so_a_user_deny_still_wins() {
         let config = OxlintConfig {
