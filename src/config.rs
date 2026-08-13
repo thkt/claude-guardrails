@@ -359,6 +359,14 @@ impl Config {
             .map(Path::to_path_buf)
     }
 
+    /// Drops the notes from `effective_rules_with_notes`. Test-only: the hook
+    /// boundary always wants the notes, so production has no caller that
+    /// discards them.
+    #[cfg(test)]
+    pub(crate) fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
+        self.effective_rules_with_notes(file_path).0
+    }
+
     /// Rule toggles effective for `file_path`: `self.rules` with every
     /// matching override's rules layered on top in listed order, merged key
     /// by key via `RulesConfig::apply_overrides` (eslint overrides semantics:
@@ -370,15 +378,10 @@ impl Config {
     /// A `file_path` that normalizes outside `git_root` (escaping via `..`)
     /// matches no override. Without a known `git_root`, `file_path` is
     /// matched as given (legacy behavior for callers with no repo context).
-    pub fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
-        self.effective_rules_with_notes(file_path).0
-    }
-
-    /// Same resolution as `effective_rules`, paired with one note per
-    /// matching override entry that disables at least one rule (name +
-    /// the matched pattern), for the hook boundary to surface. Sharing this
-    /// loop with `effective_rules` keeps the notes from drifting out of
-    /// sync with what actually applied.
+    ///
+    /// Paired with the toggles is one note per matching override entry that
+    /// disables at least one rule (name + the matched pattern), for the hook
+    /// boundary to surface.
     ///
     /// Also carries one note per pattern in `invalid_override_patterns`
     /// (an `overrides[].files` glob that failed to compile, whole entry
