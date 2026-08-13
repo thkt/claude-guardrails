@@ -326,6 +326,25 @@ impl Config {
             .find(|d| d.join(".git").exists())
             .map(Path::to_path_buf)
     }
+
+    /// Rule toggles effective for `file_path`: `self.rules` with every
+    /// matching override's rules layered on top in listed order, merged key
+    /// by key via `RulesConfig::apply_overrides` (eslint overrides semantics:
+    /// a later match wins per rule key, not a whole-object replacement).
+    pub fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
+        let file_path = file_path.as_ref();
+        let mut rules = self.rules.clone();
+        for entry in &self.overrides {
+            let matches = entry
+                .files
+                .iter()
+                .any(|glob| glob.compile_matcher().is_match(file_path));
+            if matches {
+                rules.apply_overrides(entry.rules.clone());
+            }
+        }
+        rules
+    }
 }
 
 #[cfg(test)]

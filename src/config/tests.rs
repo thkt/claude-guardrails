@@ -446,3 +446,66 @@ fn compile_できない_glob_を含む_config_でも_rules_の基底設定は_de
     assert!(merged.rules.sensitive_file);
     assert!(merged.overrides.is_empty());
 }
+
+// T-452: pattern にマッチする file_path では override が指定した toggle が false になる
+#[test]
+fn pattern_にマッチする_file_path_では_override_が指定した_toggle_が_false_になる() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{"overrides": [{"files": ["src/**/*.test.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+    let config = base.merge(project);
+
+    let rules = config.effective_rules("src/foo.test.ts");
+    assert!(!rules.test_assertion);
+}
+
+// T-453: pattern にマッチしない file_path では toggle が変わらない
+#[test]
+fn pattern_にマッチしない_file_path_では_toggle_が変わらない() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{"overrides": [{"files": ["src/**/*.test.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+    let config = base.merge(project);
+
+    let rules = config.effective_rules("src/foo.ts");
+    assert!(rules.test_assertion);
+}
+
+// T-454: 同じ rule key を持つ override が 2 件マッチすると後続の値が勝つ
+#[test]
+fn 同じ_rule_key_を持つ_override_が_2_件マッチすると後続の値が勝つ() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{"overrides": [
+            {"files": ["src/**/*.ts"], "rules": {"testAssertion": false}},
+            {"files": ["src/**/*.ts"], "rules": {"testAssertion": true}}
+        ]}"#,
+    )
+    .unwrap();
+    let config = base.merge(project);
+
+    let rules = config.effective_rules("src/foo.ts");
+    assert!(rules.test_assertion);
+}
+
+// T-455: 後続の override は先行の override が設定した別の rule key を消さない
+#[test]
+fn 後続の_override_は先行の_override_が設定した別の_rule_key_を消さない() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{"overrides": [
+            {"files": ["src/**/*.ts"], "rules": {"testAssertion": false}},
+            {"files": ["src/**/*.ts"], "rules": {"flakyTest": false}}
+        ]}"#,
+    )
+    .unwrap();
+    let config = base.merge(project);
+
+    let rules = config.effective_rules("src/foo.ts");
+    assert!(!rules.test_assertion);
+    assert!(!rules.flaky_test);
+}
