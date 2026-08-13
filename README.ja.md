@@ -6,13 +6,13 @@ Claude Code の PreToolUse hook 用コード品質チェッカー。外部リン
 
 ## 特徴
 
-| 機能                          | 説明                                                                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| oxlint自動確保                | [oxlint](https://oxc.rs)を自動検出・ダウンロード（手動インストール不要）                                                       |
-| AI向けdenyルール              | `no-explicit-any`、`ban-ts-comment`、`no-non-null-assertion`、`no-console`、`no-new-func`、`rules-of-hooks` をデフォルト有効化 |
-| カスタムルール                | 外部リンターがカバーしないセキュリティパターン（JS/TS）                                                                        |
-| ASTベースセキュリティチェック | [oxc](https://oxc.rs)パーサーによる深層解析（コマンドインジェクション、スタック露出、パストラバーサル）                        |
-| Claude最適化出力              | stderrに修正提案を出力                                                                                                         |
+| 機能                          | 説明                                                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| oxlint自動確保                | [oxlint](https://oxc.rs)を自動検出・ダウンロード（手動インストール不要）                                                                  |
+| AI向けdenyルール              | `no-explicit-any`、`ban-ts-comment`、`no-non-null-assertion`、`no-console`、`no-new-func`、`rules-of-hooks`、`jsx-key` をデフォルト有効化 |
+| カスタムルール                | 外部リンターがカバーしないセキュリティパターン（JS/TS）                                                                                   |
+| ASTベースセキュリティチェック | [oxc](https://oxc.rs)パーサーによる深層解析（コマンドインジェクション、スタック露出、パストラバーサル）                                   |
+| Claude最適化出力              | stderrに修正提案を出力                                                                                                                    |
 
 ## インストール
 
@@ -129,20 +129,23 @@ guardrails prefetch
 
 guardrails は AI コード生成で重要な以下のルールを `--deny` で有効化します（oxlint デフォルトでは OFF）。
 
-| ルール                             | 理由                                            |
-| ---------------------------------- | ----------------------------------------------- |
-| `typescript/no-explicit-any`       | AIが `any` / `as any` で型を逃がす              |
-| `typescript/ban-ts-comment`        | AIが `@ts-ignore` で型エラーを黙殺する          |
-| `typescript/no-non-null-assertion` | AIが `!` でnullチェックをサボる                 |
-| `eslint/no-console`                | AIがデバッグ用 `console.log` を残す             |
-| `eslint/no-new-func`               | AIが `new Function(...)` で動的にコード生成する |
-| `react/rules-of-hooks`             | AIがhookを呼ぶ関数に `use` 接頭辞を付けない     |
+| ルール                             | 理由                                                            |
+| ---------------------------------- | --------------------------------------------------------------- |
+| `typescript/no-explicit-any`       | AIが `any` / `as any` で型を逃がす                              |
+| `typescript/ban-ts-comment`        | AIが `@ts-ignore` で型エラーを黙殺する                          |
+| `typescript/no-non-null-assertion` | AIが `!` でnullチェックをサボる                                 |
+| `eslint/no-console`                | AIがデバッグ用 `console.log` を残す                             |
+| `eslint/no-new-func`               | AIが `new Function(...)` で動的にコード生成する                 |
+| `react/rules-of-hooks`             | AIがhookを呼ぶ関数に `use` 接頭辞を付けない                     |
+| `react/jsx-key`                    | AIが `key` 無しの `map` を書き、list item の state が入れ替わる |
 
 > **注:** `new Function(...)` は oxlint の `eslint/no-new-func`（`--deny` 経由で High）とカスタム `eval` ルール（High）の両方で検出されます。これにより oxlint の diagnostic の後にも guardrails 固有の fix メッセージがエージェントに届きます。stderr の順は oxlint が先。
 
-`react/rules-of-hooks` は oxlint の react plugin を要求しますが、この plugin はデフォルト OFF です。guardrails は、編集対象を含む package の `package.json` が `dependencies`/`devDependencies`/`peerDependencies` のいずれかで react を宣言しているときだけ有効化します。判定は編集対象から 10 階層まで遡った最寄りの `package.json` ただ 1 個で行います。Vue や Nuxt の composable は `.ts` に住むため、この gate が無いと React Hook として報告されます。plugin は react の他 17 ルールを道連れに有効化しますが、oxlint はそれらを warning で返すため、デフォルトの `blockThreshold` では編集を止めません。[ADR-0032](docs/decisions/0032-enable-the-oxlint-react-plugin-for-hook-naming.md)参照。
+`react/rules-of-hooks` と `react/jsx-key` は oxlint の react plugin を要求しますが、この plugin はデフォルト OFF です。guardrails は、編集対象を含む package の `package.json` が `dependencies`/`devDependencies`/`peerDependencies` のいずれかで react を宣言しているときだけ有効化します。判定は編集対象から 10 階層まで遡った最寄りの `package.json` ただ 1 個で行います。Vue や Nuxt の composable は `.ts` に住むため、この gate が無いと React Hook として報告されます。plugin は react の他 16 ルールを道連れに有効化しますが、oxlint はそれらを warning で返すため、デフォルトの `blockThreshold` では編集を止めません。[ADR-0032](docs/decisions/0032-enable-the-oxlint-react-plugin-for-hook-naming.md)参照。
 
-無効化するには `oxlint.allow` に `react/rules-of-hooks` と書きます。これは config に書くキーで、stderr に出る id は `oxlint/eslint-plugin-react-hooks(rules-of-hooks)` という別の文字列です。
+`react/jsx-key` は plugin が既に有効化しているルールで、oxlint は warning で返します。`--deny` は編集を止めるために severity を error へ上げるためだけに出しています。plugin が OFF のプロジェクトでは、この `--deny` は何にも一致しません。
+
+無効化するには `oxlint.allow` にそのルール名を書きます。これは config に書くキーで、stderr に出る id は `oxlint/eslint-plugin-react-hooks(rules-of-hooks)` と `oxlint/eslint-plugin-react(jsx-key)` という別の文字列です。
 
 `oxlint.deny`/`oxlint.allow` でカスタマイズ可能です（設定セクション参照）。
 

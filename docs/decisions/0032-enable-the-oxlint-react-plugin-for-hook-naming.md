@@ -65,3 +65,20 @@ plugin が道連れに有効化する `react/exhaustive-deps` は `--allow` で�
 - `src/analysis/oxlint.rs` の unit test で、React project のとき `--react-plugin` が出て非 React project では出ないこと、`oxlint.allow` に `react/rules-of-hooks` を書くと `--deny` が消えること、`--allow react/exhaustive-deps` が最初の `--deny` より前に出ることを assert
 - `src/analysis/oxlint.rs` の unit test で、`rules-of-hooks` の fix 文が `Anonymous` を含まないこと、行番号が `Outer function` ラベルから採られること、他 rule では `labels[0]` と help/message の fallback が変わらないことを assert
 - `tests/rule_smoke.rs` で、React project 配下の 3 形が実バイナリで報告されること、react 非依存のプロジェクトでは同じコードが無音であること、react plugin を足した同一実行で `eslint/no-console` も報告されることを assert。最後の 1 本が、未知フラグによる全診断消失を捕まえる唯一の経路
+
+## Amendment 2026-08-14: `react/jsx-key` を blocking へ昇格する (#426)
+
+Scope が「個別の採否判断は行わない」とした 17 個のうち、`react/jsx-key` 1 本を `DEFAULT_DENY_RULES` に足して blocking へ昇格する。残り 16 個の採否判断は引き続き行わない。
+
+key を持たない `map` は AI が書きやすい形で、再レンダリング時に list item の state を取り違える。advisory のままだと OUTCOME の Behavior 定義どおり agent が読み飛ばすため、編集サイクル内で直らない。
+
+昇格の根拠は既存コードの掃除ではなく、AI が新規に書くコードで発火する側にある。実運用中の React project 2 件 (496 files/671 files) を oxlint 1.56.0 に `--react-plugin --allow react/exhaustive-deps` で通した測定では、`jsx-key` の検出はいずれもゼロだった。Storybook の stories やテスト内の JSX を多く持つ構成は測定に含まれない。
+
+`--deny` は severity を上げるためだけに出す。plugin が有効な時点で rule 自体は既に発火しており、oxlint が返す `warning` は `Severity::Medium` へ落ちて default の `block_threshold` (`Severity::High`) を下回る。`--deny` を渡すと `error` になり `Severity::High` へマップされる。react plugin が閉じているプロジェクトでは診断ゼロの無言通過になるため、`--deny` の出し分けは要らない。
+
+無効化は `oxlint.allow` に `react/jsx-key` と書く。stderr に出る id は `oxlint/eslint-plugin-react(jsx-key)` で、`rules-of-hooks` の `eslint-plugin-react-hooks` とは plugin 名が違う。
+
+### Amendment Verification
+
+- `src/analysis/oxlint.rs` の unit test で、default 設定が `--deny react/jsx-key` を出すこと、`oxlint.allow` に書くとその `--deny` が消えることを assert
+- `tests/rule_smoke.rs` で、React project 配下の `.tsx` に書いた key 無し `map` が severity high・decision block・exit 2 に到達することと、react 非依存のプロジェクトでは同じコードが無音であることを assert。violation の有無だけを見る assert は昇格前から通るため、severity と exit code を直接見る
