@@ -315,6 +315,12 @@ fn resolve_effective_rules_or_note(
     notes: &mut Vec<String>,
 ) -> Config {
     let (rules, override_notes) = config.effective_rules_with_notes(file_path);
+    for note in &override_notes {
+        // Without this the note reaches the JSON envelope only, and hook mode
+        // does not emit that envelope. The agent asking why a rule stayed
+        // quiet would have nothing to read.
+        eprintln!("guardrails: {note}");
+    }
     notes.extend(override_notes);
     config.rules = rules;
     config

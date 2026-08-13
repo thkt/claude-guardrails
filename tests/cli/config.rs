@@ -310,3 +310,36 @@ fn compile_できない_globを書いたconfigではnoteがjson_envelopeに出�
         "expected a note naming the uncompilable override glob \"src/[invalid\"; got: {notes:?}"
     );
 }
+
+// T-466: hook mode で override の note が stderr に出る
+#[test]
+fn hook_mode_で_override_のnoteがstderrに出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。envelope は
+    // 出ないので、note を運ぶ経路は stderr しか残らない。notes の vec を見る
+    // assert は、この経路が空でも通ってしまう。
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("override disabled rule(s) [eval]"),
+        "expected the override note on stderr; got: {stderr:?}"
+    );
+}
