@@ -16,6 +16,10 @@ const DEFAULT_DENY_RULES: &[&str] = &[
     // `config.allow` が `--allow` を出さずここから差し引くだけで、直書きだと
     // 利用者に無効化手段が残らないため。
     "react/rules-of-hooks",
+    // react plugin が既に有効化しているので発火自体は `--deny` 無しでも起きる。
+    // ただし oxlint は warning で返し `Severity::Medium` に落ちるため、default の
+    // block_threshold では編集が止まらない。`--deny` で error に上げる (#426)。
+    "react/jsx-key",
 ];
 
 // react plugin が道連れに有効化する rule のうち、advisory の量が目立つもの。
@@ -346,12 +350,12 @@ mod tests {
         args.windows(2).filter(|w| w[0] == "--deny").count()
     }
 
-    // T-007: default config → 6 deny flags
+    // T-007: default config → 7 deny flags
     #[test]
-    fn build_args_default_has_six_deny() {
+    fn build_args_default_has_seven_deny() {
         let config = OxlintConfig::default();
         let args = build_args(&config, false);
-        assert_eq!(deny_count(&args), 6);
+        assert_eq!(deny_count(&args), 7);
         assert!(args.contains(&"--format".to_owned()));
         assert!(args.contains(&"json".to_owned()));
     }
@@ -364,7 +368,7 @@ mod tests {
             allow: vec![],
         };
         let args = build_args(&config, false);
-        assert_eq!(deny_count(&args), 7);
+        assert_eq!(deny_count(&args), 8);
         assert!(args.contains(&"eslint/curly".to_owned()));
     }
 
@@ -376,8 +380,20 @@ mod tests {
             allow: vec!["eslint/no-console".to_owned()],
         };
         let args = build_args(&config, false);
-        assert_eq!(deny_count(&args), 5);
+        assert_eq!(deny_count(&args), 6);
         assert!(!args.contains(&"eslint/no-console".to_owned()));
+    }
+
+    // T-446 (#426): jsx-key が list に載っていること自体の pin。
+    #[test]
+    fn denies_jsx_key_by_default_to_raise_it_from_warning_to_error() {
+        let args = build_args(&OxlintConfig::default(), true);
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--deny" && w[1] == "react/jsx-key"),
+            "expected `--deny react/jsx-key`; without it oxlint returns warning and the \
+             edit is not stopped. got: {args:?}"
+        );
     }
 
     // T-432 (#424)

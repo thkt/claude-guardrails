@@ -845,22 +845,42 @@ fn oxlint_no_new_func_fires_on_new_function_ctor() {
 }
 
 const RULES_OF_HOOKS: &str = "oxlint/eslint-plugin-react-hooks(rules-of-hooks)";
+// jsx-key の plugin 名は rules-of-hooks の `eslint-plugin-react-hooks` とは別。
+const JSX_KEY: &str = "oxlint/eslint-plugin-react(jsx-key)";
 const REACT_MANIFEST: &str = r#"{"dependencies": {"react": "^19.0.0"}}"#;
 const VUE_MANIFEST: &str = r#"{"dependencies": {"vue": "^3.5.0"}}"#;
+const KEYLESS_MAP: &str =
+    "export const List = ({ xs }: { xs: string[] }) => <ul>{xs.map(x => <li>{x}</li>)}</ul>;";
 
 // #424 の seam 用。`--react-plugin` の gate は編集対象の最寄り package.json を読むため、
 // 他のスモークテストのような架空の path では開かない。返す `TempDir` は呼び出し側が
 // 束縛したまま保持すること。捨てるとディレクトリごと消え、gate が閉じて空振りする。
 fn in_project(manifest: &str) -> (tempfile::TempDir, String) {
+    in_project_file(manifest, "src/hooks/useFetch.ts")
+}
+
+fn in_project_file(manifest: &str, relative_path: &str) -> (tempfile::TempDir, String) {
     let root = tempfile::TempDir::new().unwrap();
     std::fs::write(root.path().join("package.json"), manifest).unwrap();
-    let file_path = root
-        .path()
-        .join("src/hooks/useFetch.ts")
-        .to_str()
-        .unwrap()
-        .to_owned();
+    let file_path = root.path().join(relative_path).to_str().unwrap().to_owned();
     (root, file_path)
+}
+
+// severity を昇格させる変更を `assert_rule_fires` では捕まえられないので分けた。
+// あちらは rule id の有無しか見ず、昇格前から通る。
+fn assert_rule_blocks(rule_id: &str, file_path: &str, content: &str) {
+    let output = run_guardrails_json(hook_input(file_path, content).as_bytes());
+    let envelope = parse_envelope(&output);
+    let hits = violations_for_rule(&envelope, rule_id);
+    assert!(
+        hits.iter().any(|v| v["severity"] == "high"),
+        "expected a high-severity {rule_id} violation; a warning maps to Medium and \
+         stays under the default blockThreshold. envelope: {envelope}"
+    );
+    assert_eq!(
+        envelope["data"]["decision"], "block",
+        "expected the edit to stop. envelope: {envelope}"
+    );
 }
 
 // T-439
@@ -926,4 +946,20 @@ fn reports_both_rules_of_hooks_and_no_console_for_one_react_project_file() {
              envelope: {envelope}"
         );
     }
+}
+
+// T-444 (#426): key を持たない map は、編集サイクル内で直させるため advisory では
+// なく block まで到達する。
+#[test]
+fn jsx_key_blocks_a_map_without_key_in_a_react_project() {
+    let (_root, path) = in_project_file(REACT_MANIFEST, "src/List.tsx");
+    assert_rule_blocks(JSX_KEY, &path, KEYLESS_MAP);
+}
+
+// T-445 (#426): react に依存しないプロジェクトでは plugin が開かないため、
+// `--deny react/jsx-key` は診断ゼロの無言通過になる。
+#[test]
+fn jsx_key_silent_on_the_same_code_in_a_project_without_react_dependency() {
+    let (_root, path) = in_project_file(VUE_MANIFEST, "src/List.tsx");
+    assert_rule_silent(JSX_KEY, &path, KEYLESS_MAP);
 }

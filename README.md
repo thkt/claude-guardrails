@@ -7,7 +7,7 @@ Code quality checker for Claude Code's PreToolUse hook. Combines external linter
 ## Features
 
 - **oxlint auto-provision**: Automatically resolves or downloads [oxlint](https://oxc.rs) — no manual install needed
-- **AI-tuned deny rules**: Enables `no-explicit-any`, `ban-ts-comment`, `no-non-null-assertion`, `no-console`, `no-new-func`, `rules-of-hooks` by default via `--deny`
+- **AI-tuned deny rules**: Enables `no-explicit-any`, `ban-ts-comment`, `no-non-null-assertion`, `no-console`, `no-new-func`, `rules-of-hooks`, `jsx-key` by default via `--deny`
 - **Custom rules**: Security patterns external linters don't cover (JS/TS)
 - **AST-based security checks**: Deep analysis via [oxc](https://oxc.rs) parser (command injection, stack exposure, path traversal)
 - **Claude-optimized output**: Actionable fix suggestions in stderr
@@ -135,12 +135,15 @@ guardrails enables these oxlint rules via `--deny` (off by default in oxlint, im
 | `eslint/no-console`                | AI leaves debug `console.log`                             |
 | `eslint/no-new-func`               | AI uses `new Function(...)` for dynamic code              |
 | `react/rules-of-hooks`             | AI names a hook-calling function without the `use` prefix |
+| `react/jsx-key`                    | AI writes a `map` without `key`, so list item state swaps |
 
 > **Note:** `new Function(...)` triggers both oxlint's `eslint/no-new-func` (High via `--deny`) and the custom `eval` rule (High), so the agent reads the guardrails-specific fix message even after oxlint already fired. stderr shows oxlint first.
 
-`react/rules-of-hooks` needs oxlint's react plugin, which is off by default. guardrails turns it on only for files under a package whose `package.json` declares react in `dependencies`, `devDependencies`, or `peerDependencies` — the nearest `package.json` above the edited file decides, up to 10 levels. Vue and Nuxt composables live in `.ts` and would otherwise be reported as React Hooks. The plugin brings in 17 more react rules; oxlint returns them as warnings, so they stay advisory under the default `blockThreshold`. See [ADR-0032](docs/decisions/0032-enable-the-oxlint-react-plugin-for-hook-naming.md).
+`react/rules-of-hooks` and `react/jsx-key` need oxlint's react plugin, which is off by default. guardrails turns it on only for files under a package whose `package.json` declares react in `dependencies`, `devDependencies`, or `peerDependencies` — the nearest `package.json` above the edited file decides, up to 10 levels. Vue and Nuxt composables live in `.ts` and would otherwise be reported as React Hooks. The plugin brings in 16 more react rules; oxlint returns them as warnings, so they stay advisory under the default `blockThreshold`. See [ADR-0032](docs/decisions/0032-enable-the-oxlint-react-plugin-for-hook-naming.md).
 
-To turn it off, write `react/rules-of-hooks` in `oxlint.allow`. That is the config key; stderr shows the violation under the id `oxlint/eslint-plugin-react-hooks(rules-of-hooks)`, which is a different string.
+`react/jsx-key` is one the plugin already enables, and oxlint returns it as a warning. The `--deny` only raises it to an error so the edit stops. Where the plugin stays off, that `--deny` matches nothing.
+
+To turn either off, write its name in `oxlint.allow`. That is the config key; stderr shows the violations under the ids `oxlint/eslint-plugin-react-hooks(rules-of-hooks)` and `oxlint/eslint-plugin-react(jsx-key)`, which are different strings.
 
 Customize via `oxlint.deny` / `oxlint.allow` in config (see below).
 
