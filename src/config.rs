@@ -1,4 +1,5 @@
 use crate::rules::Severity;
+use globset::{Glob, GlobBuilder};
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -21,11 +22,11 @@ macro_rules! define_rule_config {
             }
         }
 
-        #[derive(Debug, Deserialize)]
-        struct ProjectRulesConfig {
+        #[derive(Debug, Clone, Deserialize)]
+        pub(crate) struct ProjectRulesConfig {
             $(
                 #[serde(rename = $serde_name)]
-                $field: Option<bool>,
+                pub(crate) $field: Option<bool>,
             )*
         }
 
@@ -97,6 +98,7 @@ pub struct Config {
     pub diff_aware: bool,
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
+    pub overrides: Vec<OverrideEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,14 @@ pub struct OxlintConfig {
     pub allow: Vec<String>,
 }
 
+/// A single `.guardrails.json` `overrides` entry: file glob patterns paired
+/// with the rule toggles that apply only to matching files.
+#[derive(Debug, Clone)]
+pub struct OverrideEntry {
+    pub files: Vec<Glob>,
+    pub rules: ProjectRulesConfig,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -129,6 +139,7 @@ impl Default for Config {
             diff_aware: false,
             source: ConfigSource::Default,
             git_root: None,
+            overrides: Vec::new(),
         }
     }
 }
@@ -147,6 +158,13 @@ struct ProjectConfig {
     oxlint: Option<ProjectOxlintConfig>,
     #[serde(rename = "diffAware")]
     diff_aware: Option<bool>,
+    overrides: Option<Vec<ProjectOverrideEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectOverrideEntry {
+    files: Vec<String>,
+    rules: ProjectRulesConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,7 +293,31 @@ impl Config {
         if let Some(diff_aware) = project.diff_aware {
             self.diff_aware = diff_aware;
         }
+        if let Some(raw_overrides) = project.overrides {
+            self.overrides = raw_overrides
+                .into_iter()
+                .filter_map(Self::compile_override_entry)
+                .collect();
+        }
         self
+    }
+
+    /// Compiles an override entry's glob patterns with `literal_separator(true)`
+    /// so `*`/`?` do not cross a `/` boundary, matching eslint's glob semantics
+    /// instead of globset's cross-`/` default
+    /// (<https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator>).
+    /// An entry with any glob that fails to compile is dropped whole; other
+    /// entries in the same config are kept.
+    fn compile_override_entry(raw: ProjectOverrideEntry) -> Option<OverrideEntry> {
+        let files: Result<Vec<Glob>, globset::Error> = raw
+            .files
+            .iter()
+            .map(|pattern| GlobBuilder::new(pattern).literal_separator(true).build())
+            .collect();
+        files.ok().map(|files| OverrideEntry {
+            files,
+            rules: raw.rules,
+        })
     }
 
     pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {

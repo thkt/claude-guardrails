@@ -381,3 +381,68 @@ fn diff_aware_defaults_off_when_key_absent() {
     let merged = base.merge(project);
     assert!(!merged.diff_aware);
 }
+
+// T-448: overrides を書かない config は override を持たない状態で読める
+#[test]
+fn overrides_を書かない_config_は_override_を持たない状態で読める() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(r"{}").unwrap();
+    let merged = base.merge(project);
+    assert!(merged.overrides.is_empty());
+}
+
+// T-449: files と rules を持つ override entry がそのまま保持される
+#[test]
+fn files_と_rules_を持つ_override_entry_がそのまま保持される() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{"overrides": [{"files": ["src/**/*.test.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+
+    let merged = base.merge(project);
+    assert_eq!(merged.overrides.len(), 1);
+    let entry = &merged.overrides[0];
+    assert_eq!(entry.files.len(), 1);
+    assert_eq!(entry.files[0].glob(), "src/**/*.test.ts");
+    assert_eq!(entry.rules.test_assertion, Some(false));
+}
+
+// T-450: compile できない glob を含む entry は捨てられ、同じ config の他の entry は保持される
+#[test]
+fn compile_できない_glob_を含む_entry_は捨てられ_同じ_config_の他の_entry_は保持される() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{"overrides": [
+            {"files": ["src/[invalid"], "rules": {"testAssertion": false}},
+            {"files": ["src/**/*.spec.ts"], "rules": {"flakyTest": false}}
+        ]}"#,
+    )
+    .unwrap();
+
+    let merged = base.merge(project);
+    assert_eq!(merged.overrides.len(), 1);
+    let entry = &merged.overrides[0];
+    assert_eq!(entry.files[0].glob(), "src/**/*.spec.ts");
+    assert_eq!(entry.rules.flaky_test, Some(false));
+}
+
+// T-451: compile できない glob を含む config でも rules の基底設定は default に戻らない
+#[test]
+fn compile_できない_glob_を含む_config_でも_rules_の基底設定は_default_に戻らない() {
+    let base = Config::default();
+    let project: ProjectConfig = serde_json::from_str(
+        r#"{
+            "rules": {"testAssertion": false},
+            "overrides": [
+                {"files": ["src/[invalid"], "rules": {"flakyTest": false}}
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let merged = base.merge(project);
+    assert!(!merged.rules.test_assertion);
+    assert!(merged.rules.sensitive_file);
+    assert!(merged.overrides.is_empty());
+}
