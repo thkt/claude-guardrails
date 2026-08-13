@@ -509,3 +509,69 @@ fn 後続の_override_は先行の_override_が設定した別の_rule_key_を�
     assert!(!rules.test_assertion);
     assert!(!rules.flaky_test);
 }
+
+// T-456: `..` で git root の外へ出る file_path には override が適用されず rule が有効なままになる
+#[test]
+fn dotdot_で_git_root_の外へ出る_file_path_には_override_が適用されず_rule_が有効なままになる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+    let config = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    // git root の外 (親の親) へ `..` で抜けたうえで "secret.ts" に戻ってくる file_path。
+    // `Path::components` で畳み込むと git root の外側を指し、root 相対化できない。
+    let escaping_path = tmp
+        .path()
+        .join("src")
+        .join("..")
+        .join("..")
+        .join("secret.ts");
+
+    let rules = config.effective_rules(&escaping_path);
+    assert!(rules.test_assertion);
+}
+
+// T-457: `src/*.ts` は `src/api/db.ts` にマッチしない
+#[test]
+fn src_star_ts_は_src_api_db_ts_にマッチしない() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["src/*.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+    let config = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    let nested_path = tmp.path().join("src").join("api").join("db.ts");
+
+    let rules = config.effective_rules(&nested_path);
+    assert!(rules.test_assertion);
+}
+
+// T-458: 絶対パスで書いた pattern は git root 相対のマッチ対象に一致しない
+#[test]
+fn 絶対パスで書いた_pattern_は_git_root_相対のマッチ対象に一致しない() {
+    let tmp = tmp_repo();
+    let target_path = tmp.path().join("src").join("foo.ts");
+    let absolute_pattern = target_path.to_string_lossy().into_owned();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        format!(
+            r#"{{"overrides": [{{"files": ["{absolute_pattern}"], "rules": {{"testAssertion": false}}}}]}}"#
+        ),
+    )
+    .unwrap();
+    let config = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    let rules = config.effective_rules(&target_path);
+    assert!(rules.test_assertion);
+}

@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Generates `RulesConfig` (runtime flags), `ProjectRulesConfig` (serde DTO),
 /// `Default` impl (all rules enabled), and `apply_overrides` (partial merge).
@@ -331,19 +331,74 @@ impl Config {
     /// matching override's rules layered on top in listed order, merged key
     /// by key via `RulesConfig::apply_overrides` (eslint overrides semantics:
     /// a later match wins per rule key, not a whole-object replacement).
+    ///
+    /// When `git_root` is known, `file_path` is resolved against it and
+    /// normalized (see `normalize_relative_to_root`) before matching, so
+    /// patterns are always evaluated against a git-root-relative path.
+    /// A `file_path` that normalizes outside `git_root` (escaping via `..`)
+    /// matches no override. Without a known `git_root`, `file_path` is
+    /// matched as given (legacy behavior for callers with no repo context).
     pub fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
         let file_path = file_path.as_ref();
         let mut rules = self.rules.clone();
+
+        let match_target = match &self.git_root {
+            Some(root) => Self::normalize_relative_to_root(file_path, root),
+            None => Some(file_path.to_path_buf()),
+        };
+        let Some(match_target) = match_target else {
+            return rules;
+        };
+
         for entry in &self.overrides {
             let matches = entry
                 .files
                 .iter()
-                .any(|glob| glob.compile_matcher().is_match(file_path));
+                .any(|glob| glob.compile_matcher().is_match(&match_target));
             if matches {
                 rules.apply_overrides(entry.rules.clone());
             }
         }
         rules
+    }
+
+    /// Resolves `file_path` against `git_root` and returns it relative to
+    /// `git_root`, or `None` when it falls outside `git_root`.
+    ///
+    /// `file_path` is not required to exist on disk (a `PreToolUse` hook may
+    /// see a file about to be created), so `Path::canonicalize` cannot be
+    /// used here: it resolves symlinks and requires the path to exist.
+    /// Instead `.` and `..` are resolved lexically by folding
+    /// `Path::components` (`ParentDir` pops the last pushed `Normal`
+    /// component, `CurDir` is dropped), mirroring what `canonicalize` would
+    /// do for the path-syntax part alone.
+    fn normalize_relative_to_root(file_path: &Path, git_root: &Path) -> Option<PathBuf> {
+        let absolute = if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            git_root.join(file_path)
+        };
+
+        let mut normalized: Vec<Component> = Vec::new();
+        for component in absolute.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if matches!(normalized.last(), Some(Component::Normal(_))) {
+                        normalized.pop();
+                    } else {
+                        normalized.push(component);
+                    }
+                }
+                other => normalized.push(other),
+            }
+        }
+        let normalized: PathBuf = normalized.into_iter().collect();
+
+        normalized
+            .strip_prefix(git_root)
+            .ok()
+            .map(Path::to_path_buf)
     }
 }
 
