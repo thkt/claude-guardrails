@@ -213,3 +213,93 @@ fn malformed_config_falls_back_to_defaults_and_keeps_detecting() {
         "expected eval violation despite config error: {stderr}"
     );
 }
+
+// U-005 seam: `.guardrails.json` overrides read from disk, matched against
+// the incoming `file_path`, and applied to rule evaluation, all through the
+// real binary (config load -> effective_rules_with_notes -> collect_violations
+// -> exit code / JSON envelope), not through a unit-level call into
+// `resolve_effective_rules_or_note` directly.
+
+// T-462: overrides の pattern に一致するパスへの Write は exit 0 で通る
+#[test]
+fn overrides_の_pattern_に一致するパスへの_write_は_exit_0で通る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/allowed/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "path matching the override pattern must skip the disabled eval rule; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-463: 同じ content を overrides の外のパスへ書くと exit 2 で止まる
+#[test]
+fn 同じ_content_を_overrides_の外のパスへ書くと_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/other/app.ts",
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "path outside the override pattern must keep the eval rule active; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-464: compile できない glob を書いた config では note が JSON envelope に出る
+#[test]
+fn compile_できない_globを書いたconfigではnoteがjson_envelopeに出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    let notes = parsed["notes"].as_array().expect("notes must be an array");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.as_str().unwrap_or("").contains("src/[invalid")),
+        "expected a note naming the uncompilable override glob \"src/[invalid\"; got: {notes:?}"
+    );
+}
