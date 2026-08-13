@@ -229,14 +229,20 @@ fn overrides_の_pattern_に一致するパスへの_write_は_exit_0で通る()
         r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
     )
     .unwrap();
+    // Claude Code sends an absolute file_path, so the seam runs the branch that
+    // shape takes. A relative fixture would only cover `git_root.join`.
+    // The root is canonicalized because on macOS the tempdir sits under a
+    // symlinked `/var`; `current_dir` resolves it while the file_path here
+    // would not, and the mismatch is a separate axis from what this asserts.
+    let root = tmp.path().canonicalize().unwrap();
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
-            "file_path": "src/allowed/app.ts",
+            "file_path": root.join("src/allowed/app.ts"),
             "content": "eval(userInput);\n"
         }
     });
-    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -254,14 +260,15 @@ fn 同じ_content_を_overrides_の外のパスへ書くと_exit_2で止まる()
         r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
     )
     .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
-            "file_path": "src/other/app.ts",
+            "file_path": root.join("src/other/app.ts"),
             "content": "eval(userInput);\n"
         }
     });
-    let output = run_guardrails_in_dir(&json.to_string(), tmp.path());
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
     assert_eq!(
         output.status.code(),
         Some(2),

@@ -536,6 +536,35 @@ fn dotdot_で_git_root_の外へ出る_file_path_には_override_が適用され
     assert!(rules.test_assertion);
 }
 
+// T-465: root 相対化できない file_path では override を飛ばしたことが note に出る
+#[test]
+fn root相対化できない_file_path_では_override_を飛ばしたことが_note_に出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+    let config = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    // 相対化できない経路は 2 つあり、どちらも rule を有効なまま残す。`..` で
+    // repository の外へ出る形と、symlink 経由の root (`current_dir` は実体へ
+    // 解決するが agent が送る file_path は解決しない) がそれで、出力は同じ。
+    // note が無いと利用者は override を書いたのに効かない理由を追えない。
+    let escaping_path = tmp.path().join("..").join("..").join("secret.ts");
+
+    let (rules, notes) = config.effective_rules_with_notes(&escaping_path);
+    assert!(rules.test_assertion);
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("override matching skipped")),
+        "expected a note naming the skipped path; got: {notes:?}"
+    );
+}
+
 // T-457: `src/*.ts` は `src/api/db.ts` にマッチしない
 #[test]
 fn src_star_ts_は_src_api_db_ts_にマッチしない() {

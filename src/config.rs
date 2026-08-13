@@ -407,7 +407,21 @@ impl Config {
             Some(root) => Self::normalize_relative_to_root(file_path, root),
             None => Some(file_path.to_path_buf()),
         };
+        // Two different situations reach this branch and neither is visible
+        // otherwise: a `..` that climbs out of the repository, and a root
+        // reached through a symlink (`current_dir` resolves it, the
+        // agent-supplied `file_path` does not, so `strip_prefix` misses).
+        // Both leave every rule enabled, which is the safe direction but
+        // silently ignores what the user wrote. Only say so when the user
+        // wrote overrides at all; a repository without them has nothing to
+        // report.
         let Some(match_target) = match_target else {
+            if !self.overrides.is_empty() {
+                notes.push(format!(
+                    "override matching skipped: {} did not resolve under the repository root",
+                    file_path.display(),
+                ));
+            }
             return (rules, notes);
         };
 

@@ -458,7 +458,8 @@ deny リストにルールを追加、またはデフォルト deny から除外
 - `rules`: top-level の `rules` オブジェクトと同じキーです（上記の[ルール](#ルール)参照）。指定しなかったキーは、この entry にマッチした file でも top-level（またはデフォルト）の値のままです。
 - 同じ file に複数の entry がマッチした場合、配列の順序どおりに適用され、キー単位で merge されます。後続の entry は名指ししたキーだけを上書きし、先行の entry が設定した `rules` オブジェクト全体を置き換えることはありません。
 - `files` の pattern が glob として compile できない entry（閉じ括弧を欠いた `[` など）は、その entry ごと丸ごと捨てられます。同じ config の他の `overrides` entry と top-level の `rules` は影響を受けません。guardrails は compile できなかった pattern を名指しした note を積みます。例: `override entry dropped: glob pattern "src/[invalid" failed to compile`。この note は、チェック対象の file が該当 entry の `files` にマッチするかどうかに関わらず、config を読み込むたびに JSON envelope の `notes` と stderr の両方に出ます。
-- toggle の粒度であり、rule の粒度ではありません。override の `rules` キーは top-level と同じ粗さの toggle で、個々の `rule_id` 単位ではありません。ある glob に対して `security` や `astSecurity` を無効化すると、その toggle が束ねる `rule_id` がマッチした file すべてで一括して無効になります。`astSecurity` の場合は上記の AST セキュリティルールに載る 14 個の sub-rule 全部で、1 個だけを選ぶことはできません。他の sub-rule を有効なまま残しつつ 1 個だけをパス単位で切る手段はありません。
+- toggle の粒度であり、rule の粒度ではありません。override の `rules` キーは top-level と同じ粗さの toggle で、個々の `rule_id` 単位ではありません。ある glob に対して `security` や `astSecurity` を無効化すると、その toggle が束ねる `rule_id` がマッチした file すべてで一括して無効になります。`astSecurity` の場合は上記の AST セキュリティルールに載る 15 行のうち 14 個で、1 個だけを選ぶことはできません。他の sub-rule を有効なまま残しつつ 1 個だけをパス単位で切る手段はありません。
+- `excessive-nesting` だけは override で切れません。この sub-rule は AST rule のどれか 1 つでも有効なときにパース前のバイトスキャンとして走ります。`astSecurity` で gate すると、`astSecurity` が off で `eval` が on の config がパーサに到達してプロセスを落とすためです。`astSecurity` を無効化する override を書いても、安全な深さを超えた入れ子の file は block されます。
 - override がチェック対象の file に対してルールを無効化すると、guardrails は無効化したルール名とマッチした pattern を記した note を積みます。例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts]`。この note は JSON envelope の `notes` と stderr の両方に出ます。
 
 ### 設定例

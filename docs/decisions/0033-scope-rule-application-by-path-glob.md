@@ -17,7 +17,7 @@ decision-makers: thkt
 - ESLint の `overrides` は AI agent と人間レビュアーの双方が既に知っているメンタルモデル。新しい配列/merge semantics を発明せず、それに倣うことで学習コストを増やさない
 - glob の `*` が `/` を跨ぐ globset のデフォルト挙動は、`src/*.ts` が `src/api/db.ts` にまで意図せず一致し、ESLint の `overrides.files` に慣れた利用者の直感と食い違う
 - `.guardrails.json` 自体の trust boundary (git root 直下) を再利用できる範囲と、entry 単位の glob compile という新しい失敗点が生まれる範囲を分けて扱う必要がある
-- 1 toggle が複数 `rule_id` を束ねる既存の粒度 (`security` は 2 個、`astSecurity` は 14 個、README `Security Rules`/`AST Security Rules` 参照) は override 導入でも変えない。誰も要求していない細分化は追加しない (YAGNI)
+- 1 toggle が複数 `rule_id` を束ねる既存の粒度 (`security` は 2 個、`astSecurity` は 15 行のうち 14 個、README `Security Rules`/`AST Security Rules` 参照) は override 導入でも変えない。誰も要求していない細分化は追加しない (YAGNI)
 
 ## Considered Options
 
@@ -53,8 +53,9 @@ ADR-0004 の「config エラー」軸 (fail-open with defaults、`Config::with_p
 - Good: override が rule を無効化したときは note で可視化されるため、AI agent は「なぜこの rule が発火しなかったか」を追える (`src/hook/tests.rs` で pin 済み)
 - Good: entry 単位の glob compile 失敗が config 全体を defaults に倒さない。1 entry の typo が project 全体の override を無効化しない
 - Good: `files` の pattern が glob として compile できない entry は drop と同時に note が積まれる。`tests/cli/config.rs` の T-464 (`compile_できない_globを書いたconfigではnoteがjson_envelopeに出る`) がこの挙動を pin している
-- Bad: override の `rules` キーは top-level と同じ粗さの toggle であり、`rule_id` 単位の細かい制御はできない。`astSecurity` を 1 path で切ると 14 個の `rule_id` が全部切れる
+- Bad: override の `rules` キーは top-level と同じ粗さの toggle であり、`rule_id` 単位の細かい制御はできない。`astSecurity` を 1 path で切ると 14 個の `rule_id` が切れる。`AST Security Rules` の表は 15 行あり、残る 1 個の `excessive-nesting` は override で切れない
 - Bad: override 解決は `file_path` ごとに毎回 entry を線形走査する。entry 数が多い project では、rule 判定の前に glob match のコストが積み上がる
+- Bad: symlink 経由の repository root では override が効かない。`current_dir` が root を実体パスへ解決する一方、agent が送る `file_path` は解決されないため `strip_prefix` が外れる。rule が有効なまま残る fail-closed 方向だが、利用者が書いた override は無視される。`~/GitHub/...` 形式の root は影響を受けず、動機となった dotclaude もそこに入る。相対化できなかったことは note に出る (`override matching skipped: ...`)。`file_path` 側を最寄りの実在祖先まで遡って canonicalize する対応は backlog
 
 ### Verification
 
