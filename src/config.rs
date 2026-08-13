@@ -108,6 +108,12 @@ pub struct Config {
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
     pub overrides: Vec<OverrideEntry>,
+    /// `overrides[].files` patterns that failed to compile as a glob, in
+    /// config-declaration order. The whole entry containing a failing
+    /// pattern is dropped (see `compile_override_entry`); this list is what
+    /// lets `effective_rules_with_notes` surface that drop instead of
+    /// silently ignoring the entry.
+    pub invalid_override_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +155,7 @@ impl Default for Config {
             source: ConfigSource::Default,
             git_root: None,
             overrides: Vec::new(),
+            invalid_override_patterns: Vec::new(),
         }
     }
 }
@@ -303,10 +310,16 @@ impl Config {
             self.diff_aware = diff_aware;
         }
         if let Some(raw_overrides) = project.overrides {
-            self.overrides = raw_overrides
-                .into_iter()
-                .filter_map(Self::compile_override_entry)
-                .collect();
+            let mut overrides = Vec::new();
+            let mut invalid_patterns = Vec::new();
+            for raw in raw_overrides {
+                match Self::compile_override_entry(raw) {
+                    Ok(entry) => overrides.push(entry),
+                    Err(failed_patterns) => invalid_patterns.extend(failed_patterns),
+                }
+            }
+            self.overrides = overrides;
+            self.invalid_override_patterns = invalid_patterns;
         }
         self
     }
@@ -316,17 +329,27 @@ impl Config {
     /// instead of globset's cross-`/` default
     /// (<https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator>).
     /// An entry with any glob that fails to compile is dropped whole; other
-    /// entries in the same config are kept.
-    fn compile_override_entry(raw: ProjectOverrideEntry) -> Option<OverrideEntry> {
-        let files: Result<Vec<Glob>, globset::Error> = raw
-            .files
-            .iter()
-            .map(|pattern| GlobBuilder::new(pattern).literal_separator(true).build())
-            .collect();
-        files.ok().map(|files| OverrideEntry {
-            files,
-            rules: raw.rules,
-        })
+    /// entries in the same config are kept. The failing pattern(s) are
+    /// returned so the caller can populate `invalid_override_patterns` and
+    /// the hook boundary can surface a note instead of dropping the entry
+    /// silently (T-464).
+    fn compile_override_entry(raw: ProjectOverrideEntry) -> Result<OverrideEntry, Vec<String>> {
+        let mut files = Vec::with_capacity(raw.files.len());
+        let mut failed_patterns = Vec::new();
+        for pattern in raw.files {
+            match GlobBuilder::new(&pattern).literal_separator(true).build() {
+                Ok(glob) => files.push(glob),
+                Err(_) => failed_patterns.push(pattern),
+            }
+        }
+        if failed_patterns.is_empty() {
+            Ok(OverrideEntry {
+                files,
+                rules: raw.rules,
+            })
+        } else {
+            Err(failed_patterns)
+        }
     }
 
     pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -356,13 +379,26 @@ impl Config {
     /// the matched pattern), for the hook boundary to surface. Sharing this
     /// loop with `effective_rules` keeps the notes from drifting out of
     /// sync with what actually applied.
+    ///
+    /// Also carries one note per pattern in `invalid_override_patterns`
+    /// (an `overrides[].files` glob that failed to compile, whole entry
+    /// dropped at config load — see `compile_override_entry`). Unlike the
+    /// match-dependent notes below, this is a config-file defect, so it is
+    /// reported for every call regardless of whether `file_path` matches
+    /// anything, including when `file_path` escapes `git_root`.
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
     ) -> (RulesConfig, Vec<String>) {
         let file_path = file_path.as_ref();
         let mut rules = self.rules.clone();
-        let mut notes = Vec::new();
+        let mut notes: Vec<String> = self
+            .invalid_override_patterns
+            .iter()
+            .map(|pattern| {
+                format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
+            })
+            .collect();
 
         let match_target = match &self.git_root {
             Some(root) => Self::normalize_relative_to_root(file_path, root),
