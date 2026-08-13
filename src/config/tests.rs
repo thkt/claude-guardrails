@@ -404,7 +404,7 @@ fn files_と_rules_を持つ_override_entry_がそのまま保持される() {
     assert_eq!(merged.overrides.len(), 1);
     let entry = &merged.overrides[0];
     assert_eq!(entry.files.len(), 1);
-    assert_eq!(entry.files[0].glob(), "src/**/*.test.ts");
+    assert_eq!(entry.files[0].glob().glob(), "src/**/*.test.ts");
     assert_eq!(entry.rules.test_assertion, Some(false));
 }
 
@@ -423,7 +423,7 @@ fn compile_できない_glob_を含む_entry_は捨てられ_同じ_config_の�
     let merged = base.merge(project);
     assert_eq!(merged.overrides.len(), 1);
     let entry = &merged.overrides[0];
-    assert_eq!(entry.files[0].glob(), "src/**/*.spec.ts");
+    assert_eq!(entry.files[0].glob().glob(), "src/**/*.spec.ts");
     assert_eq!(entry.rules.flaky_test, Some(false));
 }
 
@@ -510,18 +510,24 @@ fn 後続の_override_は先行の_override_が設定した別の_rule_key_を�
     assert!(!rules.flaky_test);
 }
 
-// T-456: `..` で git root の外へ出る file_path には override が適用されず rule が有効なままになる
-#[test]
-fn dotdot_で_git_root_の外へ出る_file_path_には_override_が適用されず_rule_が有効なままになる() {
+/// tmp git root に `.guardrails.json` を書き、そこから読んだ Config を返す。
+/// `TempDir` は呼び出し側が束縛したまま保持すること。捨てるとディレクトリごと
+/// 消え、git root が失われて override 解決が別の経路に落ちる。
+fn repo_with_config(json: &str) -> (tempfile::TempDir, Config) {
     let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
-        r#"{"overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": false}}]}"#,
-    )
-    .unwrap();
+    fs::write(tmp.path().join(GUARDRAILS_CONFIG_FILE), json).unwrap();
     let config = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
+    (tmp, config)
+}
+
+// T-456: `..` で git root の外へ出る file_path には override が適用されず rule が有効なままになる
+#[test]
+fn dotdot_で_git_root_の外へ出る_file_path_には_override_が適用されず_rule_が有効なままになる() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": false}}]}"#,
+    );
 
     // git root の外 (親の親) へ `..` で抜けたうえで "secret.ts" に戻ってくる file_path。
     // `Path::components` で畳み込むと git root の外側を指し、root 相対化できない。
@@ -539,15 +545,9 @@ fn dotdot_で_git_root_の外へ出る_file_path_には_override_が適用され
 // T-465: root 相対化できない file_path では override を飛ばしたことが note に出る
 #[test]
 fn root相対化できない_file_path_では_override_を飛ばしたことが_note_に出る() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+    let (tmp, config) = repo_with_config(
         r#"{"overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": false}}]}"#,
-    )
-    .unwrap();
-    let config = Config::default()
-        .with_overrides_from_root(tmp.path())
-        .unwrap();
+    );
 
     // 相対化できない経路は 2 つあり、どちらも rule を有効なまま残す。`..` で
     // repository の外へ出る形と、symlink 経由の root (`current_dir` は実体へ
@@ -568,15 +568,9 @@ fn root相対化できない_file_path_では_override_を飛ばしたことが_
 // T-457: `src/*.ts` は `src/api/db.ts` にマッチしない
 #[test]
 fn src_star_ts_は_src_api_db_ts_にマッチしない() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+    let (tmp, config) = repo_with_config(
         r#"{"overrides": [{"files": ["src/*.ts"], "rules": {"testAssertion": false}}]}"#,
-    )
-    .unwrap();
-    let config = Config::default()
-        .with_overrides_from_root(tmp.path())
-        .unwrap();
+    );
 
     let nested_path = tmp.path().join("src").join("api").join("db.ts");
 

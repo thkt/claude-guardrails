@@ -456,14 +456,9 @@ fn load_config_or_note_pushes_note_and_falls_back_to_default_on_err() {
     );
 }
 
-// U-004: `resolve_effective_rules_or_note` sits between `load_config_or_note`
-// and `collect_violations` in `run_hook_with_input`, layering
-// `Config::effective_rules(file_path)` onto the config's `rules` before the
-// pipeline reads any toggle. Because `AstRuleFlags::from_config` and
-// `rules::load_rules` both read `config.rules`, resolving once at this single
-// point covers a registry rule (`sensitive-file`, via `rules::load_rules`)
-// and a rule gated outside the registry (`ast_security`, via
-// `AstRuleFlags::from_config` inside `collect_violations`) alike.
+// The three below pin what one resolution point has to cover: a registry rule,
+// a rule gated outside the registry, and the note. Why that point is the right
+// one lives on `resolve_effective_rules_with_notes` in `src/hook.rs`.
 
 // T-459: override がマッチするパスでは registry 経由の rule が発火しない
 #[test]
@@ -473,12 +468,12 @@ fn override_がマッチするパスでは_registry_経由の_rule_が発火し�
     let override_rules: ProjectRulesConfig =
         serde_json::from_str(r#"{"sensitiveFile": false}"#).unwrap();
     config.overrides = vec![OverrideEntry {
-        files: vec![Glob::new(file_path).unwrap()],
+        files: vec![Glob::new(file_path).unwrap().compile_matcher()],
         rules: override_rules,
     }];
 
     let mut notes = Vec::new();
-    let resolved = resolve_effective_rules_or_note(config, file_path, &mut notes);
+    let resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
 
     let (violations, _notes) = collect_violations(
         file_path,
@@ -502,12 +497,12 @@ fn override_がマッチするパスでは_registry_外で_gate_される_ast_se
     let override_rules: ProjectRulesConfig =
         serde_json::from_str(r#"{"astSecurity": false}"#).unwrap();
     config.overrides = vec![OverrideEntry {
-        files: vec![Glob::new(file_path).unwrap()],
+        files: vec![Glob::new(file_path).unwrap().compile_matcher()],
         rules: override_rules,
     }];
 
     let mut notes = Vec::new();
-    let resolved = resolve_effective_rules_or_note(config, file_path, &mut notes);
+    let resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
 
     let (violations, _notes) =
         collect_violations(file_path, "exec(userInput);", &resolved, None, true, None);
@@ -528,12 +523,12 @@ fn override_が_rule_を無効化すると無効化された_rule_名と一致�
     let mut config = Config::default();
     let override_rules: ProjectRulesConfig = serde_json::from_str(r#"{"eval": false}"#).unwrap();
     config.overrides = vec![OverrideEntry {
-        files: vec![Glob::new(pattern).unwrap()],
+        files: vec![Glob::new(pattern).unwrap().compile_matcher()],
         rules: override_rules,
     }];
 
     let mut notes = Vec::new();
-    let _resolved = resolve_effective_rules_or_note(config, file_path, &mut notes);
+    let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
 
     assert!(
         notes

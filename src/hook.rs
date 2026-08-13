@@ -301,7 +301,7 @@ fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<Stri
     }
 }
 
-/// Layers `config.effective_rules(file_path)` onto `config.rules` right after
+/// Layers `config.effective_rules_with_notes(file_path)` onto `config.rules` right after
 /// config load, before `collect_violations` reads a single toggle.
 /// `AstRuleFlags::from_config` (the `ast_security` / eval / ... gate that sits
 /// outside `rules::load_rules`) runs inside `collect_violations`, so
@@ -309,7 +309,7 @@ fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<Stri
 /// `AstRuleFlags::from_config` — is the one point that covers a registry
 /// rule (e.g. `sensitive-file`) and a rule gated outside the registry (e.g.
 /// `ast_security`) alike.
-fn resolve_effective_rules_or_note(
+fn resolve_effective_rules_with_notes(
     mut config: Config,
     file_path: &str,
     notes: &mut Vec<String>,
@@ -382,7 +382,7 @@ where
     };
 
     let config = load_config_or_note(load_config(), &mut notes);
-    let config = resolve_effective_rules_or_note(config, &target.file_path, &mut notes);
+    let config = resolve_effective_rules_with_notes(config, &target.file_path, &mut notes);
 
     show_config_hint(&config);
 

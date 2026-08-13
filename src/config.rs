@@ -1,5 +1,5 @@
 use crate::rules::Severity;
-use globset::{Glob, GlobBuilder};
+use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -140,7 +140,7 @@ pub struct OxlintConfig {
 /// with the rule toggles that apply only to matching files.
 #[derive(Debug, Clone)]
 pub struct OverrideEntry {
-    pub files: Vec<Glob>,
+    pub files: Vec<GlobMatcher>,
     pub rules: ProjectRulesConfig,
 }
 
@@ -338,7 +338,7 @@ impl Config {
         let mut failed_patterns = Vec::new();
         for pattern in raw.files {
             match GlobBuilder::new(&pattern).literal_separator(true).build() {
-                Ok(glob) => files.push(glob),
+                Ok(glob) => files.push(glob.compile_matcher()),
                 Err(_) => failed_patterns.push(pattern),
             }
         }
@@ -377,7 +377,7 @@ impl Config {
     /// patterns are always evaluated against a git-root-relative path.
     /// A `file_path` that normalizes outside `git_root` (escaping via `..`)
     /// matches no override. Without a known `git_root`, `file_path` is
-    /// matched as given (legacy behavior for callers with no repo context).
+    /// matched as given. Production always has a root, since `with_overrides_from_root` returns early without one and leaves `overrides` empty; the tests in `src/hook/tests.rs` build that shape by hand.
     ///
     /// Paired with the toggles is one note per matching override entry that
     /// disables at least one rule (name + the matched pattern), for the hook
@@ -402,6 +402,14 @@ impl Config {
                 format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
             })
             .collect();
+
+        // The common case: no `overrides` key in the config, so there is
+        // nothing to match against and no dropped entry to report. Returning
+        // here skips the path normalization below, which every hook
+        // invocation would otherwise pay for.
+        if self.overrides.is_empty() {
+            return (rules, notes);
+        }
 
         let match_target = match &self.git_root {
             Some(root) => Self::normalize_relative_to_root(file_path, root),
@@ -429,8 +437,8 @@ impl Config {
             let matched_patterns: Vec<&str> = entry
                 .files
                 .iter()
-                .filter(|glob| glob.compile_matcher().is_match(&match_target))
-                .map(Glob::glob)
+                .filter(|matcher| matcher.is_match(&match_target))
+                .map(|matcher| matcher.glob().glob())
                 .collect();
             if matched_patterns.is_empty() {
                 continue;

@@ -28,7 +28,7 @@ decision-makers: thkt
 
 ## Decision Outcome
 
-採用: **Option A**。`src/config.rs` の `OverrideEntry { files: Vec<Glob>, rules: ProjectRulesConfig }` が `.guardrails.json` の `overrides` 配列を保持する。`Config::effective_rules_with_notes` が対象 file の git-root 相対パスに対して各 entry を配列順に評価し、マッチした entry の `rules` を base の `RulesConfig` へ `RulesConfig::apply_overrides` (rule key 単位の merge) で重ねる。同じ rule key を複数 entry が指定したときは、後方の entry が勝つ。ESLint の `overrides` と同じく、entry 全体の置換ではなくキー単位の merge である。
+採用: **Option A**。`src/config.rs` の `OverrideEntry { files: Vec<GlobMatcher>, rules: ProjectRulesConfig }` が `.guardrails.json` の `overrides` 配列を保持する。`Config::effective_rules_with_notes` が対象 file の git-root 相対パスに対して各 entry を配列順に評価し、マッチした entry の `rules` を base の `RulesConfig` へ `RulesConfig::apply_overrides` (rule key 単位の merge) で重ねる。同じ rule key を複数 entry が指定したときは、後方の entry が勝つ。ESLint の `overrides` と同じく、entry 全体の置換ではなくキー単位の merge である。
 
 glob は `GlobBuilder::literal_separator(true)` で compile する。default の `false` は `*` が `/` を跨ぐため、`src/*.ts` が `src/api/db.ts` にまで一致してしまい、ESLint の `overrides.files` が前提とする「ディレクトリ境界を越えない」直感と食い違う。
 
@@ -36,15 +36,22 @@ glob は `GlobBuilder::literal_separator(true)` で compile する。default の
 
 override の `rules` キーは top-level `rules` と同じ toggle 名であり、`rule_id` ではない。1 toggle が複数 `rule_id` を束ねる既存の粒度は override でも変わらないため、path 単位で `astSecurity` を切ると、その path に属する 14 個の `rule_id` (`child-process-injection`、`err-stack-exposure`、`postmessage-origin-missing` 等、README `AST Security Rules` 参照) が丸ごと切れる。同様に `security` を切ると `security`/`dangerous-inner-html` の 2 個の `rule_id` が同時に切れる。1 個の `rule_id` だけを path 単位で切る手段はない。
 
-override がマッチした file で rule を無効化すると、`effective_rules_with_notes` が無効化した rule 名とマッチした pattern を記した note を積む (例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts]`)。hook はこの note を `resolve_effective_rules_or_note` (`src/hook.rs`) で JSON envelope の `notes` と stderr の両方に流す。
+override がマッチした file で rule を無効化すると、`effective_rules_with_notes` が無効化した rule 名とマッチした pattern を記した note を積む (例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts]`)。hook はこの note を `resolve_effective_rules_with_notes` (`src/hook.rs`) で JSON envelope の `notes` と stderr の両方に流す。
 
-`overrides` entry の `files` に compile できない glob pattern があると、`Config::compile_override_entry` はその entry を丸ごと `Err` で返し、`Config::merge` が失敗した pattern を `Config::invalid_override_patterns` へ集約する。`effective_rules_with_notes` は呼び出しのたびに (対象 file がどの entry にもマッチしなくても) `invalid_override_patterns` の各 pattern について `override entry dropped: glob pattern "..." failed to compile` という note を積む。この note も同じ `resolve_effective_rules_or_note` 経路で JSON envelope の `notes` と stderr に流れる。
+`overrides` entry の `files` に compile できない glob pattern があると、`Config::compile_override_entry` はその entry を丸ごと `Err` で返し、`Config::merge` が失敗した pattern を `Config::invalid_override_patterns` へ集約する。`effective_rules_with_notes` は呼び出しのたびに (対象 file がどの entry にもマッチしなくても) `invalid_override_patterns` の各 pattern について `override entry dropped: glob pattern "..." failed to compile` という note を積む。この note も同じ `resolve_effective_rules_with_notes` 経路で JSON envelope の `notes` と stderr に流れる。
 
 ### `overrides` の entry 単位 glob 失敗は ADR-0004 の config エラー軸と別軸
 
 ADR-0004 の「config エラー」軸 (fail-open with defaults、`Config::with_project_overrides` が `ConfigError::Parse` を返し `Config::default()` で続行) が扱うのは `.guardrails.json` 自体の JSON parse 失敗、つまり file 全体が壊れているケースである。
 
-`overrides` の entry が持つ glob pattern が compile に失敗するケース (閉じ括弧を欠いた `[invalid` 等) はこれとは別軸である。`.guardrails.json` 自体の parse は成功しており、`overrides` 配列の中の 1 entry だけが `GlobBuilder::build` に失敗する。この失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` (失敗した pattern 文字列) を返すことで entry 単位に閉じ込められ、`Config::merge` が当該 entry だけを drop しつつ、失敗した pattern を `Config::invalid_override_patterns` に集めて note 化に回す。同じ config の他の entry、および `rules` の基底設定は defaults に戻らず、影響を受けない。ADR-0004 の 4 軸で言えば、file 全体の parse 失敗は config エラー軸のまま、entry 単位の glob compile 失敗は同じ config エラー軸の中でもさらに粒度の細かい部分失敗として扱う。config 全体を defaults へ倒す必要はなく、壊れた entry 1 個だけを無効化すれば足りる。ADR-0004 の config エラー軸は fail-open (defaults へ丸ごと fallback) だが、entry 単位の glob 失敗は fail-open ではなく fail-partial (壊れた entry だけを無効化し、他は生かす) である点も両者を分ける。
+両者を分けるのは fallback の及ぶ範囲である。file 全体が壊れていれば読める設定が 1 つも無いので defaults へ倒すしかないが、glob 1 個が compile できないだけなら壊れた entry を外して残りを生かせる。
+
+| 失敗の軸                       | fallback の範囲                                                 |
+| ------------------------------ | --------------------------------------------------------------- |
+| `.guardrails.json` の parse    | config 全体を `Config::default()` へ (fail-open)                |
+| `overrides` entry の glob      | 当該 entry のみ drop、他 entry と `rules` は保持 (fail-partial) |
+
+entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` で失敗した pattern 文字列を返すことで閉じ込める。`Config::merge` は当該 entry を drop し、pattern を `Config::invalid_override_patterns` へ集めて note 化に回す。
 
 ### Consequences
 
@@ -55,7 +62,7 @@ ADR-0004 の「config エラー」軸 (fail-open with defaults、`Config::with_p
 - Good: `files` の pattern が glob として compile できない entry は drop と同時に note が積まれる。`tests/cli/config.rs` の T-464 (`compile_できない_globを書いたconfigではnoteがjson_envelopeに出る`) がこの挙動を pin している
 - Bad: override の `rules` キーは top-level と同じ粗さの toggle であり、`rule_id` 単位の細かい制御はできない。`astSecurity` を 1 path で切ると 14 個の `rule_id` が切れる。`AST Security Rules` の表は 15 行あり、残る 1 個の `excessive-nesting` は override で切れない
 - Bad: override 解決は `file_path` ごとに毎回 entry を線形走査する。entry 数が多い project では、rule 判定の前に glob match のコストが積み上がる
-- Bad: symlink 経由の repository root では override が効かない。`current_dir` が root を実体パスへ解決する一方、agent が送る `file_path` は解決されないため `strip_prefix` が外れる。rule が有効なまま残る fail-closed 方向だが、利用者が書いた override は無視される。`~/GitHub/...` 形式の root は影響を受けず、動機となった dotclaude もそこに入る。相対化できなかったことは note に出る (`override matching skipped: ...`)。`file_path` 側を最寄りの実在祖先まで遡って canonicalize する対応は backlog
+- Bad: symlink 経由の repository root では override が効かない。`current_dir` が root を実体パスへ解決する一方、agent が送る `file_path` は解決されないため `strip_prefix` が外れる。rule が有効なまま残る fail-closed 方向だが、利用者が書いた override は無視される。`~/GitHub/...` 形式の root は影響を受けず、動機となった dotclaude もそこに入る。相対化できなかったことは note に出る (`override matching skipped: ...`)。`file_path` 側を canonicalize する対応は backlog。設計から起こす必要はなく、`src/invariant.rs` の `canonical_path` (親を canonicalize して file 名を再結合) と `canonical_relative_key` が同じ caller context で既に解いている。統合時は両者の fallback が違う点に注意する。invariant 側は raw path で `strip_prefix` し直すが、それは `..` を畳み込まないため override に持ち込むと traversal 対策が緩む
 
 ### Verification
 

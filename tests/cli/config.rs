@@ -218,7 +218,7 @@ fn malformed_config_falls_back_to_defaults_and_keeps_detecting() {
 // the incoming `file_path`, and applied to rule evaluation, all through the
 // real binary (config load -> effective_rules_with_notes -> collect_violations
 // -> exit code / JSON envelope), not through a unit-level call into
-// `resolve_effective_rules_or_note` directly.
+// `resolve_effective_rules_with_notes` directly.
 
 // T-462: overrides の pattern に一致するパスへの Write は exit 0 で通る
 #[test]
