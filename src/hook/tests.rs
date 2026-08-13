@@ -1,5 +1,7 @@
 use super::*;
+use crate::config::{OverrideEntry, ProjectRulesConfig};
 use crate::rules::{rule_id, Severity};
+use globset::Glob;
 
 fn make_violation(rule: &str, severity: Severity) -> Violation {
     Violation {
@@ -451,5 +453,93 @@ fn load_config_or_note_pushes_note_and_falls_back_to_default_on_err() {
         notes[0].contains("invalid config"),
         "note must include underlying error; got: {}",
         notes[0]
+    );
+}
+
+// U-004: `resolve_effective_rules_or_note` sits between `load_config_or_note`
+// and `collect_violations` in `run_hook_with_input`, layering
+// `Config::effective_rules(file_path)` onto the config's `rules` before the
+// pipeline reads any toggle. Because `AstRuleFlags::from_config` and
+// `rules::load_rules` both read `config.rules`, resolving once at this single
+// point covers a registry rule (`sensitive-file`, via `rules::load_rules`)
+// and a rule gated outside the registry (`ast_security`, via
+// `AstRuleFlags::from_config` inside `collect_violations`) alike.
+
+// T-459: override がマッチするパスでは registry 経由の rule が発火しない
+#[test]
+fn override_がマッチするパスでは_registry_経由の_rule_が発火しない() {
+    let file_path = "/project/.env";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig =
+        serde_json::from_str(r#"{"sensitiveFile": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(file_path).unwrap()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let resolved = resolve_effective_rules_or_note(config, file_path, &mut notes);
+
+    let (violations, _notes) = collect_violations(
+        file_path,
+        "DB_URL=postgres://localhost/db\n",
+        &resolved,
+        None,
+        false,
+        None,
+    );
+    assert!(
+        !violations.iter().any(|v| v.rule == rule_id::SENSITIVE_FILE),
+        "sensitive-file must not fire once the matching override disables it; got: {violations:?}"
+    );
+}
+
+// T-460: override がマッチするパスでは registry 外で gate される ast_security も発火しない
+#[test]
+fn override_がマッチするパスでは_registry_外で_gate_される_ast_security_も発火しない() {
+    let file_path = "/src/app/api/users/route.ts";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig =
+        serde_json::from_str(r#"{"astSecurity": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(file_path).unwrap()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let resolved = resolve_effective_rules_or_note(config, file_path, &mut notes);
+
+    let (violations, _notes) =
+        collect_violations(file_path, "exec(userInput);", &resolved, None, true, None);
+    assert!(
+        !violations
+            .iter()
+            .any(|v| v.rule == rule_id::CHILD_PROCESS_INJECTION),
+        "child-process-injection (gated by ast_security, outside rules::load_rules) must not \
+         fire once the matching override disables ast_security; got: {violations:?}"
+    );
+}
+
+// T-461: override が rule を無効化すると無効化された rule 名と一致した pattern を含む note が積まれる
+#[test]
+fn override_が_rule_を無効化すると無効化された_rule_名と一致した_pattern_を含む_note_が積まれる() {
+    let file_path = "/src/app.ts";
+    let pattern = "**/app.ts";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig = serde_json::from_str(r#"{"eval": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(pattern).unwrap()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let _resolved = resolve_effective_rules_or_note(config, file_path, &mut notes);
+
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("eval") && n.contains(pattern)),
+        "expected a note naming the disabled rule (\"eval\") and the matching override pattern \
+         (\"{pattern}\"); got: {notes:?}"
     );
 }

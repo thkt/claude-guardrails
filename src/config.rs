@@ -41,6 +41,15 @@ macro_rules! define_rule_config {
             pub(crate) fn all_off() -> Self {
                 Self { $($field: false,)* }
             }
+
+            /// Serde names of rules `before` had on and `self` has off, in
+            /// declaration order. Drives the override-disable note in
+            /// `effective_rules_with_notes` without hand-listing every field.
+            pub(crate) fn disabled_since(&self, before: &RulesConfig) -> Vec<&'static str> {
+                let mut disabled = Vec::new();
+                $(if before.$field && !self.$field { disabled.push($serde_name); })*
+                disabled
+            }
         }
 
         /// Every public toggle name (the `.guardrails.json` `rules` keys). Test-only
@@ -339,27 +348,52 @@ impl Config {
     /// matches no override. Without a known `git_root`, `file_path` is
     /// matched as given (legacy behavior for callers with no repo context).
     pub fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
+        self.effective_rules_with_notes(file_path).0
+    }
+
+    /// Same resolution as `effective_rules`, paired with one note per
+    /// matching override entry that disables at least one rule (name +
+    /// the matched pattern), for the hook boundary to surface. Sharing this
+    /// loop with `effective_rules` keeps the notes from drifting out of
+    /// sync with what actually applied.
+    pub fn effective_rules_with_notes(
+        &self,
+        file_path: impl AsRef<Path>,
+    ) -> (RulesConfig, Vec<String>) {
         let file_path = file_path.as_ref();
         let mut rules = self.rules.clone();
+        let mut notes = Vec::new();
 
         let match_target = match &self.git_root {
             Some(root) => Self::normalize_relative_to_root(file_path, root),
             None => Some(file_path.to_path_buf()),
         };
         let Some(match_target) = match_target else {
-            return rules;
+            return (rules, notes);
         };
 
         for entry in &self.overrides {
-            let matches = entry
+            let matched_patterns: Vec<&str> = entry
                 .files
                 .iter()
-                .any(|glob| glob.compile_matcher().is_match(&match_target));
-            if matches {
-                rules.apply_overrides(entry.rules.clone());
+                .filter(|glob| glob.compile_matcher().is_match(&match_target))
+                .map(Glob::glob)
+                .collect();
+            if matched_patterns.is_empty() {
+                continue;
+            }
+            let before = rules.clone();
+            rules.apply_overrides(entry.rules.clone());
+            let disabled = rules.disabled_since(&before);
+            if !disabled.is_empty() {
+                notes.push(format!(
+                    "override disabled rule(s) [{}] for pattern(s) [{}]",
+                    disabled.join(", "),
+                    matched_patterns.join(", "),
+                ));
             }
         }
-        rules
+        (rules, notes)
     }
 
     /// Resolves `file_path` against `git_root` and returns it relative to
