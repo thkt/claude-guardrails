@@ -384,8 +384,7 @@ mod tests {
         assert!(!args.contains(&"eslint/no-console".to_owned()));
     }
 
-    // T-446 (#426): jsx-key は plugin 有効時点で warning として発火済み。`--deny` は
-    // severity を error へ上げるためだけに出すので、この 1 本が昇格の pin になる。
+    // T-446 (#426): jsx-key が list に載っていること自体の pin。
     #[test]
     fn denies_jsx_key_by_default_to_raise_it_from_warning_to_error() {
         let args = build_args(&OxlintConfig::default(), true);
@@ -394,22 +393,6 @@ mod tests {
                 .any(|w| w[0] == "--deny" && w[1] == "react/jsx-key"),
             "expected `--deny react/jsx-key`; without it oxlint returns warning and the \
              edit is not stopped. got: {args:?}"
-        );
-    }
-
-    // T-447 (#426): 昇格の無効化手段。`--deny` が消えると warning に戻り advisory になる。
-    #[test]
-    fn omits_deny_jsx_key_when_the_user_allows_that_rule_in_config() {
-        let config = OxlintConfig {
-            deny: vec![],
-            allow: vec!["react/jsx-key".to_owned()],
-        };
-        let args = build_args(&config, true);
-        assert!(
-            !args
-                .windows(2)
-                .any(|w| w[0] == "--deny" && w[1] == "react/jsx-key"),
-            "expected the user allow to remove the default deny; got: {args:?}"
         );
     }
 

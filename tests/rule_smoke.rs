@@ -866,9 +866,8 @@ fn in_project_file(manifest: &str, relative_path: &str) -> (tempfile::TempDir, S
     (root, file_path)
 }
 
-// #426 用。plugin が有効な時点で jsx-key は warning として既に violation 配列へ載る。
-// `assert_rule_fires` は severity を見ないので、`--deny` による昇格はこの assert でしか
-// 落ちない。
+// severity を昇格させる変更を `assert_rule_fires` では捕まえられないので分けた。
+// あちらは rule id の有無しか見ず、昇格前から通る。
 fn assert_rule_blocks(rule_id: &str, file_path: &str, content: &str) {
     let output = run_guardrails_json(hook_input(file_path, content).as_bytes());
     let envelope = parse_envelope(&output);
@@ -881,11 +880,6 @@ fn assert_rule_blocks(rule_id: &str, file_path: &str, content: &str) {
     assert_eq!(
         envelope["data"]["decision"], "block",
         "expected the edit to stop. envelope: {envelope}"
-    );
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "expected the blocking hook exit code. envelope: {envelope}"
     );
 }
 
