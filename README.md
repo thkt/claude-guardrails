@@ -397,7 +397,8 @@ Place a `.guardrails.json` at your project root. The format is the flat `Project
   },
   "severity": {
     "blockThreshold": "high"
-  }
+  },
+  "overrides": []
 }
 ```
 
@@ -433,6 +434,30 @@ Off by default. When enabled, an edit to a file that already contains blocking v
 - Matching counts (rule, trimmed line text) pairs, so pasting an extra copy of an existing violating line still blocks the surplus copy.
 - Fail-safe: when the before-edit state cannot be trusted (unreadable file, degraded edit resolution, before-edit parse failure), demotion is skipped entirely, every violation keeps blocking, and a `demotion skipped (...)` note names the cause. Writing a brand-new file is not a failure: it has no before content, so nothing demotes and every violation blocks, with no note.
 - With the toggle on, each demoted violation in the JSON output carries `"origin": "preexisting"`, and demoted warnings are marked `(preexisting)` on stderr. Every other entry omits `origin`: the tool only before-compares the demoted ones, so it claims nothing about the rest. With the toggle off, the `origin` field is absent and output is byte-identical to previous versions.
+
+#### `overrides`
+
+Per-path rule toggles, layered on top of the top-level `rules` for files whose path matches a glob. Same shape as ESLint's `overrides`: an array of `{ files, rules }` entries, each `rules` a partial `rules` object naming only the keys to change.
+
+```json
+{
+  "overrides": [
+    {
+      "files": ["src/**/*.test.ts", "src/**/*.spec.ts"],
+      "rules": {
+        "testAssertion": false
+      }
+    }
+  ]
+}
+```
+
+- `files`: glob patterns matched against the path relative to the git root, not the absolute or cwd-relative path. `*`/`?` do not cross a `/` boundary — `src/*.ts` matches `src/app.ts` but not `src/api/db.ts` — matching ESLint's glob semantics rather than globset's cross-`/` default ([globset `literal_separator`](https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator)). A `file_path` that resolves outside the git root (e.g. via a leading `../`) matches no override.
+- `rules`: the same keys as the top-level `rules` object (see [Rules](#rules) above). Any key left out keeps the top-level (or default) value for files matched by this entry.
+- When two or more entries match the same file, they apply in array order and merge key by key, so a later match overwrites only the rule keys it names; it does not replace the whole `rules` object of an earlier match.
+- An entry whose `files` pattern fails to compile as a glob (e.g. an unbalanced `[`) is dropped in its entirety. The rest of the config, including other `overrides` entries and the top-level `rules`, is unaffected. guardrails adds a note naming the pattern it could not compile, e.g. `override entry dropped: glob pattern "src/[invalid" failed to compile`. This note is surfaced in the JSON envelope's `notes` and on stderr on every config load, regardless of whether the file being checked matches that entry's `files`.
+- **Toggle granularity, not rule granularity**: an override's `rules` keys are the same coarse toggles as the top-level config, not individual `rule_id`s. Disabling `security` or `astSecurity` for a glob disables every `rule_id` that toggle covers for the matched files. For `astSecurity` that is all 14 sub-rules listed under `AST Security Rules` above, not a single one — there is no per-path way to turn off one sub-rule while keeping its siblings on.
+- When an override disables a rule for the file being checked, guardrails adds a note naming the disabled rule(s) and the matching pattern(s), e.g. `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts]`, surfaced in the JSON envelope's `notes` and on stderr.
 
 ### Examples
 
@@ -481,6 +506,23 @@ All rules enabled, oxlint auto-provisioned, AI-tuned deny rules active.
   "enabled": false
 }
 ```
+
+**Relax a rule for one directory only**:
+
+```json
+{
+  "overrides": [
+    {
+      "files": ["fixtures/**"],
+      "rules": {
+        "testAssertion": false
+      }
+    }
+  ]
+}
+```
+
+`testAssertion` stays on everywhere else; only files under `fixtures/` skip it.
 
 ### Config Resolution
 
