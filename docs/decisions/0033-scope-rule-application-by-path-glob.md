@@ -46,10 +46,10 @@ ADR-0004 の「config エラー」軸 (fail-open with defaults、`Config::with_p
 
 両者を分けるのは fallback の及ぶ範囲である。file 全体が壊れていれば読める設定が 1 つも無いので defaults へ倒すしかないが、glob 1 個が compile できないだけなら壊れた entry を外して残りを生かせる。
 
-| 失敗の軸                       | fallback の範囲                                                 |
-| ------------------------------ | --------------------------------------------------------------- |
-| `.guardrails.json` の parse    | config 全体を `Config::default()` へ (fail-open)                |
-| `overrides` entry の glob      | 当該 entry のみ drop、他 entry と `rules` は保持 (fail-partial) |
+| 失敗の軸                    | fallback の範囲                                                 |
+| --------------------------- | --------------------------------------------------------------- |
+| `.guardrails.json` の parse | config 全体を `Config::default()` へ (fail-open)                |
+| `overrides` entry の glob   | 当該 entry のみ drop、他 entry と `rules` は保持 (fail-partial) |
 
 entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` で失敗した pattern 文字列を返すことで閉じ込める。`Config::merge` は当該 entry を drop し、pattern を `Config::invalid_override_patterns` へ集めて note 化に回す。
 
@@ -62,10 +62,14 @@ entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が 
 - Good: `files` の pattern が glob として compile できない entry は drop と同時に note が積まれる。`tests/cli/config.rs` の T-464 (`compile_できない_globを書いたconfigではnoteがjson_envelopeに出る`) がこの挙動を pin している
 - Bad: override の `rules` キーは top-level と同じ粗さの toggle であり、`rule_id` 単位の細かい制御はできない。`astSecurity` を 1 path で切ると 14 個の `rule_id` が切れる。`AST Security Rules` の表は 15 行あり、残る 1 個の `excessive-nesting` は override で切れない
 - Bad: override 解決は `file_path` ごとに毎回 entry を線形走査する。entry 数が多い project では、rule 判定の前に glob match のコストが積み上がる
-- Bad: symlink 経由の repository root では override が効かない。`current_dir` が root を実体パスへ解決する一方、agent が送る `file_path` は解決されないため `strip_prefix` が外れる。rule が有効なまま残る fail-closed 方向だが、利用者が書いた override は無視される。`~/GitHub/...` 形式の root は影響を受けず、動機となった dotclaude もそこに入る。相対化できなかったことは note に出る (`override matching skipped: ...`)。`file_path` 側を canonicalize する対応は backlog。設計から起こす必要はなく、`src/invariant.rs` の `canonical_path` (親を canonicalize して file 名を再結合) と `canonical_relative_key` が同じ caller context で既に解いている。統合時は両者の fallback が違う点に注意する。invariant 側は raw path で `strip_prefix` し直すが、それは `..` を畳み込まないため override に持ち込むと traversal 対策が緩む
+- Good: pattern のマッチは symlink を解決した後のパスに対して行う (#432)。`src/path_resolve.rs` の `resolve_under_root` が、実在するパスは丸ごと canonicalize し、まだ存在しないパスは最も近い実在の祖先まで遡って canonicalize してから残りを再結合する。遡りは git root で打ち切るので、repository の外を stat しない。解決でパスが変わったときは note に出る (`override matching followed a symlink: ...`)
+- Bad: hook が判定してから write syscall が走るまでの間に symlink を差し替える競合 (TOCTOU) は塞げない。PreToolUse hook は書き込み前に 1 回しか呼ばれず、symlink の作成自体も Bash 経由なら hook を通らない。この設計が塞ぐのは、1 回の綴りに対する静的な誤マッチに限る
+- Bad: repository 内に symlink を置いている利用者は、override の当たり方が変わる。`packages/web/src` が別ディレクトリを指す monorepo では、`packages/web/**` の override が解決後のパスに当たらなくなる。note で気付ける形にしてあるが、config を書き直す必要は残る
+- Note: `src/invariant.rs` の `canonical_relative_key`/`canonical_path` は同じ問題を別実装で解いたままになっている。統合は backlog。invariant 側の fallback は raw path での `strip_prefix` で、`..` を畳み込まないため override へそのまま持ち込むと traversal 対策が緩む。doc が明記する「raw path 版より厳しくならない」契約も変わるため、契約変更の pin を足したうえで別 PR にする
 
 ### Verification
 
 - `src/config/tests.rs` で、`overrides` 未指定時は空のまま読めること、`files`/`rules` を保持すること、compile 不能な glob を含む entry だけが drop され他 entry と基底 `rules` は影響を受けないこと、pattern 一致/不一致で toggle が変わる/変わらないこと、同じ rule key を複数 entry が指定したときは後方が勝つこと、別 rule key は消えないこと、`..` で root の外に出る path はどの override にもマッチしないこと、`src/*.ts` が `src/api/db.ts` にマッチしないこと、絶対パスの pattern は git-root 相対のマッチ対象に一致しないこと、相対パスの `file_path` は git root へ join してから同じ override が当たること、filesystem root を越える `..` で始まる絶対 `file_path` はどの override にもマッチしないことを assert
 - `src/hook/tests.rs` で、override が registry 経由の rule (`sensitive-file`) と registry 外で gate される rule (`ast_security` 経由の `child-process-injection`) の両方を止めること、override が rule を無効化すると note に無効化した rule 名とマッチした pattern が乗ることを assert
-- `tests/cli/config.rs` で実バイナリを通し、`overrides` の対象パスへの Write は exit 0 で通り、対象外パスへの同じ content は exit 2 で block されることを assert。同じファイルの T-464 は compile 不能 glob を書いた config で JSON envelope の `notes` に当該 pattern を含む note が乗ることを assert し、green
+- `src/path_resolve/tests.rs` で、symlink のディレクトリを含むパスと symlink そのものを指すパスが実体へ解決されること、未作成のディレクトリを含むパスが最寄りの実在祖先まで遡って解決されること、root の外へ出るパスが `None` になることを assert。実装を 2 通り (symlink を辿らない形、親を 1 段だけ canonicalize する形) に壊して落ちることを確認した
+- `tests/cli/config.rs` で実バイナリを通し、`overrides` の対象パスへの Write は exit 0 で通り、対象外パスへの同じ content は exit 2 で block されることを assert。対象外へ向く symlink を経由した Write が exit 2 で止まり note が出ることも同じファイルで assert。同じファイルの T-464 は compile 不能 glob を書いた config で JSON envelope の `notes` に当該 pattern を含む note が乗ることを assert し、green

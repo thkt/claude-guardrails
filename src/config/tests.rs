@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::os::unix::fs::symlink;
 
 fn tmp_repo() -> tempfile::TempDir {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -623,4 +624,75 @@ fn root_を越える_dotdot_で始まる絶対_file_path_には_override_が適�
     // 無いため `..` が残り、git root 相対にできないので rule は有効なまま。
     let rules = config.effective_rules(Path::new("/../secret.ts"));
     assert!(rules.test_assertion);
+}
+
+/// `repo_with_config` が返した repository に `src/allowed/esc -> ../protected`
+/// を張り、実体の root を返す。
+fn with_escape_symlink(tmp: &tempfile::TempDir) -> PathBuf {
+    let root = tmp.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("src/allowed")).unwrap();
+    fs::create_dir_all(root.join("src/protected")).unwrap();
+    symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    root
+}
+
+// T-473: symlink 経由で綴った file_path には symlink 先のパスで override が判定される
+#[test]
+fn symlink_経由で綴った_file_path_には_symlink_先のパスで_override_が判定される() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"testAssertion": false}}]}"#,
+    );
+    let root = with_escape_symlink(&tmp);
+
+    // 綴りは override の対象内だが、書き込み先の実体は対象外。
+    let rules = config.effective_rules(root.join("src/allowed/esc/app.ts"));
+    assert!(rules.test_assertion);
+}
+
+// T-474: 解決で path が変わったときは変更前後のパスを含む note が出る
+#[test]
+fn 解決で_path_が変わったときは変更前後のパスを含む_note_が出る() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"testAssertion": false}}]}"#,
+    );
+    let root = with_escape_symlink(&tmp);
+
+    let spelled = root.join("src/allowed/esc/app.ts");
+    let (_rules, notes) = config.effective_rules_with_notes(&spelled);
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("followed a symlink"))
+        .unwrap_or_else(|| panic!("expected a symlink note; got: {notes:?}"));
+    assert!(note.contains("src/allowed/esc/app.ts"), "note: {note}");
+    assert!(note.contains("src/protected/app.ts"), "note: {note}");
+}
+
+// T-475: 未作成ディレクトリ配下への Write でも pattern に一致すれば override が適用される
+#[test]
+fn 未作成ディレクトリ配下への_write_でも_pattern_に一致すれば_override_が適用される() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"testAssertion": false}}]}"#,
+    );
+    let root = tmp.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("src/allowed")).unwrap();
+
+    // `fresh` はこの Write が作るディレクトリで、まだ disk に無い。
+    let rules = config.effective_rules(root.join("src/allowed/fresh/app.ts"));
+    assert!(!rules.test_assertion);
+}
+
+// T-476: 解決できない file_path では rule を有効化する override も適用されず base の toggle が残る
+#[test]
+fn 解決できない_file_path_では_rule_を有効化する_override_も適用されない() {
+    let (tmp, config) = repo_with_config(
+        r#"{"rules": {"testAssertion": false},
+            "overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": true}}]}"#,
+    );
+
+    // override は rule を有効化する向きにも書ける。解決できない file_path では
+    // その override も落ちるので、base の無効化がそのまま残る。
+    let escaping = tmp.path().join("..").join("..").join("secret.ts");
+    let rules = config.effective_rules(&escaping);
+    assert!(!rules.test_assertion);
 }

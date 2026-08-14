@@ -1,10 +1,11 @@
+use crate::path_resolve::{self, Resolved};
 use crate::rules::Severity;
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// Generates `RulesConfig` (runtime flags), `ProjectRulesConfig` (serde DTO),
 /// `Default` impl (all rules enabled), and `apply_overrides` (partial merge).
@@ -370,18 +371,20 @@ impl Config {
     /// by key via `RulesConfig::apply_overrides` (eslint overrides semantics:
     /// a later match wins per rule key, not a whole-object replacement).
     ///
-    /// Patterns are matched against a git-root-relative path (see
-    /// `normalize_relative_to_root`), so a `file_path` escaping `git_root`
-    /// via `..` matches no override. Without a known `git_root` the path is
-    /// matched as given; production never takes that branch, since
-    /// `with_overrides_from_root` leaves `overrides` empty when it finds no
-    /// root.
+    /// Patterns are matched against a git-root-relative path resolved by
+    /// `path_resolve::resolve_under_root`, so a `file_path` escaping
+    /// `git_root` via `..` matches no override, and one spelled through a
+    /// symlink matches the patterns its target sits under. Without a known
+    /// `git_root` the path is matched as given; production never takes that
+    /// branch, since `with_overrides_from_root` leaves `overrides` empty when
+    /// it finds no root.
     ///
     /// The notes are for the hook boundary to surface: one per matching
     /// entry that disables at least one rule (rule names + matched
-    /// patterns), plus one per `invalid_override_patterns` pattern. The
-    /// latter reports a config-file defect rather than a match result, so it
-    /// is emitted on every call, `file_path` escaping `git_root` included.
+    /// patterns), one when resolution moved the path, and one per
+    /// `invalid_override_patterns` pattern. The last reports a config-file
+    /// defect rather than a match result, so it is emitted on every call,
+    /// `file_path` escaping `git_root` included.
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
@@ -402,9 +405,12 @@ impl Config {
             return (rules, notes);
         }
 
-        let match_target = match &self.git_root {
-            Some(root) => Self::normalize_relative_to_root(file_path, root),
-            None => Some(file_path.to_path_buf()),
+        let resolved = match &self.git_root {
+            Some(root) => path_resolve::resolve_under_root(file_path, root),
+            None => Some(Resolved {
+                relative: file_path.to_path_buf(),
+                moved: false,
+            }),
         };
         // Two situations reach this branch and neither is visible otherwise:
         // a `..` that climbs out of the repository, and a root reached
@@ -412,13 +418,23 @@ impl Config {
         // `file_path` does not, so `strip_prefix` misses). Both leave every
         // rule enabled — the safe direction, but it drops what the user
         // wrote, so say so.
-        let Some(match_target) = match_target else {
+        let Some(resolved) = resolved else {
             notes.push(format!(
                 "override matching skipped: {} did not resolve under the repository root",
                 file_path.display(),
             ));
             return (rules, notes);
         };
+        // Without this the patterns that matched are not the ones the spelling
+        // suggests, and nothing says so.
+        if resolved.moved {
+            notes.push(format!(
+                "override matching followed a symlink: {} resolves to {}",
+                file_path.display(),
+                resolved.relative.display(),
+            ));
+        }
+        let match_target = resolved.relative;
 
         for entry in &self.overrides {
             let matched_patterns: Vec<&str> = entry
@@ -442,50 +458,6 @@ impl Config {
             }
         }
         (rules, notes)
-    }
-
-    /// Resolves `file_path` against `git_root` and returns it relative to
-    /// `git_root`, or `None` when it falls outside `git_root`.
-    ///
-    /// `file_path` is not required to exist on disk (a `PreToolUse` hook may
-    /// see a file about to be created), so `Path::canonicalize` cannot be
-    /// used here: it resolves symlinks and requires the path to exist.
-    /// Instead `..` is resolved lexically by folding `Path::components`
-    /// (`ParentDir` pops the last pushed `Normal` component), mirroring what
-    /// `canonicalize` would do for the path-syntax part alone. `.` is not
-    /// folded here because `absolute` is always absolute and
-    /// `Path::components` drops `.` outside the start of a relative path
-    /// (<https://doc.rust-lang.org/std/path/struct.Components.html>).
-    ///
-    /// The fold stops at `..`, not at symlinks: a `file_path` spelled
-    /// through a symlink pointing out of the matched directory still matches
-    /// the pattern while the write lands elsewhere.
-    fn normalize_relative_to_root(file_path: &Path, git_root: &Path) -> Option<PathBuf> {
-        let absolute = if file_path.is_absolute() {
-            file_path.to_path_buf()
-        } else {
-            git_root.join(file_path)
-        };
-
-        let mut normalized: Vec<Component> = Vec::new();
-        for component in absolute.components() {
-            match component {
-                Component::ParentDir => {
-                    if matches!(normalized.last(), Some(Component::Normal(_))) {
-                        normalized.pop();
-                    } else {
-                        normalized.push(component);
-                    }
-                }
-                other => normalized.push(other),
-            }
-        }
-        let normalized: PathBuf = normalized.into_iter().collect();
-
-        normalized
-            .strip_prefix(git_root)
-            .ok()
-            .map(Path::to_path_buf)
     }
 }
 

@@ -7,6 +7,7 @@ mod hook_exit;
 mod import_map;
 mod invariant;
 mod io;
+mod path_resolve;
 mod regex_compile;
 mod resolve;
 mod rules;
