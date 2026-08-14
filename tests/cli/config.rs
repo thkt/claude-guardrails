@@ -343,3 +343,68 @@ fn hook_mode_で_override_のnoteがstderrに出る() {
         "expected the override note on stderr; got: {stderr:?}"
     );
 }
+
+// T-477: override の対象外へ向く symlink を経由した Write は exit 2 で止まる
+#[test]
+fn override_の対象外へ向く_symlink_を経由した_write_は_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("src/allowed")).unwrap();
+    fs::create_dir_all(root.join("src/protected")).unwrap();
+    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+
+    // 綴りは override の対象内だが、この Write が作るファイルは src/protected に落ちる。
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/esc/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a path spelled through a symlink must be judged at its target; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("followed a symlink"),
+        "the resolution must be visible in a note; stderr: {stderr}"
+    );
+}
+
+// T-478: symlink を経由しない override 対象パスへの同じ Write は exit 0 で通る
+#[test]
+fn symlink_を経由しない_override_対象パスへの同じ_write_は_exit_0で通る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("src/allowed")).unwrap();
+    fs::create_dir_all(root.join("src/protected")).unwrap();
+    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "the same repository must keep applying the override to non-symlinked paths; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
