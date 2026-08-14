@@ -2,6 +2,8 @@ use crate::common::{
     clean_write_json, run_guardrails_in_dir, run_guardrails_with, tmp_repo, tmp_repo_with_claude,
 };
 use std::fs;
+use std::os::unix::fs::symlink;
+use std::path::PathBuf;
 
 #[test]
 fn hint_shown_when_claude_dir_exists_without_tools_json() {
@@ -344,9 +346,10 @@ fn hook_mode_で_override_のnoteがstderrに出る() {
     );
 }
 
-// T-477: override の対象外へ向く symlink を経由した Write は exit 2 で止まる
-#[test]
-fn override_の対象外へ向く_symlink_を経由した_write_は_exit_2で止まる() {
+/// `src/allowed/**` で eval を切る config と `src/allowed/esc -> ../protected`
+/// を持つ repository を組み、`TempDir` と実体の root を返す。`TempDir` を落とす
+/// とディレクトリごと消えるので、呼び出し側で束縛したまま保持する。
+fn repo_with_escape_symlink() -> (tempfile::TempDir, PathBuf) {
     let tmp = tmp_repo();
     fs::write(
         tmp.path().join(".guardrails.json"),
@@ -356,7 +359,14 @@ fn override_の対象外へ向く_symlink_を経由した_write_は_exit_2で止
     let root = tmp.path().canonicalize().unwrap();
     fs::create_dir_all(root.join("src/allowed")).unwrap();
     fs::create_dir_all(root.join("src/protected")).unwrap();
-    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    (tmp, root)
+}
+
+// T-477: override の対象外へ向く symlink を経由した Write は exit 2 で止まる
+#[test]
+fn override_の対象外へ向く_symlink_を経由した_write_は_exit_2で止まる() {
+    let (_tmp, root) = repo_with_escape_symlink();
 
     // 綴りは override の対象内だが、この Write が作るファイルは src/protected に落ちる。
     let json = serde_json::json!({
@@ -382,16 +392,7 @@ fn override_の対象外へ向く_symlink_を経由した_write_は_exit_2で止
 // T-478: symlink を経由しない override 対象パスへの同じ Write は exit 0 で通る
 #[test]
 fn symlink_を経由しない_override_対象パスへの同じ_write_は_exit_0で通る() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(".guardrails.json"),
-        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
-    )
-    .unwrap();
-    let root = tmp.path().canonicalize().unwrap();
-    fs::create_dir_all(root.join("src/allowed")).unwrap();
-    fs::create_dir_all(root.join("src/protected")).unwrap();
-    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    let (_tmp, root) = repo_with_escape_symlink();
 
     let json = serde_json::json!({
         "tool_name": "Write",

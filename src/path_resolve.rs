@@ -43,10 +43,7 @@ pub(crate) fn resolve_under_root(file_path: &Path, root: &Path) -> Option<Resolv
 }
 
 /// Folds `..` by popping the last pushed `Normal` component, mirroring what
-/// `canonicalize` would do for the path-syntax part alone. `.` needs no arm:
-/// `absolute` is always absolute and `Path::components` drops `.` outside the
-/// start of a relative path
-/// (<https://doc.rust-lang.org/std/path/struct.Components.html>).
+/// `canonicalize` would do for the path-syntax part alone.
 fn fold_parent_dirs(absolute: &Path) -> PathBuf {
     let mut folded: Vec<Component> = Vec::new();
     for component in absolute.components() {
@@ -66,13 +63,14 @@ fn fold_parent_dirs(absolute: &Path) -> PathBuf {
 
 /// Collapses symlinked ancestors of `lexical` into the same space as `root`.
 ///
-/// The whole path is canonicalized when it exists, which covers a symlink in
-/// the final component. Otherwise the nearest existing ancestor is
-/// canonicalized and the components below it are rejoined; those components
-/// are about to be created, so none of them can be a symlink today. The walk
-/// stops at `root`, leaving paths outside the repository untouched — they are
-/// rejected by `strip_prefix` anyway, and canonicalizing them would stat
-/// directories the repository does not own.
+/// A path that exists is canonicalized whole, which covers a symlink in the
+/// final component. Otherwise the nearest existing ancestor is canonicalized
+/// and the components below it are rejoined. Those components are about to be
+/// created, so none of them can be a symlink today.
+///
+/// The walk stops at `root`. A path outside the repository is rejected by
+/// `strip_prefix` regardless, and canonicalizing it would stat directories the
+/// repository does not own.
 fn follow_symlinks(lexical: &Path, root: &Path) -> PathBuf {
     if let Ok(canonical) = fs::canonicalize(lexical) {
         return canonical;

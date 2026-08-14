@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::os::unix::fs::symlink;
 
 fn tmp_repo() -> tempfile::TempDir {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -625,16 +626,23 @@ fn root_を越える_dotdot_で始まる絶対_file_path_には_override_が適�
     assert!(rules.test_assertion);
 }
 
+/// `repo_with_config` が返した repository に `src/allowed/esc -> ../protected`
+/// を張り、実体の root を返す。
+fn with_escape_symlink(tmp: &tempfile::TempDir) -> PathBuf {
+    let root = tmp.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("src/allowed")).unwrap();
+    fs::create_dir_all(root.join("src/protected")).unwrap();
+    symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    root
+}
+
 // T-473: symlink 経由で綴った file_path には symlink 先のパスで override が判定される
 #[test]
 fn symlink_経由で綴った_file_path_には_symlink_先のパスで_override_が判定される() {
     let (tmp, config) = repo_with_config(
         r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"testAssertion": false}}]}"#,
     );
-    let root = tmp.path().canonicalize().unwrap();
-    fs::create_dir_all(root.join("src/allowed")).unwrap();
-    fs::create_dir_all(root.join("src/protected")).unwrap();
-    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    let root = with_escape_symlink(&tmp);
 
     // 綴りは override の対象内だが、書き込み先の実体は対象外。
     let rules = config.effective_rules(root.join("src/allowed/esc/app.ts"));
@@ -647,10 +655,7 @@ fn 解決で_path_が変わったときは変更前後のパスを含む_note_�
     let (tmp, config) = repo_with_config(
         r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"testAssertion": false}}]}"#,
     );
-    let root = tmp.path().canonicalize().unwrap();
-    fs::create_dir_all(root.join("src/allowed")).unwrap();
-    fs::create_dir_all(root.join("src/protected")).unwrap();
-    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    let root = with_escape_symlink(&tmp);
 
     let spelled = root.join("src/allowed/esc/app.ts");
     let (_rules, notes) = config.effective_rules_with_notes(&spelled);

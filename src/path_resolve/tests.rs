@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::os::unix::fs::symlink;
 
 fn tmp_root() -> tempfile::TempDir {
     tempfile::TempDir::new().unwrap()
@@ -8,18 +9,25 @@ fn tmp_root() -> tempfile::TempDir {
 /// macOS の tempdir は `/var -> /private/var` の下にあり、`current_dir` 由来の
 /// git root と同じ空間に揃えるには実体パスが要る。テストの root は production の
 /// `find_git_root(env::current_dir())` が返す形 (symlink 解決済み) に合わせる。
-fn real_root(tmp: &tempfile::TempDir) -> std::path::PathBuf {
+fn real_root(tmp: &tempfile::TempDir) -> PathBuf {
     tmp.path().canonicalize().unwrap()
+}
+
+/// `src/allowed/esc` が `src/protected` を指す repository を組み、実体の root を
+/// 返す。
+fn repo_with_escape_symlink(tmp: &tempfile::TempDir) -> PathBuf {
+    let root = real_root(tmp);
+    fs::create_dir_all(root.join("src/allowed")).unwrap();
+    fs::create_dir_all(root.join("src/protected")).unwrap();
+    symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    root
 }
 
 // T-469: symlink のディレクトリを含む file_path は symlink 先の root 相対パスに解決される
 #[test]
 fn symlink_のディレクトリを含む_file_path_は_symlink_先の_root_相対パスに解決される() {
     let tmp = tmp_root();
-    let root = real_root(&tmp);
-    fs::create_dir_all(root.join("src/allowed")).unwrap();
-    fs::create_dir_all(root.join("src/protected")).unwrap();
-    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    let root = repo_with_escape_symlink(&tmp);
 
     let resolved = resolve_under_root(&root.join("src/allowed/esc/app.ts"), &root).unwrap();
 
@@ -35,7 +43,7 @@ fn symlink_になっているファイル自体を指す_file_path_も_symlink_�
     fs::create_dir_all(root.join("src/allowed")).unwrap();
     fs::create_dir_all(root.join("src/protected")).unwrap();
     fs::write(root.join("src/protected/app.ts"), "").unwrap();
-    std::os::unix::fs::symlink("../protected/app.ts", root.join("src/allowed/link.ts")).unwrap();
+    symlink("../protected/app.ts", root.join("src/allowed/link.ts")).unwrap();
 
     let resolved = resolve_under_root(&root.join("src/allowed/link.ts"), &root).unwrap();
 
@@ -47,12 +55,9 @@ fn symlink_になっているファイル自体を指す_file_path_も_symlink_�
 #[test]
 fn 未作成のディレクトリを含む_file_path_は最寄りの実在祖先まで遡って解決される() {
     let tmp = tmp_root();
-    let root = real_root(&tmp);
-    fs::create_dir_all(root.join("src/allowed")).unwrap();
-    fs::create_dir_all(root.join("src/protected")).unwrap();
-    std::os::unix::fs::symlink("../protected", root.join("src/allowed/esc")).unwrap();
+    let root = repo_with_escape_symlink(&tmp);
 
-    // 末尾 2 段が未作成。親を 1 段だけ canonicalize する形では symlink に届かない。
+    // symlink の下に、この Write が作る 2 段のディレクトリがぶら下がる形。
     let resolved = resolve_under_root(&root.join("src/allowed/esc/fresh/app.ts"), &root).unwrap();
 
     assert_eq!(resolved.relative, Path::new("src/protected/fresh/app.ts"));
