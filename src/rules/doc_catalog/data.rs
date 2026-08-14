@@ -1,7 +1,7 @@
 //! Authoritative content for the README rule tables (Issue #257).
 //!
-//! Rows are declared in README display order, grouped by table: `Rules` (26),
-//! then `Security` (2), then `AstSecurity` (14). `severity` is shared by both
+//! Rows are declared in README display order, grouped by table: `Rules` (28),
+//! then `Security` (2), then `AstSecurity` (15). `severity` is shared by both
 //! languages; the `*_ja` fields hold the README.ja.md prose (a separate human
 //! translation, not a literal mirror). Severity / description / why are migrated
 //! verbatim from the README cells; `why` and `when_to_disable` are
