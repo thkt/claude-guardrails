@@ -332,7 +332,7 @@ impl Config {
     /// entries in the same config are kept. The failing pattern(s) are
     /// returned so the caller can populate `invalid_override_patterns` and
     /// the hook boundary can surface a note instead of dropping the entry
-    /// silently (T-464).
+    /// silently.
     fn compile_override_entry(raw: ProjectOverrideEntry) -> Result<OverrideEntry, Vec<String>> {
         let mut files = Vec::with_capacity(raw.files.len());
         let mut failed_patterns = Vec::new();
@@ -359,9 +359,7 @@ impl Config {
             .map(Path::to_path_buf)
     }
 
-    /// Drops the notes from `effective_rules_with_notes`. Test-only: the hook
-    /// boundary always wants the notes, so production has no caller that
-    /// discards them.
+    /// Drops the notes from `effective_rules_with_notes`.
     #[cfg(test)]
     pub(crate) fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
         self.effective_rules_with_notes(file_path).0
@@ -454,15 +452,14 @@ impl Config {
     /// used here: it resolves symlinks and requires the path to exist.
     /// Instead `..` is resolved lexically by folding `Path::components`
     /// (`ParentDir` pops the last pushed `Normal` component), mirroring what
-    /// `canonicalize` would do for the path-syntax part alone. `.` needs no
-    /// arm of its own: `absolute` is always absolute here, and
-    /// `Path::components` drops `.` everywhere except at the start of a
-    /// relative path
+    /// `canonicalize` would do for the path-syntax part alone. `.` is not
+    /// folded here because `absolute` is always absolute and
+    /// `Path::components` drops `.` outside the start of a relative path
     /// (<https://doc.rust-lang.org/std/path/struct.Components.html>).
     ///
-    /// A lexical fold stops at `..`, not at symlinks: a `file_path` spelled
-    /// through a symlink that points out of the matched directory still
-    /// matches the pattern while the write lands elsewhere (#437).
+    /// The fold stops at `..`, not at symlinks: a `file_path` spelled
+    /// through a symlink pointing out of the matched directory still matches
+    /// the pattern while the write lands elsewhere.
     fn normalize_relative_to_root(file_path: &Path, git_root: &Path) -> Option<PathBuf> {
         let absolute = if file_path.is_absolute() {
             file_path.to_path_buf()
