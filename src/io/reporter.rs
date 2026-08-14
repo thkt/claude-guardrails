@@ -80,8 +80,6 @@ pub fn build_json_report<'a>(
     }
 }
 
-/// `color` decides ANSI, because the caller knows which stream this text is
-/// bound for and `color::stderr_takes_color` answers for stderr alone.
 pub fn format_warnings(violations: &[&Violation], color: bool) -> String {
     if violations.is_empty() {
         return String::new();

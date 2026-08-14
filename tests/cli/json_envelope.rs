@@ -258,16 +258,21 @@ fn json_mode_disabled_without_flag() {
     );
 }
 
-// T-520: advisory だけの Write では stdout の hook JSON に rule id が含まれる
-#[test]
-fn advisory_だけの_write_では_stdout_の_hook_json_に_rule_id_が含まれる() {
-    let json = serde_json::json!({
+/// dom-access だけを踏む Write。blocking な rule には当たらない。
+fn advisory_only_write() -> serde_json::Value {
+    serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
             "file_path": "/src/app.tsx",
             "content": "export function App() { document.getElementById('x'); return null; }\n"
         }
-    });
+    })
+}
+
+// T-520: advisory だけの Write では stdout の hook JSON に rule id が含まれる
+#[test]
+fn advisory_だけの_write_では_stdout_の_hook_json_に_rule_id_が含まれる() {
+    let json = advisory_only_write();
     let output = run_guardrails_json(&json.to_string());
     assert_eq!(
         output.status.code(),
@@ -307,13 +312,7 @@ fn blocking_を含む_write_では_stdout_が空のままになる() {
 // T-522: --json を付けた advisory の実行では stdout に envelope だけが出る
 #[test]
 fn json_を付けた_advisory_の実行では_stdout_に_envelope_だけが出る() {
-    let json = serde_json::json!({
-        "tool_name": "Write",
-        "tool_input": {
-            "file_path": "/src/app.tsx",
-            "content": "export function App() { document.getElementById('x'); return null; }\n"
-        }
-    });
+    let json = advisory_only_write();
     let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =

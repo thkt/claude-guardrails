@@ -78,9 +78,8 @@ pub(crate) fn print_json_line<T: Serialize>(value: &T) {
     print_line(&json);
 }
 
-/// One `write_all`, so a failure mid-write leaves a truncated line rather than
-/// a line the next write would extend. A reader parsing stdout as one document
-/// gets nothing either way; a second attempt would hand it two fragments.
+/// A failed write is not retried: a reader parsing stdout as one document gets
+/// nothing from a truncated line, and two fragments from a second attempt.
 fn print_line(line: &str) {
     let mut out = io::stdout().lock();
     // Ignore write errors (e.g. BrokenPipe) so the caller's exit code is preserved.
@@ -103,8 +102,8 @@ pub(crate) fn emit_json_if_enabled(
     ));
 }
 
-/// Advisory entries carried to the agent. The hook runs on every edit, so an
-/// unbounded list spends the agent's context on repetition.
+/// The hook runs on every edit, so an unbounded list would spend the agent's
+/// context on repetition.
 const MAX_CONTEXT_VIOLATIONS: usize = 10;
 
 #[derive(Serialize)]
@@ -121,7 +120,6 @@ struct HookOutput {
     hook_specific_output: HookSpecificOutput,
 }
 
-/// Writes the agent-facing stdout line for this run, when there is one.
 pub(crate) fn emit_hook_context(
     json_mode: bool,
     blocking: &[&Violation],
@@ -133,13 +131,12 @@ pub(crate) fn emit_hook_context(
     }
 }
 
-/// The stdout line that carries advisory text to the agent, or `None` when
-/// this run has nothing to deliver there.
+/// The stdout line carrying advisory text to the agent, or `None` when this
+/// run has nothing to deliver there.
 ///
-/// `json_mode` and `blocking` both suppress it. The envelope owns stdout under
-/// `--json`, and two JSON documents on one stream parse as neither. A blocking
-/// run already reaches the agent through the exit-2 stderr path, and a stdout
-/// document there would change how the run is classified.
+/// Under `--json` the envelope owns stdout, and two JSON documents on one
+/// stream parse as neither. A blocking run reaches the agent through the exit-2
+/// stderr path, and a stdout document there would change its classification.
 pub(crate) fn hook_context_line(
     json_mode: bool,
     blocking: &[&Violation],
@@ -159,7 +156,8 @@ pub(crate) fn hook_context_line(
         .copied()
         .collect();
     let mut context = format_warnings(&shown, false).trim_start().to_owned();
-    if let Some(hidden) = warnings.len().checked_sub(shown.len()).filter(|n| *n > 0) {
+    let hidden = warnings.len() - shown.len();
+    if hidden > 0 {
         let _ = write!(context, "\n  ... and {hidden} more");
     }
     for note in notes {
