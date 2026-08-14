@@ -353,6 +353,20 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
         why_ja: r"固定値はアプリ全体が依存する契約で、無言で変える編集は誰も承認していない挙動変更を出荷する",
         when_to_disable_ja: Some("不変値を固定しないプロジェクト"),
     },
+    RuleDoc {
+        table: Table::Rules,
+        key: "configGuard",
+        rule_id: Some(rule_id::CONFIG_GUARD),
+        severity: "Critical",
+        description: r"Blocks an edit to the config files guardrails reads at the git root (`.guardrails.json`, `.claude/tools.json`, `.claude-guardrails.json`)",
+        why: r"An agent that rewrites the config can switch off the rule that would stop its next edit, and an `overrides` entry reads as a test-path exclusion in the diff",
+        when_to_disable: Some(
+            "Repositories where an agent is expected to set up the config and a human cannot",
+        ),
+        description_ja: r"guardrails が git root で読む設定ファイル（`.guardrails.json`、`.claude/tools.json`、`.claude-guardrails.json`）への編集をブロック",
+        why_ja: r"設定を書き換えられる agent は次の編集を止める rule を自分で切れる。`overrides` の追記は diff 上 test パスの除外に見える",
+        when_to_disable_ja: Some("設定の用意を agent に任せ、人が用意できないリポジトリ"),
+    },
     // ----- ### Security Rules (`security`) (rule_id-level, 4 columns) -----
     RuleDoc {
         table: Table::Security,

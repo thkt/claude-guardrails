@@ -1,5 +1,6 @@
 mod architecture;
 mod bundle_size;
+pub(crate) mod config_guard;
 pub(crate) mod cors_wildcard;
 mod cot_leakage_marker;
 mod crypto_weak;
@@ -92,6 +93,7 @@ pub(crate) mod rule_id {
         EXCESSIVE_NESTING = "excessive-nesting",
         TEST_ENDPOINT_PROD_GUARD = "test-endpoint-prod-guard",
         INVARIANT = "invariant",
+        CONFIG_GUARD = "config-guard",
     }
 }
 

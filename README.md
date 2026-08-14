@@ -183,6 +183,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `jwtClient` | Medium | Client-side JWT decode (`jwtDecode`, `jwt_decode`, `atob(token.split('.'))`). Suggests server-side `jwtVerify` | JWT payload is base64url. It is readable but also editable without a signature check, so trusting it on the client is an authorization bypass | Server-only JWT decode paths (e.g., Node-only files) |
 | `astSecurity` | Mixed | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection, client env leak, SSR secret bleed, postMessage origin (see below) | Aggregated AST checks. Each sub-rule has its own threat (see the sub-rule table below) | Non-Node.js projects |
 | `invariant` | High | Blocks an edit that drifts a `.json` value away from the scalar pinned for it in `.invariants.json` (feature flags, i18n strings, design tokens) | A pinned value is a contract the rest of the app depends on; a silent edit that changes it ships a behavior change no human approved | Projects that do not pin invariant values |
+| `configGuard` | Critical | Blocks an edit to the config files guardrails reads at the git root (`.guardrails.json`, `.claude/tools.json`, `.claude-guardrails.json`) | An agent that rewrites the config can switch off the rule that would stop its next edit, and an `overrides` entry reads as a test-path exclusion in the diff | Repositories where an agent is expected to set up the config and a human cannot |
 <!-- END GENERATED: rules-table -->
 
 ### Security Rules (`security`)
@@ -391,7 +392,8 @@ Place a `.guardrails.json` at your project root. The format is the flat `Project
     "serviceWorker": true,
     "jwtClient": true,
     "astSecurity": true,
-    "invariant": true
+    "invariant": true,
+    "configGuard": true
   },
   "oxlint": {
     "deny": [],
