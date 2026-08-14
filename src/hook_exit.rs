@@ -9,9 +9,11 @@
 //! | 70   | `EX_SOFTWARE`  | internal panic / invariant violation      | no      |
 //!
 //! Per the `PreToolUse` contract, only exit 2 blocks the tool call; 0 allows and
-//! 1 / 64 / 70 are non-blocking errors (stderr surfaced, tool proceeds). An
-//! oversized payload is therefore routed to `Blocking` (2), not `InputError`
-//! (64), so the resource-boundary guard stays fail-closed (ADR-0004 / ADR-0005).
+//! 1 / 64 / 70 are non-blocking errors (the tool proceeds). stderr reaches the
+//! agent on exit 2 alone; an advisory run carries its findings to the agent as
+//! `hookSpecificOutput` JSON on stdout instead. An oversized payload is
+//! therefore routed to `Blocking` (2), not `InputError` (64), so the
+//! resource-boundary guard stays fail-closed (ADR-0004 / ADR-0005).
 //!
 //! `ErrorCode` (in `envelope.rs`) covers the JSON `error.code` field for
 //! human/agent-readable diagnostics; this enum maps to the process exit code

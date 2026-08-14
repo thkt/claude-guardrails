@@ -2,7 +2,8 @@ use std::env;
 use std::io::{stderr, IsTerminal};
 use std::sync::LazyLock;
 
-fn use_color() -> bool {
+/// Text bound for another stream cannot use this answer.
+pub(crate) fn stderr_takes_color() -> bool {
     static COLOR: LazyLock<bool> =
         LazyLock::new(|| use_color_with(env::var_os("NO_COLOR").is_none(), stderr().is_terminal()));
     *COLOR
@@ -13,7 +14,7 @@ fn use_color_with(no_color_unset: bool, stderr_is_tty: bool) -> bool {
 }
 
 fn wrap(ansi_code: &str, text: &str) -> String {
-    wrap_with(use_color(), ansi_code, text)
+    wrap_with(stderr_takes_color(), ansi_code, text)
 }
 
 fn wrap_with(color: bool, ansi_code: &str, text: &str) -> String {
@@ -30,6 +31,11 @@ pub fn red(text: &str) -> String {
 
 pub fn yellow(text: &str) -> String {
     wrap("33", text)
+}
+
+/// For text whose destination stream is not the one `stderr_takes_color` reads.
+pub(crate) fn yellow_if(color: bool, text: &str) -> String {
+    wrap_with(color, "33", text)
 }
 
 pub fn bold_red(text: &str) -> String {

@@ -35,12 +35,15 @@ const SYSEXIT_USAGE: i32 = 64;
     about = "Pre-write guardrails for Claude Code (PreToolUse hook)",
     after_help = "\
 Hook mode (no subcommand): reads tool input JSON from stdin and emits violations.
-With --json: emits a structured JSON report on stdout, human-readable on stderr.
+Advisory findings also go to stdout as PreToolUse hook JSON, which is the channel
+the AI reads for a non-blocking run. With --json: the structured envelope takes
+stdout instead and the hook JSON is suppressed, so the AI sees neither.
 
 Exit codes (hook mode). Per the PreToolUse contract only exit 2 blocks the tool
-call; 0 allows and 1/64/70 are non-blocking (stderr shown to AI, tool proceeds):
+call; 0 allows and 1/64/70 are non-blocking (the tool proceeds). stderr reaches
+the AI on exit 2 only; on other codes it is human-facing:
   0   Pass — no violations
-  1   Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI
+  1   Warning only — non-blocking severity violations, tool proceeds, findings sent to the AI as stdout hook JSON
   2   Blocked — violations at or above severity.blockThreshold (default: high), oversized stdin, or an internal panic mid-check (all fail-closed), tool halted
   64  Hook input error — invalid JSON, stdin read failure, or clap usage failure (non-blocking)
 

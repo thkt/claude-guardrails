@@ -331,8 +331,9 @@ fn hook_mode_で_override_のnoteがstderrに出る() {
         }
     });
     // `--json` を渡さない、Claude Code が hook を起動するときの形。envelope は
-    // 出ないので、note を運ぶ経路は stderr しか残らない。notes の vec を見る
-    // assert は、この経路が空でも通ってしまう。
+    // 出ず、stdout には note を含む hook JSON が出る。stderr にも同じ note が
+    // 出ることを見るのがこのテストで、notes の vec を見る assert では stderr
+    // 経路が空でも通ってしまう。
     let output = run_guardrails_with(
         json.to_string().as_bytes(),
         Some(&root),

@@ -257,3 +257,69 @@ fn json_mode_disabled_without_flag() {
         "stdout must remain empty without --json flag, got: {stdout}"
     );
 }
+
+/// dom-access だけを踏む Write。blocking な rule には当たらない。
+fn advisory_only_write() -> serde_json::Value {
+    serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.tsx",
+            "content": "export function App() { document.getElementById('x'); return null; }\n"
+        }
+    })
+}
+
+// T-520: advisory だけの Write では stdout の hook JSON に rule id が含まれる
+#[test]
+fn advisory_だけの_write_では_stdout_の_hook_json_に_rule_id_が含まれる() {
+    let json = advisory_only_write();
+    let output = run_guardrails_json(&json.to_string());
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "advisory only; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be one hook JSON document");
+    assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    let context = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext must be a string");
+    assert!(context.contains("dom-access"), "context: {context}");
+}
+
+// T-521: blocking を含む Write では stdout が空のままになる
+#[test]
+fn blocking_を含む_write_では_stdout_が空のままになる() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);"
+        }
+    });
+    let output = run_guardrails_json(&json.to_string());
+    assert_eq!(output.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.is_empty(),
+        "the exit-2 stderr path already reaches the agent, got: {stdout}"
+    );
+}
+
+// T-522: --json を付けた advisory の実行では stdout に envelope だけが出る
+#[test]
+fn json_を付けた_advisory_の実行では_stdout_に_envelope_だけが出る() {
+    let json = advisory_only_write();
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be one JSON document");
+    assert!(parsed.get("data").is_some(), "expected envelope: {parsed}");
+    assert!(
+        parsed.get("hookSpecificOutput").is_none(),
+        "the envelope owns stdout under --json: {parsed}"
+    );
+}

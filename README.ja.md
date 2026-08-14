@@ -241,14 +241,14 @@ Options:
 
 ## 終了コード
 
-Claude Code は終了コードを見て、tool 呼び出しを通す/AI に警告を見せる/停止するを決めます。PreToolUse 契約で呼び出しを止めるのは exit `2` のみ。`0` は通過、`1`/`64` は非 blocking (stderr を AI に出して tool は続行) です。検査の途中で panic した場合も exit `2` を返し、検査未完了の編集を素通りさせず fail-closed にします。
+Claude Code は終了コードを見て、tool 呼び出しを通す/AI に警告を見せる/停止するを決めます。PreToolUse 契約で呼び出しを止めるのは exit `2` のみ。`0` は通過、`1`/`64` は非 blocking (tool は続行) です。stderr が AI に届くのは exit `2` のときだけで、advisory の検出結果は stdout の PreToolUse hook JSON で AI に渡ります。検査の途中で panic した場合も exit `2` を返し、検査未完了の編集を素通りさせず fail-closed にします。
 
 ### hook モード (サブコマンドなし)
 
 | コード | 意味                                                                                                                                               |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0      | 合格 — 違反なし                                                                                                                                    |
-| 1      | 警告のみ — 非 blocking severity 違反、tool は実行されるが stderr が AI に表示される                                                                |
+| 1      | 警告のみ — 非 blocking severity 違反、tool は実行され、検出結果は stdout の hook JSON で AI に渡る                                                 |
 | 2      | ブロック — `severity.blockThreshold` (デフォルト: `high`) 以上の違反、サイズ超過 stdin、または検査途中の panic (いずれも fail-closed)、tool を停止 |
 | 64     | hook 入力エラー — JSON 不正、stdin read 失敗、または clap usage 失敗 (非 blocking)                                                                 |
 
@@ -277,7 +277,9 @@ Claude Code は終了コードを見て、tool 呼び出しを通す/AI に警�
 guardrails --json < tool-call.json
 ```
 
-> **BREAKING (v0.15+)**: v0.14 で利用できた `GUARDRAILS_JSON=1` env は削除されました。代わりに `--json` を使ってください。すべての hook 呼び出しで JSON を出力したい場合は、hook の `command` にフラグを追加してください ([Claude Code Hookとして](#claude-code-hookとして)参照)。
+> **BREAKING (v0.15+)**: v0.14 で利用できた `GUARDRAILS_JSON=1` env は削除されました。代わりに `--json` を使ってください。
+
+> **hook の `command` に `--json` を足さないでください。** stdout に出る document は 1 つで、`--json` のときは envelope、そうでないときは advisory を AI へ届ける PreToolUse hook JSON です。hook にフラグを足すとこの配送が止まります。`--json` は guardrails を直接読むツール向けです。
 
 > **BREAKING (v0.15+)**: 成功時の出力は[ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md)に従って `SuccessEnvelope` (`{ data, degraded, notes }`) で wrap されます。旧 schema (`{ violations, decision, exit_code }`) は廃止 — hook 判定はプロセス終了コードを参照してください。
 
