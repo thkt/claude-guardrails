@@ -425,9 +425,8 @@ impl Config {
             ));
             return (rules, notes);
         };
-        // The spelling the agent sent and the file the write lands on are two
-        // different paths here, so the patterns that match are not the ones the
-        // spelling suggests. The user who wrote those patterns needs to see it.
+        // Without this the patterns that matched are not the ones the spelling
+        // suggests, and nothing says so.
         if resolved.moved {
             notes.push(format!(
                 "override matching followed a symlink: {} resolves to {}",

@@ -1,9 +1,7 @@
 //! Resolves a hook-supplied `file_path` into a repository-root-relative path.
 //!
-//! The path may not exist yet (a `PreToolUse` hook sees a file about to be
-//! created), so `fs::canonicalize` cannot be applied to it wholesale. What is
-//! resolvable still gets resolved: symlinks collapse for the part that exists
-//! on disk, and `..` is folded lexically for the rest.
+//! `fs::canonicalize` cannot carry this on its own: a `PreToolUse` hook sees a
+//! file about to be created, and canonicalize requires the path to exist.
 
 use std::ffi::OsString;
 use std::fs;
@@ -11,19 +9,18 @@ use std::path::{Component, Path, PathBuf};
 
 /// A `file_path` placed under the repository root.
 pub(crate) struct Resolved {
-    /// The path relative to the root, for glob matching.
     pub(crate) relative: PathBuf,
-    /// True when symlink resolution landed somewhere other than the spelling
-    /// the caller was given. Callers surface this: the same spelling matches
-    /// different patterns before and after resolution.
+    /// True when resolution landed somewhere other than the spelling the
+    /// caller was given, so the spelling and `relative` match different
+    /// patterns.
     pub(crate) moved: bool,
 }
 
-/// Resolves `file_path` against `root`, or `None` when it lands outside `root`.
+/// Resolves `file_path` against `root`, or `None` when it lands outside
+/// `root`. A relative `file_path` is taken as relative to `root`.
 ///
-/// A relative `file_path` is taken as relative to `root`. `..` is folded
-/// lexically first, so a path that climbs out of the repository is rejected
-/// whether or not any of it exists on disk.
+/// The `..` fold runs before any symlink resolution, so a path climbing out of
+/// the repository is rejected whether or not it exists on disk.
 pub(crate) fn resolve_under_root(file_path: &Path, root: &Path) -> Option<Resolved> {
     let root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let absolute = if file_path.is_absolute() {
@@ -42,8 +39,7 @@ pub(crate) fn resolve_under_root(file_path: &Path, root: &Path) -> Option<Resolv
     })
 }
 
-/// Folds `..` by popping the last pushed `Normal` component, mirroring what
-/// `canonicalize` would do for the path-syntax part alone.
+/// Mirrors what `canonicalize` would do for the path-syntax part alone.
 fn fold_parent_dirs(absolute: &Path) -> PathBuf {
     let mut folded: Vec<Component> = Vec::new();
     for component in absolute.components() {
@@ -63,14 +59,12 @@ fn fold_parent_dirs(absolute: &Path) -> PathBuf {
 
 /// Collapses symlinked ancestors of `lexical` into the same space as `root`.
 ///
-/// A path that exists is canonicalized whole, which covers a symlink in the
-/// final component. Otherwise the nearest existing ancestor is canonicalized
-/// and the components below it are rejoined. Those components are about to be
-/// created, so none of them can be a symlink today.
+/// The components below the nearest existing ancestor are rejoined unresolved:
+/// they are about to be created, so none of them can be a symlink today.
 ///
-/// The walk stops at `root`. A path outside the repository is rejected by
-/// `strip_prefix` regardless, and canonicalizing it would stat directories the
-/// repository does not own.
+/// The walk stops at `root` rather than climbing past it. A path outside the
+/// repository is rejected by `strip_prefix` regardless, and canonicalizing it
+/// would stat directories the repository does not own.
 fn follow_symlinks(lexical: &Path, root: &Path) -> PathBuf {
     if let Ok(canonical) = fs::canonicalize(lexical) {
         return canonical;
