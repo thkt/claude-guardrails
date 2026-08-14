@@ -27,6 +27,8 @@ mod transaction;
 
 use crate::analysis::scanner::build_source_masks;
 use crate::config::Config;
+#[cfg(test)]
+use crate::config::RulesConfig;
 use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -95,6 +97,110 @@ pub(crate) mod rule_id {
         INVARIANT = "invariant",
         CONFIG_GUARD = "config-guard",
     }
+}
+
+/// `.guardrails.json` toggle name -> the first-party `rule_id`s it gates
+/// when `true`. The one place the toggle/`rule_id` correspondence lives:
+/// [`toggle_rule_id_count`] (production) and `hook::precision`'s
+/// `toggle_isolation_cases` (test-only single-toggle isolation `Config`s)
+/// both derive from this one invocation instead of a second hand-written
+/// table. A macro rather than a plain data table because the isolation-config
+/// side must assign a named `RulesConfig` field (`config.rules.$field =
+/// true`), which data cannot express without reflection.
+macro_rules! toggle_isolation {
+    ( $( $field:ident => $name:literal : [ $( $rule:literal ),* $(,)? ] );* $(;)? ) => {
+        pub(crate) const TOGGLE_RULE_IDS: &[(&str, &[&str])] = &[
+            $( ($name, &[ $( $rule ),* ]) ),*
+        ];
+
+        /// Single-toggle isolation configs (`.rules` all off except
+        /// `$field`) for the precision harness: per-toggle latency
+        /// diagnostics, the single-toggle fire check, and override
+        /// leak/overreach tallies.
+        #[cfg(test)]
+        pub(crate) fn toggle_isolation_cases()
+        -> Vec<(&'static str, Config, &'static [&'static str])> {
+            vec![
+                $(
+                    {
+                        let mut config = Config::default();
+                        config.rules = RulesConfig::all_off();
+                        config.rules.$field = true;
+                        ($name, config, &[ $( $rule ),* ][..])
+                    }
+                ),*
+            ]
+        }
+    };
+}
+
+toggle_isolation! {
+    sensitive_file => "sensitiveFile": ["sensitive-file"];
+    architecture => "architecture": ["architecture"];
+    naming => "naming": ["naming-convention"];
+    transaction => "transaction": ["transaction-boundary"];
+    security => "security": ["security", "dangerous-inner-html"];
+    crypto_weak => "cryptoWeak": ["crypto-weak"];
+    generated_file => "generatedFile": ["generated-file"];
+    test_location => "testLocation": ["test-location"];
+    dom_access => "domAccess": ["dom-access"];
+    sync_io => "syncIo": ["sync-io"];
+    bundle_size => "bundleSize": ["bundle-size"];
+    test_assertion => "testAssertion": ["test-assertion"];
+    flaky_test => "flakyTest": ["flaky-test"];
+    sensitive_logging => "sensitiveLogging": ["sensitive-logging"];
+    no_use_effect => "noUseEffect": ["no-use-effect"];
+    eval => "eval": ["eval"];
+    hardcoded_secrets => "hardcodedSecrets": ["hardcoded-secret"];
+    http_resource => "httpResource": ["http-resource"];
+    raw_html => "rawHtml": ["raw-html"];
+    open_redirect => "openRedirect": ["open-redirect"];
+    // "security" (rule_id::SECURITY) is deliberately absent from this list:
+    // `analysis::ast_security::postmessage::check_post_message_wildcard`
+    // emits it too, and `rules::security` (the "security" toggle) emits the
+    // same rule_id independently, so turning `astSecurity` off would not
+    // stop it from firing.
+    ast_security => "astSecurity": [
+        "bidi-characters", "child-process-injection", "client-env-public-leak",
+        "env-var-fallback", "err-stack-exposure", "excessive-nesting",
+        "math-random-insecure", "non-literal-fs-path", "non-literal-require",
+        "postmessage-origin-missing", "prototype-pollution", "ssr-secret-bleed",
+        "test-endpoint-prod-guard", "unsafe-html-injection", "unsafe-regex",
+    ];
+    cot_leakage_marker => "cotLeakageMarker": ["cot-leakage-marker"];
+    sqli_concat => "sqliConcat": ["sqli-concat"];
+    cors_wildcard => "corsWildcard": ["cors-wildcard"];
+    service_worker => "serviceWorker": ["service-worker-scope-root"];
+    jwt_client => "jwtClient": ["jwt-client-decode"];
+    invariant => "invariant": ["invariant"];
+    config_guard => "configGuard": ["config-guard"];
+}
+
+/// `rule_id`s excluded from [`toggle_rule_id_count`]'s answer even though
+/// [`TOGGLE_RULE_IDS`] lists them under a toggle, because they do not
+/// actually stop firing when that toggle turns off. `excessive-nesting`
+/// (listed under `astSecurity`) runs unconditionally from `src/hook.rs`,
+/// independent of `astSecurity`.
+const TOGGLE_RULE_ID_COUNT_EXCEPTIONS: &[&str] = &[rule_id::EXCESSIVE_NESTING];
+
+/// Number of `rule_id`s that stop firing when the `.guardrails.json` toggle
+/// named `toggle_name` (its serde name, e.g. `"astSecurity"`) is set to
+/// `false`. `None` when `toggle_name` gates no fixed `rule_id` set (e.g.
+/// `"oxlint"`, which delegates to an external linter run rather than a
+/// first-party `rule_id`).
+// No production caller yet (#435 U-001 is the plumbing unit); a later unit
+// surfaces this count in hook output. Pinned by `rules::tests`.
+#[allow(dead_code)]
+pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
+    TOGGLE_RULE_IDS
+        .iter()
+        .find(|(name, _)| *name == toggle_name)
+        .map(|(_, rules)| {
+            rules
+                .iter()
+                .filter(|rule| !TOGGLE_RULE_ID_COUNT_EXCEPTIONS.contains(rule))
+                .count()
+        })
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =

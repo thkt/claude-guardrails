@@ -25,9 +25,9 @@ use std::time::Instant;
 use globset::GlobBuilder;
 
 use super::collect_violations;
-use crate::config::{Config, OverrideEntry, RulesConfig};
+use crate::config::{Config, OverrideEntry};
 use crate::rules::rule_id::{self, RULE_ID_CATALOG};
-use crate::rules::RE_JS_FILE;
+use crate::rules::{toggle_isolation_cases, RE_JS_FILE};
 
 /// Whether a sample must trigger its rule (`Fire`) or stay silent (`Clean`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,66 +129,6 @@ fn median_latency_us(path: &str, content: &str, config: &Config) -> u64 {
     // Saturating keeps an impossibly large median failing the 10ms gate
     // loudly instead of wrapping into a passing value.
     u64::try_from(elapsed[LATENCY_ITERATIONS / 2]).unwrap_or(u64::MAX)
-}
-
-/// Single-toggle isolation configs for per-toggle latency diagnostics.
-/// Keys are the `.guardrails.json` rules keys; each lists the `rule_id`s the
-/// toggle gates (their fire samples are measured under that config).
-/// A macro rather than a data table because each case assigns a named
-/// `RulesConfig` field (`config.rules.$field = true`), which data cannot
-/// express without reflection.
-macro_rules! toggle_isolation {
-    ( $( $field:ident => $name:literal : [ $( $rule:literal ),* $(,)? ] );* $(;)? ) => {
-        fn toggle_isolation_cases() -> Vec<(&'static str, Config, &'static [&'static str])> {
-            vec![
-                $(
-                    {
-                        let mut config = harness_config();
-                        config.rules = RulesConfig::all_off();
-                        config.rules.$field = true;
-                        ($name, config, &[ $( $rule ),* ][..])
-                    }
-                ),*
-            ]
-        }
-    };
-}
-
-toggle_isolation! {
-    sensitive_file => "sensitiveFile": ["sensitive-file"];
-    architecture => "architecture": ["architecture"];
-    naming => "naming": ["naming-convention"];
-    transaction => "transaction": ["transaction-boundary"];
-    security => "security": ["security", "dangerous-inner-html"];
-    crypto_weak => "cryptoWeak": ["crypto-weak"];
-    generated_file => "generatedFile": ["generated-file"];
-    test_location => "testLocation": ["test-location"];
-    dom_access => "domAccess": ["dom-access"];
-    sync_io => "syncIo": ["sync-io"];
-    bundle_size => "bundleSize": ["bundle-size"];
-    test_assertion => "testAssertion": ["test-assertion"];
-    flaky_test => "flakyTest": ["flaky-test"];
-    sensitive_logging => "sensitiveLogging": ["sensitive-logging"];
-    no_use_effect => "noUseEffect": ["no-use-effect"];
-    eval => "eval": ["eval"];
-    hardcoded_secrets => "hardcodedSecrets": ["hardcoded-secret"];
-    http_resource => "httpResource": ["http-resource"];
-    raw_html => "rawHtml": ["raw-html"];
-    open_redirect => "openRedirect": ["open-redirect"];
-    ast_security => "astSecurity": [
-        "bidi-characters", "child-process-injection", "client-env-public-leak",
-        "env-var-fallback", "err-stack-exposure", "excessive-nesting",
-        "math-random-insecure", "non-literal-fs-path", "non-literal-require",
-        "postmessage-origin-missing", "prototype-pollution", "ssr-secret-bleed",
-        "test-endpoint-prod-guard", "unsafe-html-injection", "unsafe-regex",
-    ];
-    cot_leakage_marker => "cotLeakageMarker": ["cot-leakage-marker"];
-    sqli_concat => "sqliConcat": ["sqli-concat"];
-    cors_wildcard => "corsWildcard": ["cors-wildcard"];
-    service_worker => "serviceWorker": ["service-worker-scope-root"];
-    jwt_client => "jwtClient": ["jwt-client-decode"];
-    invariant => "invariant": ["invariant"];
-    config_guard => "configGuard": ["config-guard"];
 }
 
 /// Worst (max) fire-sample median per toggle under its isolation config.
