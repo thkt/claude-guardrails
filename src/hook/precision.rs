@@ -637,14 +637,11 @@ fn metrics_snapshot_measures_all_samples_under_10ms() {
         *entry = (*entry).max(median);
     }
 
-    // The production corpus config carries no `overrides` entries, so every
-    // sample's path matches none of them and `tally_override_metrics` reduces
-    // to leak=0/overreach=0. Computed via the real function (not a hardcoded
-    // default) so a regression that starts miscounting even the trivial
-    // no-override case surfaces here too, not only in T-492..T-494.
-    let override_metrics = tally_override_metrics(corpus::SAMPLES, &config, |path, content| {
-        detected_rules_with_overrides(path, content, config.clone())
-    });
+    let override_config = metrics_override_config();
+    let override_metrics =
+        tally_override_metrics(corpus::SAMPLES, &override_config, |path, content| {
+            detected_rules_with_overrides(path, content, override_config.clone())
+        });
 
     let report = build_report(
         tallies,
@@ -673,6 +670,16 @@ fn override_entry(pattern: &str, rules_json: &str) -> OverrideEntry {
             .compile_matcher()],
         rules: serde_json::from_str(rules_json).expect("test rules JSON parses"),
     }
+}
+
+/// The config the gated snapshot measures the override axis against. The
+/// production config carries no `overrides`, so both counters would stay at 0
+/// under it whatever override resolution does.
+fn metrics_override_config() -> Config {
+    let mut config = harness_config();
+    config.git_root = Some(PathBuf::from("/"));
+    config.overrides = vec![override_entry("src/app.ts", r#"{"eval": false}"#)];
+    config
 }
 
 /// Same production seam as `detected_rules`, but resolves `config.overrides`
@@ -808,9 +815,15 @@ fn tally_override_metrics(
         let (resolved, _override_notes) = config.effective_rules_with_notes(sample.path);
         let intended_disabled = resolved.disabled_since(&config.rules).contains(toggle);
         let fired = detect(sample.path, sample.content).contains(sample.rule);
+        // A sample that stays silent under the base toggles too is a false
+        // negative, which `ci.yml` leaves ungated on purpose. Only a sample
+        // the base config fires can be silenced by an override reaching too
+        // far.
+        let baseline_fired =
+            detected_rules(sample.path, sample.content, config).contains(sample.rule);
         match (intended_disabled, fired) {
             (true, true) => metrics.leak += 1,
-            (false, false) => metrics.overreach += 1,
+            (false, false) if baseline_fired => metrics.overreach += 1,
             _ => {}
         }
     }
@@ -885,6 +898,50 @@ fn override_を無視する実装に差し替えると適用漏れの件数が�
     assert!(
         ignoring.leak > honoring.leak,
         "ignoring overrides must raise the leak count: honoring={honoring:?} ignoring={ignoring:?}"
+    );
+}
+
+// T-491: gate が回す config は git root を `/` に置き、corpus の仮想パスが
+// production と同じ root 相対形で override の pattern に一致する
+#[test]
+fn gate_の_config_では_corpus_の仮想パスが_override_の_pattern_に一致する() {
+    let config = metrics_override_config();
+
+    let matched = corpus::SAMPLES
+        .iter()
+        .filter(|s| s.expectation == Expectation::Fire)
+        .filter(|s| {
+            let (resolved, _) = config.effective_rules_with_notes(s.path);
+            !resolved.disabled_since(&config.rules).is_empty()
+        })
+        .count();
+
+    assert!(
+        matched > 0,
+        "override の対象になる fire サンプルが 1 件も無いと、gate は override 軸を測らない"
+    );
+}
+
+// T-498: baseline でも黙るサンプルは過剰適用に数えない (false negative との切り分け)
+#[test]
+fn baseline_でも黙るサンプルは過剰適用に数えない() {
+    // どの rule も踏まない content を Fire として宣言したサンプル。override の
+    // 対象外なので、素朴な実装では過剰適用に化ける。
+    let samples = [CorpusSample {
+        rule: "eval",
+        path: "/src/untouched.ts",
+        content: "const value = 1;\n",
+        expectation: Expectation::Fire,
+    }];
+    let config = metrics_override_config();
+
+    let metrics = tally_override_metrics(&samples, &config, |path, content| {
+        detected_rules_with_overrides(path, content, config.clone())
+    });
+
+    assert_eq!(
+        metrics.overreach, 0,
+        "false negative は ci.yml が意図的に gate していない軸なので、ここで拾ってはいけない"
     );
 }
 
