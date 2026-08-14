@@ -374,8 +374,9 @@ fn astsecurity_を切る_overrideを書いたrepositoryでstderrのnoteにrule_i
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("override disabled rule(s) [astSecurity]") && stderr.contains("rule_id(s) stopped"),
-        "expected the override note on stderr to name a rule_id count for astSecurity; got: {stderr:?}"
+        stderr.contains("override disabled rule(s) [astSecurity]")
+            && stderr.contains("astSecurity: 14 rule_id(s)"),
+        "expected the override note on stderr to carry astSecurity's own count; got: {stderr:?}"
     );
 }
 
@@ -404,7 +405,7 @@ fn evalを切るoverrideのnoteが既存の書式のまま読める() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("override disabled rule(s) [eval] for pattern(s) [src/allowed/**] (1 rule_id(s) stopped)"),
+        stderr.contains("override disabled rule(s) [eval] for pattern(s) [src/allowed/**] (eval: 1 rule_id(s))"),
         "expected the T-466 note format to still hold, now with the rule_id count appended; got: {stderr:?}"
     );
 }

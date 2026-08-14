@@ -301,21 +301,25 @@ fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
 // (e.g. `oxlint`, which gates an external linter run rather than first-party
 // rule_ids) has no count to report.
 
+// T-524: rule_id と 1 対 1 の toggle は 1 を返す
 #[test]
 fn rule_id_と_1_対_1_の_toggle_は_1_を返す() {
     assert_eq!(toggle_rule_id_count("sensitiveFile"), Some(1));
 }
 
+// T-525: astSecurity は excessive-nesting を除いた数を返す
 #[test]
 fn ast_security_は_excessive_nesting_を除いた数を返す() {
     assert_eq!(toggle_rule_id_count("astSecurity"), Some(14));
 }
 
+// T-526: security は 2 を返す
 #[test]
 fn security_は_2_を返す() {
     assert_eq!(toggle_rule_id_count("security"), Some(2));
 }
 
+// T-527: oxlint は数を持たない値を返す
 #[test]
 fn oxlint_は数を持たない値を返す() {
     assert_eq!(toggle_rule_id_count("oxlint"), None);

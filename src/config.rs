@@ -473,38 +473,26 @@ impl Config {
     }
 
     /// Text appended, outside the bracketed rule(s)/pattern(s) lists, to an
-    /// override-disable note: how many `rule_id`s the disabled toggles stop
+    /// override-disable note: how many `rule_id`s each disabled toggle stops
     /// firing. Counts come from `rules::toggle_rule_id_count`, the one place
-    /// the toggle -> `rule_id` correspondence lives (`rules::toggle_isolation!`);
-    /// this does not keep a second mapping. A toggle gating no fixed `rule_id`
-    /// set (`oxlint`, which delegates to an external linter run instead of
-    /// first-party `rule_id`s) contributes no digit and is named instead.
+    /// the toggle -> `rule_id` correspondence lives (`rules::toggle_isolation!`).
+    ///
+    /// Per toggle, not summed: `security` is emitted by the registry rule and
+    /// by `ast_security`'s postMessage path alike, so adding the two toggles'
+    /// counts would claim more stopped checks than exist. A toggle gating no
+    /// fixed set (`oxlint` runs an external linter) is named instead of counted.
     fn stopped_rule_id_summary(disabled: &[&str]) -> String {
-        let mut rule_id_total = 0usize;
-        let mut has_counted = false;
-        let mut external: Vec<&str> = Vec::new();
-        for &name in disabled {
-            match toggle_rule_id_count(name) {
-                Some(count) => {
-                    rule_id_total += count;
-                    has_counted = true;
-                }
-                None => external.push(name),
-            }
-        }
-        match (has_counted, external.is_empty()) {
-            (true, true) => format!(" ({rule_id_total} rule_id(s) stopped)"),
-            (false, false) => format!(
-                " ({} delegates to an external linter, no fixed rule_id count)",
-                external.join(", ")
-            ),
-            (true, false) => format!(
-                " ({rule_id_total} rule_id(s) stopped; {} delegates to an external linter)",
-                external.join(", ")
-            ),
-            // `disabled` is non-empty at every call site (guarded above), so
-            // `has_counted` and `external` cannot both be empty/false here.
-            (false, true) => String::new(),
+        let parts: Vec<String> = disabled
+            .iter()
+            .map(|&name| match toggle_rule_id_count(name) {
+                Some(count) => format!("{name}: {count} rule_id(s)"),
+                None => format!("{name}: external linter"),
+            })
+            .collect();
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", parts.join("; "))
         }
     }
 }
