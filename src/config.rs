@@ -1,9 +1,10 @@
 use crate::rules::Severity;
+use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::io::{self, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Generates `RulesConfig` (runtime flags), `ProjectRulesConfig` (serde DTO),
 /// `Default` impl (all rules enabled), and `apply_overrides` (partial merge).
@@ -21,11 +22,11 @@ macro_rules! define_rule_config {
             }
         }
 
-        #[derive(Debug, Deserialize)]
-        struct ProjectRulesConfig {
+        #[derive(Debug, Clone, Deserialize)]
+        pub(crate) struct ProjectRulesConfig {
             $(
                 #[serde(rename = $serde_name)]
-                $field: Option<bool>,
+                pub(crate) $field: Option<bool>,
             )*
         }
 
@@ -39,6 +40,15 @@ macro_rules! define_rule_config {
             #[cfg(test)]
             pub(crate) fn all_off() -> Self {
                 Self { $($field: false,)* }
+            }
+
+            /// Serde names of rules `before` had on and `self` has off, in
+            /// declaration order. Drives the override-disable note in
+            /// `effective_rules_with_notes` without hand-listing every field.
+            pub(crate) fn disabled_since(&self, before: &RulesConfig) -> Vec<&'static str> {
+                let mut disabled = Vec::new();
+                $(if before.$field && !self.$field { disabled.push($serde_name); })*
+                disabled
             }
         }
 
@@ -97,6 +107,13 @@ pub struct Config {
     pub diff_aware: bool,
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
+    pub overrides: Vec<OverrideEntry>,
+    /// `overrides[].files` patterns that failed to compile as a glob, in
+    /// config-declaration order. The entry holding one is dropped whole
+    /// (`compile_override_entry`); keeping the pattern here is what lets
+    /// `effective_rules_with_notes` report that drop instead of staying
+    /// silent about it.
+    pub invalid_override_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +136,14 @@ pub struct OxlintConfig {
     pub allow: Vec<String>,
 }
 
+/// A single `.guardrails.json` `overrides` entry: file glob patterns paired
+/// with the rule toggles that apply only to matching files.
+#[derive(Debug, Clone)]
+pub struct OverrideEntry {
+    pub files: Vec<GlobMatcher>,
+    pub rules: ProjectRulesConfig,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -129,6 +154,8 @@ impl Default for Config {
             diff_aware: false,
             source: ConfigSource::Default,
             git_root: None,
+            overrides: Vec::new(),
+            invalid_override_patterns: Vec::new(),
         }
     }
 }
@@ -147,6 +174,13 @@ struct ProjectConfig {
     oxlint: Option<ProjectOxlintConfig>,
     #[serde(rename = "diffAware")]
     diff_aware: Option<bool>,
+    overrides: Option<Vec<ProjectOverrideEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectOverrideEntry {
+    files: Vec<String>,
+    rules: ProjectRulesConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,13 +309,182 @@ impl Config {
         if let Some(diff_aware) = project.diff_aware {
             self.diff_aware = diff_aware;
         }
+        if let Some(raw_overrides) = project.overrides {
+            let mut overrides = Vec::new();
+            let mut invalid_patterns = Vec::new();
+            for raw in raw_overrides {
+                match Self::compile_override_entry(raw) {
+                    Ok(entry) => overrides.push(entry),
+                    Err(failed_patterns) => invalid_patterns.extend(failed_patterns),
+                }
+            }
+            self.overrides = overrides;
+            self.invalid_override_patterns = invalid_patterns;
+        }
         self
+    }
+
+    /// Compiles an override entry's glob patterns with `literal_separator(true)`
+    /// so `*`/`?` do not cross a `/` boundary, matching eslint's glob semantics
+    /// instead of globset's cross-`/` default
+    /// (<https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator>).
+    /// An entry with any glob that fails to compile is dropped whole; other
+    /// entries in the same config are kept. The failing pattern(s) are
+    /// returned so the caller can populate `invalid_override_patterns` and
+    /// the hook boundary can surface a note instead of dropping the entry
+    /// silently.
+    fn compile_override_entry(raw: ProjectOverrideEntry) -> Result<OverrideEntry, Vec<String>> {
+        let mut files = Vec::with_capacity(raw.files.len());
+        let mut failed_patterns = Vec::new();
+        for pattern in raw.files {
+            match GlobBuilder::new(&pattern).literal_separator(true).build() {
+                Ok(glob) => files.push(glob.compile_matcher()),
+                Err(_) => failed_patterns.push(pattern),
+            }
+        }
+        if failed_patterns.is_empty() {
+            Ok(OverrideEntry {
+                files,
+                rules: raw.rules,
+            })
+        } else {
+            Err(failed_patterns)
+        }
     }
 
     pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
         start
             .ancestors()
             .find(|d| d.join(".git").exists())
+            .map(Path::to_path_buf)
+    }
+
+    /// Drops the notes from `effective_rules_with_notes`.
+    #[cfg(test)]
+    pub(crate) fn effective_rules(&self, file_path: impl AsRef<Path>) -> RulesConfig {
+        self.effective_rules_with_notes(file_path).0
+    }
+
+    /// Rule toggles effective for `file_path`: `self.rules` with every
+    /// matching override's rules layered on top in listed order, merged key
+    /// by key via `RulesConfig::apply_overrides` (eslint overrides semantics:
+    /// a later match wins per rule key, not a whole-object replacement).
+    ///
+    /// Patterns are matched against a git-root-relative path (see
+    /// `normalize_relative_to_root`), so a `file_path` escaping `git_root`
+    /// via `..` matches no override. Without a known `git_root` the path is
+    /// matched as given; production never takes that branch, since
+    /// `with_overrides_from_root` leaves `overrides` empty when it finds no
+    /// root.
+    ///
+    /// The notes are for the hook boundary to surface: one per matching
+    /// entry that disables at least one rule (rule names + matched
+    /// patterns), plus one per `invalid_override_patterns` pattern. The
+    /// latter reports a config-file defect rather than a match result, so it
+    /// is emitted on every call, `file_path` escaping `git_root` included.
+    pub fn effective_rules_with_notes(
+        &self,
+        file_path: impl AsRef<Path>,
+    ) -> (RulesConfig, Vec<String>) {
+        let file_path = file_path.as_ref();
+        let mut rules = self.rules.clone();
+        let mut notes: Vec<String> = self
+            .invalid_override_patterns
+            .iter()
+            .map(|pattern| {
+                format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
+            })
+            .collect();
+
+        // Skipping the normalization below keeps its cost off every hook
+        // invocation in a repository that writes no `overrides` key.
+        if self.overrides.is_empty() {
+            return (rules, notes);
+        }
+
+        let match_target = match &self.git_root {
+            Some(root) => Self::normalize_relative_to_root(file_path, root),
+            None => Some(file_path.to_path_buf()),
+        };
+        // Two situations reach this branch and neither is visible otherwise:
+        // a `..` that climbs out of the repository, and a root reached
+        // through a symlink (`current_dir` resolves it, the agent-supplied
+        // `file_path` does not, so `strip_prefix` misses). Both leave every
+        // rule enabled — the safe direction, but it drops what the user
+        // wrote, so say so.
+        let Some(match_target) = match_target else {
+            notes.push(format!(
+                "override matching skipped: {} did not resolve under the repository root",
+                file_path.display(),
+            ));
+            return (rules, notes);
+        };
+
+        for entry in &self.overrides {
+            let matched_patterns: Vec<&str> = entry
+                .files
+                .iter()
+                .filter(|matcher| matcher.is_match(&match_target))
+                .map(|matcher| matcher.glob().glob())
+                .collect();
+            if matched_patterns.is_empty() {
+                continue;
+            }
+            let before = rules.clone();
+            rules.apply_overrides(entry.rules.clone());
+            let disabled = rules.disabled_since(&before);
+            if !disabled.is_empty() {
+                notes.push(format!(
+                    "override disabled rule(s) [{}] for pattern(s) [{}]",
+                    disabled.join(", "),
+                    matched_patterns.join(", "),
+                ));
+            }
+        }
+        (rules, notes)
+    }
+
+    /// Resolves `file_path` against `git_root` and returns it relative to
+    /// `git_root`, or `None` when it falls outside `git_root`.
+    ///
+    /// `file_path` is not required to exist on disk (a `PreToolUse` hook may
+    /// see a file about to be created), so `Path::canonicalize` cannot be
+    /// used here: it resolves symlinks and requires the path to exist.
+    /// Instead `..` is resolved lexically by folding `Path::components`
+    /// (`ParentDir` pops the last pushed `Normal` component), mirroring what
+    /// `canonicalize` would do for the path-syntax part alone. `.` is not
+    /// folded here because `absolute` is always absolute and
+    /// `Path::components` drops `.` outside the start of a relative path
+    /// (<https://doc.rust-lang.org/std/path/struct.Components.html>).
+    ///
+    /// The fold stops at `..`, not at symlinks: a `file_path` spelled
+    /// through a symlink pointing out of the matched directory still matches
+    /// the pattern while the write lands elsewhere.
+    fn normalize_relative_to_root(file_path: &Path, git_root: &Path) -> Option<PathBuf> {
+        let absolute = if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            git_root.join(file_path)
+        };
+
+        let mut normalized: Vec<Component> = Vec::new();
+        for component in absolute.components() {
+            match component {
+                Component::ParentDir => {
+                    if matches!(normalized.last(), Some(Component::Normal(_))) {
+                        normalized.pop();
+                    } else {
+                        normalized.push(component);
+                    }
+                }
+                other => normalized.push(other),
+            }
+        }
+        let normalized: PathBuf = normalized.into_iter().collect();
+
+        normalized
+            .strip_prefix(git_root)
+            .ok()
             .map(Path::to_path_buf)
     }
 }

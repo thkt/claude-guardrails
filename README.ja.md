@@ -399,7 +399,8 @@ guardrails --json < tool-call.json
   },
   "severity": {
     "blockThreshold": "high"
-  }
+  },
+  "overrides": []
 }
 ```
 
@@ -435,6 +436,31 @@ deny リストにルールを追加、またはデフォルト deny から除外
 - 照合は (ルール, trim 済み行テキスト) の個数で行うため、既存の違反行をもう 1 つ複製した場合、増えた分はブロックされます。
 - フェイルセーフ: 編集前の状態を信頼できない場合 (読み取り不能、編集解決の degrade、編集前 content の parse 失敗) は降格全体を中止し、すべての違反がブロックを維持、`demotion skipped (...)` の note が原因を示します。新規ファイルの Write は失敗ではなく、含まれる違反はすべて新規としてブロックされ、note は付きません。
 - toggle on のとき、JSON 出力の各違反に `"origin": "introduced"`/`"origin": "preexisting"` が付き、降格された警告は stderr で `(preexisting)` と表示されます。toggle off では `origin` フィールド自体が出力されず、従来とバイト互換です。
+
+#### `overrides`
+
+パス単位のルール toggle です。パスが glob にマッチした file に対して、top-level の `rules` の上にこの toggle を重ねます。形は ESLint の `overrides` と同じで、`{ files, rules }` の配列。各 `rules` は変更したいキーだけを持つ部分オブジェクトです。
+
+```json
+{
+  "overrides": [
+    {
+      "files": ["src/**/*.test.ts", "src/**/*.spec.ts"],
+      "rules": {
+        "testAssertion": false
+      }
+    }
+  ]
+}
+```
+
+- `files`: glob pattern は絶対パスや cwd 相対パスではなく、git root からの相対パスに対してマッチします。`*`/`?` は `/` を跨がないため、`src/*.ts` は `src/app.ts` にマッチしますが `src/api/db.ts` にはマッチしません。globset のデフォルト（`/` を跨ぐ）ではなく ESLint の glob 挙動に揃えています（[globset `literal_separator`](https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator)）。`../` などで git root の外へ出る file_path はどの override にもマッチしません。
+- `rules`: top-level の `rules` オブジェクトと同じキーです（上記の[ルール](#ルール)参照）。指定しなかったキーは、この entry にマッチした file でも top-level（またはデフォルト）の値のままです。
+- 同じ file に複数の entry がマッチした場合、配列の順序どおりに適用され、キー単位で merge されます。後続の entry は名指ししたキーだけを上書きし、先行の entry が設定した `rules` オブジェクト全体を置き換えることはありません。
+- `files` の pattern が glob として compile できない entry（閉じ括弧を欠いた `[` など）は、その entry ごと丸ごと捨てられます。同じ config の他の `overrides` entry と top-level の `rules` は影響を受けません。guardrails は compile できなかった pattern を名指しした note を積みます。例: `override entry dropped: glob pattern "src/[invalid" failed to compile`。この note は、チェック対象の file が該当 entry の `files` にマッチするかどうかに関わらず、config を読み込むたびに JSON envelope の `notes` と stderr の両方に出ます。
+- toggle の粒度であり、rule の粒度ではありません。override の `rules` キーは top-level と同じ粗さの toggle で、個々の `rule_id` 単位ではありません。ある glob に対して `security` や `astSecurity` を無効化すると、その toggle が束ねる `rule_id` がマッチした file すべてで一括して無効になります。`astSecurity` の場合は上記の AST セキュリティルールに載る 15 行のうち 14 個で、1 個だけを選ぶことはできません。他の sub-rule を有効なまま残しつつ 1 個だけをパス単位で切る手段はありません。
+- `excessive-nesting` だけは override で切れません。この sub-rule は AST rule のどれか 1 つでも有効なときにパース前のバイトスキャンとして走ります。`astSecurity` で gate すると、`astSecurity` が off で `eval` が on の config がパーサに到達してプロセスを落とすためです。`astSecurity` を無効化する override を書いても、安全な深さを超えた入れ子の file は block されます。
+- override がチェック対象の file に対してルールを無効化すると、guardrails は無効化したルール名とマッチした pattern を記した note を積みます。例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts]`。この note は JSON envelope の `notes` と stderr の両方に出ます。
 
 ### 設定例
 
@@ -481,6 +507,23 @@ deny リストにルールを追加、またはデフォルト deny から除外
   "enabled": false
 }
 ```
+
+特定 directory だけルールを緩める。
+
+```json
+{
+  "overrides": [
+    {
+      "files": ["fixtures/**"],
+      "rules": {
+        "testAssertion": false
+      }
+    }
+  ]
+}
+```
+
+`testAssertion` は他の場所では有効なまま。`fixtures/` 配下の file だけがこのルールをスキップします。
 
 ### 設定の解決
 

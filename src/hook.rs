@@ -301,6 +301,30 @@ fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<Stri
     }
 }
 
+/// Layers the toggles effective for `file_path` onto `config.rules`, right
+/// after config load and before `collect_violations` reads one.
+/// `AstRuleFlags::from_config` (the `ast_security` / eval / ... gate sitting
+/// outside `rules::load_rules`) runs inside `collect_violations`, so resolving
+/// here — ahead of both gates — is the one point covering a registry rule
+/// (`sensitive-file`) and a rule gated outside the registry (`ast_security`)
+/// alike.
+fn resolve_effective_rules_with_notes(
+    mut config: Config,
+    file_path: &str,
+    notes: &mut Vec<String>,
+) -> Config {
+    let (rules, override_notes) = config.effective_rules_with_notes(file_path);
+    for note in &override_notes {
+        // Without this the note reaches the JSON envelope only, and hook mode
+        // does not emit that envelope. The agent asking why a rule stayed
+        // quiet would have nothing to read.
+        eprintln!("guardrails: {note}");
+    }
+    notes.extend(override_notes);
+    config.rules = rules;
+    config
+}
+
 pub(crate) fn run_hook(json_mode: bool) -> i32 {
     let input = match parse_stdin() {
         Ok(v) => v,
@@ -357,6 +381,7 @@ where
     };
 
     let config = load_config_or_note(load_config(), &mut notes);
+    let config = resolve_effective_rules_with_notes(config, &target.file_path, &mut notes);
 
     show_config_hint(&config);
 

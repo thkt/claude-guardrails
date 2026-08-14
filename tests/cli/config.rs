@@ -213,3 +213,133 @@ fn malformed_config_falls_back_to_defaults_and_keeps_detecting() {
         "expected eval violation despite config error: {stderr}"
     );
 }
+
+// The four below run the real binary, so `overrides` is read from disk,
+// matched against the incoming `file_path`, and reflected in the exit code
+// and the JSON envelope. A unit-level call into
+// `resolve_effective_rules_with_notes` would skip the config-load and
+// exit-code ends of that chain.
+
+// T-462: overrides の pattern に一致するパスへの Write は exit 0 で通る
+#[test]
+fn overrides_の_pattern_に一致するパスへの_write_は_exit_0で通る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    // Claude Code sends an absolute file_path, so the seam runs the branch that
+    // shape takes. A relative fixture would only cover `git_root.join`.
+    // The root is canonicalized because on macOS the tempdir sits under a
+    // symlinked `/var`; `current_dir` resolves it while the file_path here
+    // would not, and the mismatch is a separate axis from what this asserts.
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "path matching the override pattern must skip the disabled eval rule; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-463: 同じ content を overrides の外のパスへ書くと exit 2 で止まる
+#[test]
+fn 同じ_content_を_overrides_の外のパスへ書くと_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/other/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "path outside the override pattern must keep the eval rule active; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-464: compile できない glob を書いた config では note が JSON envelope に出る
+#[test]
+fn compile_できない_globを書いたconfigではnoteがjson_envelopeに出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    let notes = parsed["notes"].as_array().expect("notes must be an array");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.as_str().unwrap_or("").contains("src/[invalid")),
+        "expected a note naming the uncompilable override glob \"src/[invalid\"; got: {notes:?}"
+    );
+}
+
+// T-466: hook mode で override の note が stderr に出る
+#[test]
+fn hook_mode_で_override_のnoteがstderrに出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。envelope は
+    // 出ないので、note を運ぶ経路は stderr しか残らない。notes の vec を見る
+    // assert は、この経路が空でも通ってしまう。
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("override disabled rule(s) [eval]"),
+        "expected the override note on stderr; got: {stderr:?}"
+    );
+}
