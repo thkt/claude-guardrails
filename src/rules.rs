@@ -187,10 +187,8 @@ const TOGGLE_RULE_ID_COUNT_EXCEPTIONS: &[&str] = &[rule_id::EXCESSIVE_NESTING];
 /// named `toggle_name` (its serde name, e.g. `"astSecurity"`) is set to
 /// `false`. `None` when `toggle_name` gates no fixed `rule_id` set (e.g.
 /// `"oxlint"`, which delegates to an external linter run rather than a
-/// first-party `rule_id`).
-// No production caller yet (#435 U-001 is the plumbing unit); a later unit
-// surfaces this count in hook output. Pinned by `rules::tests`.
-#[allow(dead_code)]
+/// first-party `rule_id`). Called from `Config::stopped_rule_id_summary`
+/// to append the count to override-disable notes.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
