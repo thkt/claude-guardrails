@@ -109,10 +109,10 @@ pub struct Config {
     pub git_root: Option<PathBuf>,
     pub overrides: Vec<OverrideEntry>,
     /// `overrides[].files` patterns that failed to compile as a glob, in
-    /// config-declaration order. The whole entry containing a failing
-    /// pattern is dropped (see `compile_override_entry`); this list is what
-    /// lets `effective_rules_with_notes` surface that drop instead of
-    /// silently ignoring the entry.
+    /// config-declaration order. The entry holding one is dropped whole
+    /// (`compile_override_entry`); keeping the pattern here is what lets
+    /// `effective_rules_with_notes` report that drop instead of staying
+    /// silent about it.
     pub invalid_override_patterns: Vec<String>,
 }
 
@@ -372,23 +372,18 @@ impl Config {
     /// by key via `RulesConfig::apply_overrides` (eslint overrides semantics:
     /// a later match wins per rule key, not a whole-object replacement).
     ///
-    /// When `git_root` is known, `file_path` is resolved against it and
-    /// normalized (see `normalize_relative_to_root`) before matching, so
-    /// patterns are always evaluated against a git-root-relative path.
-    /// A `file_path` that normalizes outside `git_root` (escaping via `..`)
-    /// matches no override. Without a known `git_root`, `file_path` is
-    /// matched as given. Production always has a root, since `with_overrides_from_root` returns early without one and leaves `overrides` empty; the tests in `src/hook/tests.rs` build that shape by hand.
+    /// Patterns are matched against a git-root-relative path (see
+    /// `normalize_relative_to_root`), so a `file_path` escaping `git_root`
+    /// via `..` matches no override. Without a known `git_root` the path is
+    /// matched as given; production never takes that branch, since
+    /// `with_overrides_from_root` leaves `overrides` empty when it finds no
+    /// root.
     ///
-    /// Paired with the toggles is one note per matching override entry that
-    /// disables at least one rule (name + the matched pattern), for the hook
-    /// boundary to surface.
-    ///
-    /// Also carries one note per pattern in `invalid_override_patterns`
-    /// (an `overrides[].files` glob that failed to compile, whole entry
-    /// dropped at config load — see `compile_override_entry`). Unlike the
-    /// match-dependent notes below, this is a config-file defect, so it is
-    /// reported for every call regardless of whether `file_path` matches
-    /// anything, including when `file_path` escapes `git_root`.
+    /// The notes are for the hook boundary to surface: one per matching
+    /// entry that disables at least one rule (rule names + matched
+    /// patterns), plus one per `invalid_override_patterns` pattern. The
+    /// latter reports a config-file defect rather than a match result, so it
+    /// is emitted on every call, `file_path` escaping `git_root` included.
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
@@ -403,10 +398,8 @@ impl Config {
             })
             .collect();
 
-        // The common case: no `overrides` key in the config, so there is
-        // nothing to match against and no dropped entry to report. Returning
-        // here skips the path normalization below, which every hook
-        // invocation would otherwise pay for.
+        // Skipping the normalization below keeps its cost off every hook
+        // invocation in a repository that writes no `overrides` key.
         if self.overrides.is_empty() {
             return (rules, notes);
         }
@@ -415,21 +408,17 @@ impl Config {
             Some(root) => Self::normalize_relative_to_root(file_path, root),
             None => Some(file_path.to_path_buf()),
         };
-        // Two different situations reach this branch and neither is visible
-        // otherwise: a `..` that climbs out of the repository, and a root
-        // reached through a symlink (`current_dir` resolves it, the
-        // agent-supplied `file_path` does not, so `strip_prefix` misses).
-        // Both leave every rule enabled, which is the safe direction but
-        // silently ignores what the user wrote. Only say so when the user
-        // wrote overrides at all; a repository without them has nothing to
-        // report.
+        // Two situations reach this branch and neither is visible otherwise:
+        // a `..` that climbs out of the repository, and a root reached
+        // through a symlink (`current_dir` resolves it, the agent-supplied
+        // `file_path` does not, so `strip_prefix` misses). Both leave every
+        // rule enabled — the safe direction, but it drops what the user
+        // wrote, so say so.
         let Some(match_target) = match_target else {
-            if !self.overrides.is_empty() {
-                notes.push(format!(
-                    "override matching skipped: {} did not resolve under the repository root",
-                    file_path.display(),
-                ));
-            }
+            notes.push(format!(
+                "override matching skipped: {} did not resolve under the repository root",
+                file_path.display(),
+            ));
             return (rules, notes);
         };
 
@@ -470,6 +459,10 @@ impl Config {
     /// `Path::components` drops `.` everywhere except at the start of a
     /// relative path
     /// (<https://doc.rust-lang.org/std/path/struct.Components.html>).
+    ///
+    /// A lexical fold stops at `..`, not at symlinks: a `file_path` spelled
+    /// through a symlink that points out of the matched directory still
+    /// matches the pattern while the write lands elsewhere (#437).
     fn normalize_relative_to_root(file_path: &Path, git_root: &Path) -> Option<PathBuf> {
         let absolute = if file_path.is_absolute() {
             file_path.to_path_buf()

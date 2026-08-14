@@ -301,14 +301,13 @@ fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<Stri
     }
 }
 
-/// Layers `config.effective_rules_with_notes(file_path)` onto `config.rules` right after
-/// config load, before `collect_violations` reads a single toggle.
-/// `AstRuleFlags::from_config` (the `ast_security` / eval / ... gate that sits
-/// outside `rules::load_rules`) runs inside `collect_violations`, so
-/// resolving once here — ahead of both `rules::load_rules` and
-/// `AstRuleFlags::from_config` — is the one point that covers a registry
-/// rule (e.g. `sensitive-file`) and a rule gated outside the registry (e.g.
-/// `ast_security`) alike.
+/// Layers the toggles effective for `file_path` onto `config.rules`, right
+/// after config load and before `collect_violations` reads one.
+/// `AstRuleFlags::from_config` (the `ast_security` / eval / ... gate sitting
+/// outside `rules::load_rules`) runs inside `collect_violations`, so resolving
+/// here — ahead of both gates — is the one point covering a registry rule
+/// (`sensitive-file`) and a rule gated outside the registry (`ast_security`)
+/// alike.
 fn resolve_effective_rules_with_notes(
     mut config: Config,
     file_path: &str,

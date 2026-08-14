@@ -214,11 +214,11 @@ fn malformed_config_falls_back_to_defaults_and_keeps_detecting() {
     );
 }
 
-// U-005 seam: `.guardrails.json` overrides read from disk, matched against
-// the incoming `file_path`, and applied to rule evaluation, all through the
-// real binary (config load -> effective_rules_with_notes -> collect_violations
-// -> exit code / JSON envelope), not through a unit-level call into
-// `resolve_effective_rules_with_notes` directly.
+// The four below run the real binary, so `overrides` is read from disk,
+// matched against the incoming `file_path`, and reflected in the exit code
+// and the JSON envelope. A unit-level call into
+// `resolve_effective_rules_with_notes` would skip the config-load and
+// exit-code ends of that chain.
 
 // T-462: overrides の pattern に一致するパスへの Write は exit 0 で通る
 #[test]
