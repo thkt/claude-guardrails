@@ -598,3 +598,29 @@ fn 絶対パスで書いた_pattern_は_git_root_相対のマッチ対象に一�
     let rules = config.effective_rules(&target_path);
     assert!(rules.test_assertion);
 }
+
+// T-467: 相対パスの file_path は git root 相対として解決され override が適用される
+#[test]
+fn 相対パスの_file_path_は_git_root_相対として解決され_override_が適用される() {
+    let (_tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["src/**/*.test.ts"], "rules": {"testAssertion": false}}]}"#,
+    );
+
+    // agent が絶対パスを送るとは限らない。相対パスは git root へ join してから
+    // マッチさせるので、絶対パスで送ったときと同じ override が当たる。
+    let rules = config.effective_rules("src/foo.test.ts");
+    assert!(!rules.test_assertion);
+}
+
+// T-468: root を越える `..` で始まる絶対 file_path には override が適用されない
+#[test]
+fn root_を越える_dotdot_で始まる絶対_file_path_には_override_が適用されない() {
+    let (_tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["**/secret.ts"], "rules": {"testAssertion": false}}]}"#,
+    );
+
+    // filesystem root の直下で `..` を書いた形。畳み込んでも消せる `Normal` が
+    // 無いため `..` が残り、git root 相対にできないので rule は有効なまま。
+    let rules = config.effective_rules(Path::new("/../secret.ts"));
+    assert!(rules.test_assertion);
+}

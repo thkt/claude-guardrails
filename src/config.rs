@@ -463,10 +463,13 @@ impl Config {
     /// `file_path` is not required to exist on disk (a `PreToolUse` hook may
     /// see a file about to be created), so `Path::canonicalize` cannot be
     /// used here: it resolves symlinks and requires the path to exist.
-    /// Instead `.` and `..` are resolved lexically by folding
-    /// `Path::components` (`ParentDir` pops the last pushed `Normal`
-    /// component, `CurDir` is dropped), mirroring what `canonicalize` would
-    /// do for the path-syntax part alone.
+    /// Instead `..` is resolved lexically by folding `Path::components`
+    /// (`ParentDir` pops the last pushed `Normal` component), mirroring what
+    /// `canonicalize` would do for the path-syntax part alone. `.` needs no
+    /// arm of its own: `absolute` is always absolute here, and
+    /// `Path::components` drops `.` everywhere except at the start of a
+    /// relative path
+    /// (<https://doc.rust-lang.org/std/path/struct.Components.html>).
     fn normalize_relative_to_root(file_path: &Path, git_root: &Path) -> Option<PathBuf> {
         let absolute = if file_path.is_absolute() {
             file_path.to_path_buf()
@@ -477,7 +480,6 @@ impl Config {
         let mut normalized: Vec<Component> = Vec::new();
         for component in absolute.components() {
             match component {
-                Component::CurDir => {}
                 Component::ParentDir => {
                     if matches!(normalized.last(), Some(Component::Normal(_))) {
                         normalized.pop();

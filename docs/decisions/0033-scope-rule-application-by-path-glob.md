@@ -66,6 +66,6 @@ entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が 
 
 ### Verification
 
-- `src/config/tests.rs` で、`overrides` 未指定時は空のまま読めること、`files`/`rules` を保持すること、compile 不能な glob を含む entry だけが drop され他 entry と基底 `rules` は影響を受けないこと、pattern 一致/不一致で toggle が変わる/変わらないこと、同じ rule key を複数 entry が指定したときは後方が勝つこと、別 rule key は消えないこと、`..` で root の外に出る path はどの override にもマッチしないこと、`src/*.ts` が `src/api/db.ts` にマッチしないこと、絶対パスの pattern は git-root 相対のマッチ対象に一致しないことを assert
+- `src/config/tests.rs` で、`overrides` 未指定時は空のまま読めること、`files`/`rules` を保持すること、compile 不能な glob を含む entry だけが drop され他 entry と基底 `rules` は影響を受けないこと、pattern 一致/不一致で toggle が変わる/変わらないこと、同じ rule key を複数 entry が指定したときは後方が勝つこと、別 rule key は消えないこと、`..` で root の外に出る path はどの override にもマッチしないこと、`src/*.ts` が `src/api/db.ts` にマッチしないこと、絶対パスの pattern は git-root 相対のマッチ対象に一致しないこと、相対パスの `file_path` は git root へ join してから同じ override が当たること、filesystem root を越える `..` で始まる絶対 `file_path` はどの override にもマッチしないことを assert
 - `src/hook/tests.rs` で、override が registry 経由の rule (`sensitive-file`) と registry 外で gate される rule (`ast_security` 経由の `child-process-injection`) の両方を止めること、override が rule を無効化すると note に無効化した rule 名とマッチした pattern が乗ることを assert
 - `tests/cli/config.rs` で実バイナリを通し、`overrides` の対象パスへの Write は exit 0 で通り、対象外パスへの同じ content は exit 2 で block されることを assert。同じファイルの T-464 は compile 不能 glob を書いた config で JSON envelope の `notes` に当該 pattern を含む note が乗ることを assert し、green
