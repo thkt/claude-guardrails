@@ -225,6 +225,7 @@ struct RuleMetrics {
 struct MetricsReport {
     rules: BTreeMap<String, RuleMetrics>,
     toggle_latency_us: BTreeMap<String, u64>,
+    overrides: OverrideMetrics,
 }
 
 /// Defined as 1.0 when the denominator is 0: a rule with no chance to err
@@ -242,6 +243,7 @@ fn build_report(
     tallies: BTreeMap<String, Tally>,
     latencies: &BTreeMap<String, u64>,
     toggle_latency_us: BTreeMap<String, u64>,
+    overrides: OverrideMetrics,
 ) -> MetricsReport {
     let rules = tallies
         .into_iter()
@@ -266,6 +268,7 @@ fn build_report(
     MetricsReport {
         rules,
         toggle_latency_us,
+        overrides,
     }
 }
 
@@ -548,7 +551,12 @@ fn metrics_computation_and_outputs_carry_all_counts() {
         },
     ];
     let tallies = tally_corpus(&samples, &config);
-    let report = build_report(tallies, &BTreeMap::new(), BTreeMap::new());
+    let report = build_report(
+        tallies,
+        &BTreeMap::new(),
+        BTreeMap::new(),
+        OverrideMetrics::default(),
+    );
     let eval = &report.rules["eval"];
     assert_eq!(eval.tp, 1);
     assert_eq!(eval.fp, 1);
@@ -598,7 +606,12 @@ fn known_fn_in_corpus_does_not_fail_metrics() {
     }];
     let tallies = tally_corpus(&samples, &config);
     assert_eq!(tallies["eval"].fn_count, 1);
-    let report = build_report(tallies, &BTreeMap::new(), BTreeMap::new());
+    let report = build_report(
+        tallies,
+        &BTreeMap::new(),
+        BTreeMap::new(),
+        OverrideMetrics::default(),
+    );
     assert!(report.rules["eval"].recall.abs() < f64::EPSILON);
 }
 
@@ -622,7 +635,21 @@ fn metrics_snapshot_measures_all_samples_under_10ms() {
         *entry = (*entry).max(median);
     }
 
-    let report = build_report(tallies, &rule_latency, toggle_latency_diagnostics());
+    // The production corpus config carries no `overrides` entries, so every
+    // sample's path matches none of them and `tally_override_metrics` reduces
+    // to leak=0/overreach=0. Computed via the real function (not a hardcoded
+    // default) so a regression that starts miscounting even the trivial
+    // no-override case surfaces here too, not only in T-492..T-494.
+    let override_metrics = tally_override_metrics(corpus::SAMPLES, &config, |path, content| {
+        detected_rules_with_overrides(path, content, config.clone())
+    });
+
+    let report = build_report(
+        tallies,
+        &rule_latency,
+        toggle_latency_diagnostics(),
+        override_metrics,
+    );
     emit_metrics(&report);
 }
 
@@ -721,4 +748,174 @@ fn git_root_を_root_にすると_corpus_の仮想パスが_production_と同じ
          disables ast_security, proving the virtual path normalized under git_root \"/\"; \
          got: {detected:?}"
     );
+}
+
+// U-002: metrics snapshot に override 適用の 2 count を rules 軸と別 key で持たせる。
+// 数える単位は Fire サンプルのみ (override は disable 方向にしか効かないので
+// Clean サンプルの計上先はない)。既存の `Tally::fn_count` は再利用しない
+// (rule 自体の false negative と override の適用漏れは別の失敗モード)。
+//
+// `leak` (適用漏れ): サンプルの path に一致する override pattern がその rule を
+// 無効化するはずなのに、detect がその rule を検出した件数。
+// `overreach` (過剰適用): どの override pattern にも一致しない path で、
+// detect がその rule を検出しなかった件数 (override が無関係な path まで
+// 沈黙させた場合の signal)。
+
+/// Override-application confusion counts, at the same report hierarchy level
+/// as `rules` / `toggle_latency_us` (see `MetricsReport`). Measured only over
+/// Fire samples; see the U-002 comment above for why.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+struct OverrideMetrics {
+    leak: u32,
+    overreach: u32,
+}
+
+/// Tallies `leak` / `overreach` over `samples`' Fire entries. `detect` is
+/// injected (rather than calling `detected_rules_with_overrides` directly)
+/// so a test can swap in `detected_rules` (which never resolves
+/// `config.overrides`) to prove the honoring path actually lowers `leak`
+/// (T-493).
+///
+/// "Does an override pattern disable this sample's rule for this path" is
+/// answered via `Config::effective_rules_with_notes` + `RulesConfig::
+/// disabled_since` — the same production resolution `detected_rules_with_overrides`
+/// runs, not a re-derivation — compared against `toggle_isolation_cases()`'s
+/// `rule_id` -> toggle-name mapping (reused in reverse) to find which toggle
+/// gates `sample.rule`.
+fn tally_override_metrics(
+    samples: &[CorpusSample],
+    config: &Config,
+    detect: impl Fn(&str, &str) -> BTreeSet<String>,
+) -> OverrideMetrics {
+    let toggle_for_rule: BTreeMap<&str, &str> = toggle_isolation_cases()
+        .into_iter()
+        .flat_map(|(toggle, _config, rules)| rules.iter().map(move |rule| (*rule, toggle)))
+        .collect();
+
+    let mut metrics = OverrideMetrics::default();
+    for sample in samples {
+        if sample.expectation != Expectation::Fire {
+            continue;
+        }
+        let toggle = toggle_for_rule.get(sample.rule).unwrap_or_else(|| {
+            panic!(
+                "no toggle_isolation_cases() mapping for rule_id {}",
+                sample.rule
+            )
+        });
+        let (resolved, _override_notes) = config.effective_rules_with_notes(sample.path);
+        let intended_disabled = resolved.disabled_since(&config.rules).contains(toggle);
+        let fired = detect(sample.path, sample.content).contains(sample.rule);
+        match (intended_disabled, fired) {
+            (true, true) => metrics.leak += 1,
+            (false, false) => metrics.overreach += 1,
+            _ => {}
+        }
+    }
+    metrics
+}
+
+// T-492: override が効いている状態では適用漏れと過剰適用がどちらも 0 になる
+#[test]
+fn override_が効いている状態では適用漏れと過剰適用がどちらも_0_になる() {
+    let unrelated = corpus::SAMPLES
+        .iter()
+        .find(|s| s.rule == "hardcoded-secret" && s.expectation == Expectation::Fire)
+        .expect("corpus has a hardcoded-secret fire sample");
+    let samples = [
+        CorpusSample {
+            rule: "eval",
+            path: "/src/app.ts",
+            content: "eval(userInput);\n",
+            expectation: Expectation::Fire,
+        },
+        CorpusSample {
+            rule: unrelated.rule,
+            path: unrelated.path,
+            content: unrelated.content,
+            expectation: unrelated.expectation,
+        },
+    ];
+
+    let mut config = harness_config();
+    config.git_root = Some(PathBuf::from("/"));
+    config.overrides = vec![override_entry("src/app.ts", r#"{"eval": false}"#)];
+
+    let metrics = tally_override_metrics(&samples, &config, |path, content| {
+        detected_rules_with_overrides(path, content, config.clone())
+    });
+
+    assert_eq!(
+        metrics.leak, 0,
+        "override が効くパスで fire が漏れてはいけない"
+    );
+    assert_eq!(
+        metrics.overreach, 0,
+        "override が効かないパスの fire を沈黙させてはいけない"
+    );
+}
+
+// T-493: override を無視する実装に差し替えると適用漏れの件数が増える
+#[test]
+fn override_を無視する実装に差し替えると適用漏れの件数が増える() {
+    let samples = [CorpusSample {
+        rule: "eval",
+        path: "/src/app.ts",
+        content: "eval(userInput);\n",
+        expectation: Expectation::Fire,
+    }];
+
+    let mut config = harness_config();
+    config.git_root = Some(PathBuf::from("/"));
+    config.overrides = vec![override_entry("src/app.ts", r#"{"eval": false}"#)];
+
+    let honoring = tally_override_metrics(&samples, &config, |path, content| {
+        detected_rules_with_overrides(path, content, config.clone())
+    });
+    // `detected_rules` calls `collect_violations` directly and never resolves
+    // `config.overrides` (see its doc comment above), so plugging it in here
+    // stands in for an implementation that dropped override resolution.
+    let ignoring = tally_override_metrics(&samples, &config, |path, content| {
+        detected_rules(path, content, &config)
+    });
+
+    assert_eq!(honoring.leak, 0);
+    assert!(
+        ignoring.leak > honoring.leak,
+        "ignoring overrides must raise the leak count: honoring={honoring:?} ignoring={ignoring:?}"
+    );
+}
+
+// T-494: 既存の `rules` 軸の値が override 軸の追加で変わらない
+#[test]
+fn 既存の_rules_軸の値が_override_軸の追加で変わらない() {
+    let config = harness_config();
+    let samples = [
+        CorpusSample {
+            rule: "eval",
+            path: "/src/app.ts",
+            content: "eval(userInput);\n",
+            expectation: Expectation::Fire,
+        },
+        CorpusSample {
+            rule: "eval",
+            path: "/src/app.ts",
+            content: "eval(userInput);\n",
+            expectation: Expectation::Clean,
+        },
+    ];
+    let tallies = tally_corpus(&samples, &config);
+
+    let override_metrics = OverrideMetrics {
+        leak: 2,
+        overreach: 3,
+    };
+    let report = build_report(tallies, &BTreeMap::new(), BTreeMap::new(), override_metrics);
+
+    let eval = &report.rules["eval"];
+    assert_eq!(eval.tp, 1);
+    assert_eq!(eval.fp, 1);
+    assert_eq!(eval.fn_count, 0);
+    assert!((eval.precision - 0.5).abs() < f64::EPSILON);
+    assert!((eval.recall - 1.0).abs() < f64::EPSILON);
 }

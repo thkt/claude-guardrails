@@ -81,3 +81,16 @@ The Decision Outcome leaves the on-disk metrics JSON shape implicit. This amendm
 The gate parses base.json and head.json with jq and compares `fp` against the clean-sample count per rule. The comparison is meaningful only if both checkouts emit the same keys, so the field names and the `serde(rename = "fn")` are a compatibility contract: renaming a field (e.g. `fp` to `false_pos`) makes jq read null on one side, the cross-multiplication then passes vacuously, and the FP/recall gate silently disables with no failing line. A field rename is therefore a breaking change that must update the gate's jq paths in the same PR.
 
 Enforcement, closed by the 2026-06-17 follow-up: the gate's jq filter now resolves each compared field through `// error(...)` and the `.rules` key through the same guard, so a renamed or missing field aborts jq instead of reading null. The `Precision delta gate` step runs that jq under `if ! report=$(...)`, which propagates jq's non-zero exit (a bare assignment had masked it under `set -e`) and fails the job with a schema-drift error. A field rename now blocks the PR with a loud failure rather than silently disabling the FP gate.
+
+## Amendment 2026-08-14: add override-application counts to the metrics schema
+
+An `overrides` entry in `.guardrails.json` disables its matched rules for the matching paths, and until now the metrics snapshot carried no signal on whether that resolution itself under- or over-applies. `MetricsReport` gains a third top-level key, `overrides`, at the same hierarchy level as `rules` and `toggle_latency_us`: `{ "leak": u32, "overreach": u32 }` (`OverrideMetrics` in `src/hook/precision.rs`).
+
+The counting unit stays the Fire sample. A Clean sample gives no override signal, since an override only disables and a silent Clean sample already reads the same whether the override touched it or not. For each Fire sample, `tally_override_metrics` resolves the sample's path through the same `Config::effective_rules_with_notes` step `detected_rules_with_overrides` runs in production, then checks whether the toggle gating the sample's rule_id ended up disabled for that path (via `RulesConfig::disabled_since`, matched against `rule_id` through `toggle_isolation_cases()`'s existing toggle-to-rule_id mapping).
+
+| Override disables this rule for this path | Rule still detected | Rule not detected |
+| ----------------------------------------- | ------------------- | ----------------- |
+| Yes                                       | `leak` +1           | no count          |
+| No                                        | no count            | `overreach` +1    |
+
+The CI precision delta gate (the `fp` cross-multiplication above) does not read `overrides`; it stays a diagnostic-only field alongside `toggle_latency_us` until a gate is written against it.
