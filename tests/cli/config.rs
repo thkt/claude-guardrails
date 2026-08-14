@@ -410,3 +410,71 @@ fn symlink_を経由しない_override_対象パスへの同じ_write_は_exit_0
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// T-486: `.guardrails.json` へ overrides を書き足す Write は exit 2 で止まる
+#[test]
+fn guardrails_json_へ_overrides_を書き足す_write_は_exit_2で止まる() {
+    let tmp = tmp_repo();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join(".guardrails.json"),
+            "content": r#"{"overrides":[{"files":["**"],"rules":{"eval":false}}]}"#
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "config edits belong to a human; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-487: 同じ content を `docs/sample.json` へ書くと exit 0 で通る
+#[test]
+fn 同じ_content_を_docs_配下へ書くと_exit_0で通る() {
+    let tmp = tmp_repo();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("docs/sample.json"),
+            "content": r#"{"overrides":[{"files":["**"],"rules":{"eval":false}}]}"#
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "only the config guardrails reads is guarded; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-488: `severity.blockThreshold` を `critical` にした repository でも設定ファイルへの Write は exit 2 で止まる
+#[test]
+fn blockthreshold_を_critical_にしても設定ファイルへの_write_は_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"severity": {"blockThreshold": "critical"}}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join(".guardrails.json"),
+            "content": r#"{"rules":{"configGuard":false}}"#
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "Critical stays blocking at the highest threshold; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

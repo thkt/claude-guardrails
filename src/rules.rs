@@ -1,5 +1,6 @@
 mod architecture;
 mod bundle_size;
+mod config_guard;
 pub(crate) mod cors_wildcard;
 mod cot_leakage_marker;
 mod crypto_weak;
@@ -30,6 +31,7 @@ use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::Path;
 use std::sync::LazyLock;
 
 /// `rule_id` catalog. 新規 `rule_id` を追加するときは:
@@ -92,6 +94,7 @@ pub(crate) mod rule_id {
         EXCESSIVE_NESTING = "excessive-nesting",
         TEST_ENDPOINT_PROD_GUARD = "test-endpoint-prod-guard",
         INVARIANT = "invariant",
+        CONFIG_GUARD = "config-guard",
     }
 }
 
@@ -289,6 +292,12 @@ macro_rules! register_rules {
     ($config:expr, $rules:expr, $( $field:ident => $module:ident ),* $(,)?) => {
         $(if $config.rules.$field { $rules.push(&*$module::RULE); })*
     };
+}
+
+/// Config-file guard, outside `load_rules` because it needs the git root to
+/// tell the repository's own config from a same-named file elsewhere.
+pub(crate) fn config_guard_check(file_path: &str, git_root: Option<&Path>) -> Vec<Violation> {
+    config_guard::check(file_path, git_root)
 }
 
 pub fn load_rules(config: &Config) -> Vec<&'static Rule> {

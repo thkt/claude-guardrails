@@ -91,6 +91,7 @@ define_rule_config! {
     service_worker    => "serviceWorker",
     jwt_client        => "jwtClient",
     invariant         => "invariant",
+    config_guard      => "configGuard",
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,7 +193,7 @@ struct ProjectSeverityConfig {
 
 pub(crate) const GUARDRAILS_CONFIG_FILE: &str = ".guardrails.json";
 pub(crate) const TOOLS_CONFIG_FILE: &str = ".claude/tools.json";
-const LEGACY_CONFIG_FILE: &str = ".claude-guardrails.json";
+pub(crate) const LEGACY_CONFIG_FILE: &str = ".claude-guardrails.json";
 
 #[derive(Debug, Deserialize)]
 struct ToolsConfig {
@@ -447,7 +448,7 @@ impl Config {
                 continue;
             }
             let before = rules.clone();
-            rules.apply_overrides(entry.rules.clone());
+            rules.apply_path_overrides(entry.rules.clone());
             let disabled = rules.disabled_since(&before);
             if !disabled.is_empty() {
                 notes.push(format!(
@@ -463,3 +464,13 @@ impl Config {
 
 #[cfg(test)]
 mod tests;
+
+impl RulesConfig {
+    /// `config_guard` stays at its `rules` value: an entry switching it off for
+    /// `.guardrails.json` would let the next edit take the guard out.
+    fn apply_path_overrides(&mut self, project: ProjectRulesConfig) {
+        let guard = self.config_guard;
+        self.apply_overrides(project);
+        self.config_guard = guard;
+    }
+}

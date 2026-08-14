@@ -696,3 +696,25 @@ fn 解決できない_file_path_では_rule_を有効化する_override_も適�
     let rules = config.effective_rules(&escaping);
     assert!(!rules.test_assertion);
 }
+
+// T-484: `configGuard` を false にする override entry があっても設定ファイルへの編集は止まる
+#[test]
+fn config_guard_を切る_override_entry_があっても有効なままになる() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["**"], "rules": {"configGuard": false, "testAssertion": false}}]}"#,
+    );
+
+    // 同じ entry の他の toggle は落ちる。configGuard だけが override の対象外。
+    let rules = config.effective_rules(tmp.path().join(".guardrails.json"));
+    assert!(rules.config_guard);
+    assert!(!rules.test_assertion);
+}
+
+// T-485: `rules` に直接 `configGuard: false` を書いた repository では止まらない
+#[test]
+fn rules_に直接書いた_config_guard_の無効化は効く() {
+    let (tmp, config) = repo_with_config(r#"{"rules": {"configGuard": false}}"#);
+
+    let rules = config.effective_rules(tmp.path().join(".guardrails.json"));
+    assert!(!rules.config_guard);
+}

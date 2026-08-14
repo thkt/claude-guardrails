@@ -225,6 +225,15 @@ fn collect_violations(
         ));
     }
 
+    // Path-only, so it runs whatever the file type and whatever the content
+    // resolution produced.
+    if config.rules.config_guard {
+        violations.extend(rules::config_guard_check(
+            file_path,
+            config.git_root.as_deref(),
+        ));
+    }
+
     (violations, notes)
 }
 

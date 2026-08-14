@@ -1,0 +1,45 @@
+//! Blocks an agent-driven edit to the config files guardrails itself reads.
+//!
+//! An agent that can rewrite `.guardrails.json` can switch off the rule that
+//! would have stopped its next edit, and an `overrides` entry makes that read
+//! as a test-path exclusion in the diff.
+
+use super::{rule_id, Severity, Violation};
+use crate::config::{GUARDRAILS_CONFIG_FILE, LEGACY_CONFIG_FILE, TOOLS_CONFIG_FILE};
+use std::path::Path;
+
+/// Only the copies at the git root, since those are the ones
+/// `Config::with_overrides_from_root` reads. A nested `.guardrails.json`
+/// changes nothing guardrails does.
+fn is_guardrails_config(file_path: &str, git_root: &Path) -> bool {
+    [
+        GUARDRAILS_CONFIG_FILE,
+        TOOLS_CONFIG_FILE,
+        LEGACY_CONFIG_FILE,
+    ]
+    .iter()
+    .any(|name| Path::new(file_path) == git_root.join(name))
+}
+
+/// `Critical`, not `High`: a repository that raises `blockThreshold` to
+/// `critical` would otherwise demote this to advisory and reopen the bypass.
+pub(crate) fn check(file_path: &str, git_root: Option<&Path>) -> Vec<Violation> {
+    let Some(git_root) = git_root else {
+        return Vec::new();
+    };
+    if !is_guardrails_config(file_path, git_root) {
+        return Vec::new();
+    }
+    vec![Violation {
+        rule: rule_id::CONFIG_GUARD.to_owned(),
+        severity: Severity::Critical,
+        fix: "Leave guardrails config to a human. Ask for the change instead of editing this file."
+            .to_owned(),
+        file: file_path.to_owned(),
+        line: None,
+        origin: None,
+    }]
+}
+
+#[cfg(test)]
+mod tests;
