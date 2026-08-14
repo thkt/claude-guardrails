@@ -80,18 +80,23 @@ pub fn build_json_report<'a>(
     }
 }
 
-pub fn format_warnings(violations: &[&Violation]) -> String {
+/// `color` decides ANSI, because the caller knows which stream this text is
+/// bound for and `color::stderr_takes_color` answers for stderr alone.
+pub fn format_warnings(violations: &[&Violation], color: bool) -> String {
     if violations.is_empty() {
         return String::new();
     }
 
     let mut lines = vec![
         String::new(),
-        color::yellow(&format!(
-            "Guardrails ⚠ {} warning{}",
-            violations.len(),
-            if violations.len() == 1 { "" } else { "s" }
-        )),
+        color::yellow_if(
+            color,
+            &format!(
+                "Guardrails ⚠ {} warning{}",
+                violations.len(),
+                if violations.len() == 1 { "" } else { "s" }
+            ),
+        ),
     ];
 
     for v in violations {
@@ -130,6 +135,27 @@ mod tests {
             line: Some(1),
             origin: None,
         }
+    }
+
+    // T-514: 色を無効にして整形した advisory は ANSI 制御列を含まない
+    #[test]
+    fn 色を無効にして整形した_advisory_は_ansi_制御列を含まない() {
+        let v = make_violation("dom-access", Severity::Medium, "Use a ref");
+
+        let output = format_warnings(&[&v], false);
+
+        assert!(!output.contains('\u{1b}'), "output: {output:?}");
+        assert!(output.contains("dom-access"), "output: {output}");
+    }
+
+    // T-515: 色を有効にして整形した advisory は ANSI 制御列を含む
+    #[test]
+    fn 色を有効にして整形した_advisory_は_ansi_制御列を含む() {
+        let v = make_violation("dom-access", Severity::Medium, "Use a ref");
+
+        let output = format_warnings(&[&v], true);
+
+        assert!(output.contains('\u{1b}'), "output: {output:?}");
     }
 
     #[test]
@@ -181,7 +207,7 @@ mod tests {
             Severity::Low,
             "Remove console.log",
         );
-        let output = strip_ansi(&format_warnings(&[&v]));
+        let output = format_warnings(&[&v], false);
         assert!(output.contains("Guardrails"));
         assert!(output.contains("⚠"));
         assert!(output.contains("eslint(no-console) (oxlint) [LOW]"));
@@ -278,7 +304,7 @@ mod tests {
         let plain = make_violation("eval", Severity::High, "fix");
         let mut demoted = make_violation("eval", Severity::High, "fix");
         demoted.origin = Some(ViolationOrigin::Preexisting);
-        let output = strip_ansi(&format_warnings(&[&plain, &demoted]));
+        let output = format_warnings(&[&plain, &demoted], false);
         let marked: Vec<&str> = output
             .lines()
             .filter(|l| l.contains("preexisting"))

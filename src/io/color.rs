@@ -2,6 +2,18 @@ use std::env;
 use std::io::{stderr, IsTerminal};
 use std::sync::LazyLock;
 
+/// Whether stderr takes ANSI. A payload bound for another stream decides its
+/// own colouring and passes it down; this answers only for stderr.
+pub(crate) fn stderr_takes_color() -> bool {
+    use_color()
+}
+
+/// Yellow only when the caller says so, for text whose destination stream is
+/// not the one `use_color` inspects.
+pub(crate) fn yellow_if(color: bool, text: &str) -> String {
+    wrap_with(color, "33", text)
+}
+
 fn use_color() -> bool {
     static COLOR: LazyLock<bool> =
         LazyLock::new(|| use_color_with(env::var_os("NO_COLOR").is_none(), stderr().is_terminal()));

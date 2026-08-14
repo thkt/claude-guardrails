@@ -8,7 +8,7 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-guardrails は Claude Code の PreToolUse hook として動作する CLI で、出力経路は (a) stderr に人間/AI 向け human-readable、(b) `--json` 時に stdout に構造化 JSON、(c) terminal exit code の 3 つを持つ。AI agent が hook 結果を機械的に解釈する際、`error.code` (JSON) と exit code (terminal) が同じ分類軸を表裏で表現すれば、retry policy / branch logic / 報告生成を一貫したロジックで書ける。
+guardrails は Claude Code の PreToolUse hook として動作する CLI で、出力経路は (a) stderr に human-readable、(b) stdout に構造化 JSON、(c) terminal exit code の 3 つを持つ。stdout は `--json` のとき envelope を、hook mode で advisory があるとき PreToolUse hook JSON を運ぶ (#439、両者は排他)。AI agent が hook 結果を機械的に解釈する際、`error.code` (JSON) と exit code (terminal) が同じ分類軸を表裏で表現すれば、retry policy / branch logic / 報告生成を一貫したロジックで書ける。
 
 過去、guardrails は exit code を `0` / `1` のみで運用し、JSON 出力は pre-envelope 形 (`{ violations, decision, exit_code }`) を返していた。これでは:
 
@@ -152,6 +152,7 @@ envelope schema と exit code は次のテストで pin されている。
 | `error.code` ↔ sysexits 数値                     | `error_code_exit_code_matches_sysexits_h` (`src/io/envelope.rs`)                                                                                                                                                                                                          |
 | Hook 5 種 exit code                              | T-001 `pass_is_zero` / T-002 `advisory_is_one` / T-003 `blocking_is_two` / T-004 `input_error_is_sysexits_usage` / T-005 `internal_is_sysexits_software` (`src/hook_exit.rs`)                                                                                             |
 | Hook mode JSON envelope (e2e)                    | `tests/cli/json_envelope.rs` の `--json` envelope 検証群                                                                                                                                                                                                                  |
+| Hook mode の stdout 排他 (e2e)                   | `advisory_だけの_write_では_stdout_の_hook_json_に_rule_id_が含まれる` / `blocking_を含む_write_では_stdout_が空のままになる` / `json_を付けた_advisory_の実行では_stdout_に_envelope_だけが出る` (`tests/cli/json_envelope.rs`)                                          |
 | violation payload の `origin` field (diff-aware) | `format_json_report_omits_origin_when_absent` / `format_json_report_emits_origin_when_present` (`src/io/reporter.rs`)                                                                                                                                                     |
 
 新規 exit code / envelope field 追加 PR では、上記テストの新規追加または既存 update を description に明示する。

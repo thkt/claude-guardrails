@@ -239,14 +239,14 @@ Calling `guardrails` with no subcommand enters **hook mode** (reads tool input J
 
 ## Exit Codes
 
-Claude Code reads the exit code to decide whether to pass, surface a warning to the AI, or halt the tool call. Per the PreToolUse contract only exit `2` halts the call; `0` allows and `1` / `64` are non-blocking (stderr is surfaced to the AI, the tool proceeds). A panic mid-check also exits `2` so an incomplete check fails closed rather than letting the edit through.
+Claude Code reads the exit code to decide whether to pass, surface a warning to the AI, or halt the tool call. Per the PreToolUse contract only exit `2` halts the call; `0` allows and `1` / `64` are non-blocking (the tool proceeds). stderr reaches the AI on exit `2` only. An advisory run carries its findings to the AI as PreToolUse hook JSON on stdout instead. A panic mid-check also exits `2` so an incomplete check fails closed rather than letting the edit through.
 
 ### Hook mode (no subcommand)
 
 | Code | Meaning                                                                                                                                            |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0    | Pass — no violations                                                                                                                               |
-| 1    | Warning only — non-blocking severity violations, tool proceeds, stderr shown to AI                                                                 |
+| 1    | Warning only — non-blocking severity violations, tool proceeds, findings sent to the AI as stdout hook JSON                                        |
 | 2    | Blocked — violations at or above `severity.blockThreshold` (default: `high`), oversized stdin, or a panic mid-check (all fail-closed), tool halted |
 | 64   | Hook input error — malformed JSON, stdin read failure, or clap usage failure (non-blocking)                                                        |
 
@@ -275,7 +275,9 @@ Pass `--json` to emit a structured JSON report on stdout. Human-readable output 
 guardrails --json < tool-call.json
 ```
 
-> **BREAKING (v0.15+)**: the `GUARDRAILS_JSON=1` env from v0.14 is removed. Use `--json` instead. To keep JSON output on every hook call, add the flag to your hook command (see [As Claude Code Hook](#as-claude-code-hook)).
+> **BREAKING (v0.15+)**: the `GUARDRAILS_JSON=1` env from v0.14 is removed. Use `--json` instead.
+
+> **Do not add `--json` to your hook command.** stdout carries one document: with `--json` it is the envelope, otherwise it is the PreToolUse hook JSON that delivers advisory findings to the AI. Adding the flag to the hook silences that delivery. Use `--json` for tooling that reads guardrails directly.
 
 > **BREAKING (v0.15+)**: success output is wrapped in a `SuccessEnvelope` (`{ data, degraded, notes }`) per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md). The pre-envelope shape (`{ violations, decision, exit_code }`) is gone — the process exit code remains the source of truth for hook decisions.
 

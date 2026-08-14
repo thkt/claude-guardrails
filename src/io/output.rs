@@ -8,6 +8,7 @@ use crate::io::envelope::{ErrorCode, ErrorEnvelope, ErrorPayload, SuccessEnvelop
 use crate::io::reporter::{build_json_report, format_violations, format_warnings};
 use crate::rules::Violation;
 use serde::Serialize;
+use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -64,7 +65,7 @@ pub(crate) fn show_config_hint(config: &Config) {
 
 pub(crate) fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violation]) {
     if !warnings.is_empty() {
-        eprintln!("{}", format_warnings(warnings));
+        eprintln!("{}", format_warnings(warnings, color::stderr_takes_color()));
     }
     if !blocking.is_empty() {
         eprintln!("{}", format_violations(blocking));
@@ -74,8 +75,16 @@ pub(crate) fn emit_human_violations(blocking: &[&Violation], warnings: &[&Violat
 pub(crate) fn print_json_line<T: Serialize>(value: &T) {
     let json = serde_json::to_string(value)
         .expect("print_json_line: envelope serialization is infallible");
+    print_line(&json);
+}
+
+/// One `write_all`, so a failure mid-write leaves a truncated line rather than
+/// a line the next write would extend. A reader parsing stdout as one document
+/// gets nothing either way; a second attempt would hand it two fragments.
+fn print_line(line: &str) {
+    let mut out = io::stdout().lock();
     // Ignore write errors (e.g. BrokenPipe) so the caller's exit code is preserved.
-    let _ = writeln!(io::stdout().lock(), "{json}");
+    let _ = out.write_all(format!("{line}\n").as_bytes());
 }
 
 pub(crate) fn emit_json_if_enabled(
@@ -94,6 +103,81 @@ pub(crate) fn emit_json_if_enabled(
     ));
 }
 
+/// Advisory entries carried to the agent. The hook runs on every edit, so an
+/// unbounded list spends the agent's context on repetition.
+const MAX_CONTEXT_VIOLATIONS: usize = 10;
+
+#[derive(Serialize)]
+struct HookSpecificOutput {
+    #[serde(rename = "hookEventName")]
+    hook_event_name: &'static str,
+    #[serde(rename = "additionalContext")]
+    additional_context: String,
+}
+
+#[derive(Serialize)]
+struct HookOutput {
+    #[serde(rename = "hookSpecificOutput")]
+    hook_specific_output: HookSpecificOutput,
+}
+
+/// Writes the agent-facing stdout line for this run, when there is one.
+pub(crate) fn emit_hook_context(
+    json_mode: bool,
+    blocking: &[&Violation],
+    warnings: &[&Violation],
+    notes: &[String],
+) {
+    if let Some(line) = hook_context_line(json_mode, blocking, warnings, notes) {
+        print_line(&line);
+    }
+}
+
+/// The stdout line that carries advisory text to the agent, or `None` when
+/// this run has nothing to deliver there.
+///
+/// `json_mode` and `blocking` both suppress it. The envelope owns stdout under
+/// `--json`, and two JSON documents on one stream parse as neither. A blocking
+/// run already reaches the agent through the exit-2 stderr path, and a stdout
+/// document there would change how the run is classified.
+pub(crate) fn hook_context_line(
+    json_mode: bool,
+    blocking: &[&Violation],
+    warnings: &[&Violation],
+    notes: &[String],
+) -> Option<String> {
+    if json_mode || !blocking.is_empty() {
+        return None;
+    }
+    if warnings.is_empty() && notes.is_empty() {
+        return None;
+    }
+
+    let shown: Vec<&Violation> = warnings
+        .iter()
+        .take(MAX_CONTEXT_VIOLATIONS)
+        .copied()
+        .collect();
+    let mut context = format_warnings(&shown, false).trim_start().to_owned();
+    if let Some(hidden) = warnings.len().checked_sub(shown.len()).filter(|n| *n > 0) {
+        let _ = write!(context, "\n  ... and {hidden} more");
+    }
+    for note in notes {
+        if !context.is_empty() {
+            context.push('\n');
+        }
+        let _ = write!(context, "guardrails: {note}");
+    }
+
+    let output = HookOutput {
+        hook_specific_output: HookSpecificOutput {
+            hook_event_name: "PreToolUse",
+            additional_context: context,
+        },
+    };
+    Some(serde_json::to_string(&output).expect("hook context serialization is infallible"))
+}
+
 fn emit_error_envelope_if_enabled(json_mode: bool, payload: ErrorPayload) {
     if !json_mode {
         return;
@@ -110,6 +194,81 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir(tmp.path().join(".claude")).unwrap();
         tmp
+    }
+
+    fn warning(rule: &str) -> Violation {
+        Violation {
+            rule: rule.to_owned(),
+            severity: crate::rules::Severity::Medium,
+            fix: format!("fix {rule}"),
+            file: "/src/app.ts".to_owned(),
+            line: Some(1),
+            origin: None,
+        }
+    }
+
+    // T-516: advisory があるとき hook JSON の hookEventName が PreToolUse になる
+    #[test]
+    fn advisory_があるとき_hook_json_の_hookeventname_が_pretooluse_になる() {
+        let v = warning("dom-access");
+
+        let line = hook_context_line(false, &[], &[&v], &[]).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+        let context = parsed["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.contains("dom-access"), "context: {context}");
+        assert!(!context.contains('\u{1b}'), "context: {context:?}");
+    }
+
+    // T-517: blocking があるとき hook JSON を組まない
+    #[test]
+    fn blocking_があるとき_hook_json_を組まない() {
+        let b = warning("eval");
+        let w = warning("dom-access");
+
+        assert!(hook_context_line(false, &[&b], &[&w], &[]).is_none());
+    }
+
+    // T-518: json_mode が true のとき hook JSON を組まない
+    #[test]
+    fn json_mode_が_true_のとき_hook_json_を組まない() {
+        let v = warning("dom-access");
+
+        assert!(hook_context_line(true, &[], &[&v], &[]).is_none());
+    }
+
+    // T-519: advisory が上限を超えるとき文面に残件数が出る
+    #[test]
+    fn advisory_が上限を超えるとき文面に残件数が出る() {
+        let many: Vec<Violation> = (0..MAX_CONTEXT_VIOLATIONS + 3)
+            .map(|i| warning(&format!("rule-{i}")))
+            .collect();
+        let refs: Vec<&Violation> = many.iter().collect();
+
+        let line = hook_context_line(false, &[], &refs, &[]).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let context = parsed["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(context.contains("3 more"), "context: {context}");
+    }
+
+    // note だけでも hook JSON を組む
+    #[test]
+    fn note_だけでも_hook_json_を組む() {
+        let line = hook_context_line(false, &[], &[], &["config note".to_owned()]).unwrap();
+
+        assert!(line.contains("config note"), "line: {line}");
+    }
+
+    // 出すものが何も無ければ hook JSON を組まない
+    #[test]
+    fn 出すものが何も無ければ_hook_json_を組まない() {
+        assert!(hook_context_line(false, &[], &[], &[]).is_none());
     }
 
     #[test]
