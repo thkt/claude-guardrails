@@ -18,6 +18,8 @@ use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use globset::GlobBuilder;
@@ -918,4 +920,131 @@ fn 既存の_rules_軸の値が_override_軸の追加で変わらない() {
     assert_eq!(eval.fn_count, 0);
     assert!((eval.precision - 0.5).abs() < f64::EPSILON);
     assert!((eval.recall - 1.0).abs() < f64::EPSILON);
+}
+
+// U-004: `GUARDRAILS_METRICS_OUT` で書き出した JSON を `scripts/precision_gate.sh`
+// にそのまま base/head として渡し、終了コードで判定できることを確認する。
+// `write_metrics_json` を直接呼ばず必ず `emit_metrics` (env var 分岐) を経由するのは、
+// ci.yml が `GUARDRAILS_METRICS_OUT="$PWD/head.json" cargo test ... metrics_snapshot`
+// で叩くのと同じ経路をここでも通し、env var 分岐自体の回帰を拾うため。
+
+/// `emit_metrics` は process 全体の環境変数を読むため、cargo test の並列実行下で
+/// 複数 test が同時に `GUARDRAILS_METRICS_OUT` を書き換えると競合する。この Mutex は
+/// T-495..T-497 の 3 test 間でのみ、その書き換え区間を直列化する。
+static METRICS_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn precision_gate_script() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/precision_gate.sh")
+}
+
+/// `emit_metrics` の `GUARDRAILS_METRICS_OUT` 分岐を経由して `report` を `path` に書き出す。
+fn write_via_metrics_out_env(report: &MetricsReport, path: &Path) {
+    let _guard = METRICS_ENV_LOCK.lock().unwrap();
+    env::set_var("GUARDRAILS_METRICS_OUT", path);
+    emit_metrics(report);
+    env::remove_var("GUARDRAILS_METRICS_OUT");
+}
+
+/// `scripts/precision_gate.sh <base> <head>` を実行し、gate の終了コードが
+/// 成功 (exit 0) だったかを返す。
+fn run_gate(base: &Path, head: &Path) -> bool {
+    Command::new(precision_gate_script())
+        .arg(base)
+        .arg(head)
+        .output()
+        .expect("spawn scripts/precision_gate.sh")
+        .status
+        .success()
+}
+
+fn tiny_report(overrides: OverrideMetrics) -> MetricsReport {
+    let config = harness_config();
+    let samples = [
+        CorpusSample {
+            rule: "eval",
+            path: "/src/app.ts",
+            content: "eval(userInput);\n",
+            expectation: Expectation::Fire,
+        },
+        CorpusSample {
+            rule: "eval",
+            path: "/src/app.ts",
+            content: "export const x = 1;\n",
+            expectation: Expectation::Clean,
+        },
+    ];
+    let tallies = tally_corpus(&samples, &config);
+    build_report(tallies, &BTreeMap::new(), BTreeMap::new(), overrides)
+}
+
+// T-495: 書き出した JSON を head 側に、同じ JSON を base 側に渡すと gate は成功で返る
+#[test]
+fn 書き出した_json_を_head_側に_同じ_json_を_base_側に渡すと_gate_は成功で返る() {
+    let report = tiny_report(OverrideMetrics::default());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("metrics.json");
+    write_via_metrics_out_env(&report, &path);
+
+    assert!(
+        run_gate(&path, &path),
+        "same JSON as both base and head must pass the gate"
+    );
+}
+
+// T-496: 適用漏れを 1 件増やした JSON を head 側に渡すと gate は失敗で返る
+#[test]
+fn 適用漏れを_1_件増やした_json_を_head_側に渡すと_gate_は失敗で返る() {
+    let base_report = tiny_report(OverrideMetrics {
+        leak: 0,
+        overreach: 0,
+    });
+    let head_report = tiny_report(OverrideMetrics {
+        leak: 1,
+        overreach: 0,
+    });
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base_path = dir.path().join("base.json");
+    let head_path = dir.path().join("head.json");
+    write_via_metrics_out_env(&base_report, &base_path);
+    write_via_metrics_out_env(&head_report, &head_path);
+
+    assert!(
+        !run_gate(&base_path, &head_path),
+        "leak increasing by one on head must fail the gate"
+    );
+}
+
+// T-497: override 軸を持たない JSON を base 側に渡すと gate は bootstrap として成功で返る
+#[test]
+fn override_軸を持たない_json_を_base_側に渡すと_gate_は_bootstrap_として成功で返る() {
+    let report = tiny_report(OverrideMetrics::default());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base_path = dir.path().join("base.json");
+    let head_path = dir.path().join("head.json");
+    write_via_metrics_out_env(&report, &base_path);
+    write_via_metrics_out_env(&report, &head_path);
+
+    // U-002 (override 軸) 導入前の base.json を模す: 手書き JSON で schema を
+    // 別に定義するのではなく、実際に production の env var 経路で書き出した
+    // JSON から "overrides" キーを取り除く。schema が実物からずれない。
+    let mut base_value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&base_path).expect("read base"))
+            .expect("parse base json");
+    base_value
+        .as_object_mut()
+        .expect("report serializes as a JSON object")
+        .remove("overrides");
+    fs::write(
+        &base_path,
+        serde_json::to_string_pretty(&base_value).expect("serialize stripped base"),
+    )
+    .expect("write stripped base");
+
+    assert!(
+        run_gate(&base_path, &head_path),
+        "base predating the override axis must bootstrap-skip, not fail"
+    );
 }
