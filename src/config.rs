@@ -1,5 +1,5 @@
 use crate::path_resolve::{self, Resolved};
-use crate::rules::Severity;
+use crate::rules::{toggle_rule_id_count, Severity};
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
@@ -462,13 +462,50 @@ impl Config {
             let disabled = rules.disabled_since(&before);
             if !disabled.is_empty() {
                 notes.push(format!(
-                    "override disabled rule(s) [{}] for pattern(s) [{}]",
+                    "override disabled rule(s) [{}] for pattern(s) [{}]{}",
                     disabled.join(", "),
                     matched_patterns.join(", "),
+                    Self::stopped_rule_id_summary(&disabled),
                 ));
             }
         }
         (rules, notes)
+    }
+
+    /// Text appended, outside the bracketed rule(s)/pattern(s) lists, to an
+    /// override-disable note: how many `rule_id`s the disabled toggles stop
+    /// firing. Counts come from `rules::toggle_rule_id_count`, the one place
+    /// the toggle -> `rule_id` correspondence lives (`rules::toggle_isolation!`);
+    /// this does not keep a second mapping. A toggle gating no fixed `rule_id`
+    /// set (`oxlint`, which delegates to an external linter run instead of
+    /// first-party `rule_id`s) contributes no digit and is named instead.
+    fn stopped_rule_id_summary(disabled: &[&str]) -> String {
+        let mut rule_id_total = 0usize;
+        let mut has_counted = false;
+        let mut external: Vec<&str> = Vec::new();
+        for &name in disabled {
+            match toggle_rule_id_count(name) {
+                Some(count) => {
+                    rule_id_total += count;
+                    has_counted = true;
+                }
+                None => external.push(name),
+            }
+        }
+        match (has_counted, external.is_empty()) {
+            (true, true) => format!(" ({rule_id_total} rule_id(s) stopped)"),
+            (false, false) => format!(
+                " ({} delegates to an external linter, no fixed rule_id count)",
+                external.join(", ")
+            ),
+            (true, false) => format!(
+                " ({rule_id_total} rule_id(s) stopped; {} delegates to an external linter)",
+                external.join(", ")
+            ),
+            // `disabled` is non-empty at every call site (guarded above), so
+            // `has_counted` and `external` cannot both be empty/false here.
+            (false, true) => String::new(),
+        }
     }
 }
 
