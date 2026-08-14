@@ -20,8 +20,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use globset::GlobBuilder;
+
 use super::collect_violations;
-use crate::config::{Config, RulesConfig};
+use crate::config::{Config, OverrideEntry, RulesConfig};
 use crate::rules::rule_id::{self, RULE_ID_CATALOG};
 use crate::rules::RE_JS_FILE;
 
@@ -622,4 +624,101 @@ fn metrics_snapshot_measures_all_samples_under_10ms() {
 
     let report = build_report(tallies, &rule_latency, toggle_latency_diagnostics());
     emit_metrics(&report);
+}
+
+// U-001: corpus のサンプルを、override を適用した rule 集合で走らせられる。
+// `collect_violations` は `config.overrides` を読まないため、
+// `super::resolve_effective_rules_with_notes` を通してから走らせる
+// (`detected_rules_with_overrides`, まだ未実装)。`OverrideEntry` の組み立ては
+// `hook/tests.rs` の T-459/T-460 に倣い、glob は `compile_override_entry` と
+// 同じ `literal_separator(true)` で組む。
+
+/// `hook::tests` の T-459/T-460 と同じ組み立て: `compile_override_entry`
+/// (`src/config.rs`) と同じ `literal_separator(true)` で glob をコンパイルする。
+fn override_entry(pattern: &str, rules_json: &str) -> OverrideEntry {
+    OverrideEntry {
+        files: vec![GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .expect("test pattern compiles")
+            .compile_matcher()],
+        rules: serde_json::from_str(rules_json).expect("test rules JSON parses"),
+    }
+}
+
+/// Same production seam as `detected_rules`, but resolves `config.overrides`
+/// for `path` first via `super::resolve_effective_rules_with_notes` (the same
+/// step `hook::run_hook_with_input` runs ahead of `collect_violations`), since
+/// `collect_violations` never reads `config.overrides` itself. Override notes
+/// (e.g. "override disabled rule X matching pattern Y") are expected here and
+/// discarded; only pipeline notes from `collect_violations` fail loudly, via
+/// the delegation to `detected_rules`.
+fn detected_rules_with_overrides(path: &str, content: &str, config: Config) -> BTreeSet<String> {
+    let mut override_notes = Vec::new();
+    let resolved = super::resolve_effective_rules_with_notes(config, path, &mut override_notes);
+    detected_rules(path, content, &resolved)
+}
+
+// T-489: override が対象 rule を無効化したパスでは fire サンプルが黙る
+#[test]
+fn override_が対象_rule_を無効化したパスでは_fire_サンプルが黙る() {
+    let sample = corpus::SAMPLES
+        .iter()
+        .find(|s| s.rule == "eval" && s.expectation == Expectation::Fire)
+        .expect("corpus has an eval fire sample");
+
+    let mut config = harness_config();
+    config.git_root = Some(PathBuf::from("/"));
+    config.overrides = vec![override_entry("src/app.ts", r#"{"eval": false}"#)];
+
+    let detected = detected_rules_with_overrides(sample.path, sample.content, config);
+    assert!(
+        !detected.contains("eval"),
+        "eval must not fire once the matching override disables it; got: {detected:?}"
+    );
+}
+
+// T-490: override の pattern に一致しないパスでは fire サンプルが発火する
+#[test]
+fn override_の_pattern_に一致しないパスでは_fire_サンプルが発火する() {
+    let sample = corpus::SAMPLES
+        .iter()
+        .find(|s| s.rule == "eval" && s.expectation == Expectation::Fire)
+        .expect("corpus has an eval fire sample");
+
+    let mut config = harness_config();
+    config.git_root = Some(PathBuf::from("/"));
+    config.overrides = vec![override_entry("src/other.ts", r#"{"eval": false}"#)];
+
+    let detected = detected_rules_with_overrides(sample.path, sample.content, config);
+    assert!(
+        detected.contains("eval"),
+        "eval must still fire when no override pattern matches the path; got: {detected:?}"
+    );
+}
+
+// T-491: `git_root` を `/` にすると corpus の仮想パスが production と同じ
+// root 相対形に正規化される。`child-process-injection` (rule_id::ast_security
+// の外側で gate される rule, `hook/tests.rs` T-460 と同じ選択) の fire sample
+// はネストしたパス `/app/api/route.ts` を持つ。root-relative かつ複数
+// segment にまたがる wildcard pattern (`app/api/*.ts`) が一致するのは、
+// virtual path の先頭 `/` が git_root 相対形へ正規化された場合に限る。
+#[test]
+fn git_root_を_root_にすると_corpus_の仮想パスが_production_と同じ_root_相対形に正規化される() {
+    let sample = corpus::SAMPLES
+        .iter()
+        .find(|s| s.rule == "child-process-injection" && s.expectation == Expectation::Fire)
+        .expect("corpus has a child-process-injection fire sample");
+
+    let mut config = harness_config();
+    config.git_root = Some(PathBuf::from("/"));
+    config.overrides = vec![override_entry("app/api/*.ts", r#"{"astSecurity": false}"#)];
+
+    let detected = detected_rules_with_overrides(sample.path, sample.content, config);
+    assert!(
+        !detected.contains("child-process-injection"),
+        "child-process-injection must not fire once the root-relative override pattern \
+         disables ast_security, proving the virtual path normalized under git_root \"/\"; \
+         got: {detected:?}"
+    );
 }
