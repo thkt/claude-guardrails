@@ -34,8 +34,6 @@ fn tools_json_と_legacy_config_への編集も_critical_の_violation_になる
 // T-481: `packages/foo/.guardrails.json` では発火しない
 #[test]
 fn git_root_の外にある同名ファイルでは発火しない() {
-    // guardrails が読むのは git root 直下だけで、入れ子の同名 file は設定として
-    // 効かない。
     assert!(check_path("/repo/packages/foo/.guardrails.json").is_empty());
 }
 

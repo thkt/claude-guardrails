@@ -1,16 +1,14 @@
 //! Blocks an agent-driven edit to the config files guardrails itself reads.
 //!
-//! An agent that can rewrite `.guardrails.json` can switch off the rule that
-//! would have stopped its next edit, and an `overrides` entry makes that read
-//! as a test-path exclusion in the diff.
+//! An agent that rewrites the config switches off the rule that would stop its
+//! next edit, and an `overrides` entry reads as a test-path exclusion.
 
 use super::{rule_id, Severity, Violation};
 use crate::config::{GUARDRAILS_CONFIG_FILE, LEGACY_CONFIG_FILE, TOOLS_CONFIG_FILE};
 use std::path::Path;
 
-/// Only the copies at the git root, since those are the ones
-/// `Config::with_overrides_from_root` reads. A nested `.guardrails.json`
-/// changes nothing guardrails does.
+/// A nested `.guardrails.json` is not guarded: `with_overrides_from_root`
+/// reads the copies at the git root alone.
 fn is_guardrails_config(file_path: &str, git_root: &Path) -> bool {
     [
         GUARDRAILS_CONFIG_FILE,

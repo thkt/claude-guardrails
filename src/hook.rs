@@ -225,10 +225,9 @@ fn collect_violations(
         ));
     }
 
-    // Path-only, so it runs whatever the file type and whatever the content
-    // resolution produced.
+    // Not gated on is_js or on the content resolution: the check is the path.
     if config.rules.config_guard {
-        violations.extend(rules::config_guard_check(
+        violations.extend(rules::config_guard::check(
             file_path,
             config.git_root.as_deref(),
         ));

@@ -335,12 +335,10 @@ fn missing_corpus_coverage(catalog: &[&str], samples: &[CorpusSample]) -> Vec<St
 /// supplies (`detected_rules` passes `structured_full = None`). Its coverage
 /// lives in `invariant/tests.rs` (T-1..T-21, disk-backed + pure conformance) and
 /// the end-to-end `hook/tests.rs::json_edit_fires_invariant_violation_end_to_end`
-/// (T-22), not here. `config-guard` is exempt for the same reason from the
-/// other side: it fires on a path equal to `<git_root>/.guardrails.json`, and
-/// `harness_config` builds a `Config` with no git root, so no corpus path can
-/// reach it. Its coverage lives in `rules/config_guard/tests.rs` and the
-/// end-to-end tests in `tests/cli/config.rs`. Same allowlist precedent as
-/// `UNREGISTERED_RULE_IDS`.
+/// (T-22), not here. `config-guard` needs a git root to match against, and
+/// `harness_config` builds a `Config` without one, so no corpus path reaches
+/// it; its coverage lives in `rules/config_guard/tests.rs` and
+/// `tests/cli/config.rs`. Same allowlist precedent as `UNREGISTERED_RULE_IDS`.
 const CORPUS_EXEMPT: &[&str] = &[rule_id::INVARIANT, rule_id::CONFIG_GUARD];
 
 // T-266: 全 first-party rule_id に should-fire / should-not-fire 両 sample が存在する (corpus 網羅 gate)。

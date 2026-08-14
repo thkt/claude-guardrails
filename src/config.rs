@@ -100,6 +100,16 @@ pub enum ConfigSource {
     Explicit,
 }
 
+impl RulesConfig {
+    /// `config_guard` stays at its `rules` value: an entry switching it off for
+    /// `.guardrails.json` would let the next edit take the guard out.
+    fn apply_path_overrides(&mut self, project: ProjectRulesConfig) {
+        let guard = self.config_guard;
+        self.apply_overrides(project);
+        self.config_guard = guard;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub enabled: bool,
@@ -464,13 +474,3 @@ impl Config {
 
 #[cfg(test)]
 mod tests;
-
-impl RulesConfig {
-    /// `config_guard` stays at its `rules` value: an entry switching it off for
-    /// `.guardrails.json` would let the next edit take the guard out.
-    fn apply_path_overrides(&mut self, project: ProjectRulesConfig) {
-        let guard = self.config_guard;
-        self.apply_overrides(project);
-        self.config_guard = guard;
-    }
-}
