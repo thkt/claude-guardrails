@@ -210,7 +210,8 @@ fn toggle_latency_diagnostics() -> BTreeMap<String, u64> {
 
 /// Serializable per-rule metrics row. The JSON key for false negatives is
 /// `fn`, which is a Rust keyword, hence the rename.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RuleMetrics {
     tp: u32,
     #[serde(rename = "fn")]
@@ -223,7 +224,8 @@ struct RuleMetrics {
     unexpected_fires: u32,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MetricsReport {
     rules: BTreeMap<String, RuleMetrics>,
     toggle_latency_us: BTreeMap<String, u64>,
@@ -652,15 +654,8 @@ fn metrics_snapshot_measures_all_samples_under_10ms() {
     emit_metrics(&report);
 }
 
-// U-001: corpus のサンプルを、override を適用した rule 集合で走らせられる。
-// `collect_violations` は `config.overrides` を読まないため、
-// `super::resolve_effective_rules_with_notes` を通してから走らせる
-// (`detected_rules_with_overrides`, まだ未実装)。`OverrideEntry` の組み立ては
-// `hook/tests.rs` の T-459/T-460 に倣い、glob は `compile_override_entry` と
-// 同じ `literal_separator(true)` で組む。
-
-/// `hook::tests` の T-459/T-460 と同じ組み立て: `compile_override_entry`
-/// (`src/config.rs`) と同じ `literal_separator(true)` で glob をコンパイルする。
+/// `literal_separator(true)` は `compile_override_entry` に合わせる。既定の
+/// `*` は `/` をまたぎ、production と別の pattern 意味論になる。
 fn override_entry(pattern: &str, rules_json: &str) -> OverrideEntry {
     OverrideEntry {
         files: vec![GlobBuilder::new(pattern)
@@ -682,13 +677,10 @@ fn metrics_override_config() -> Config {
     config
 }
 
-/// Same production seam as `detected_rules`, but resolves `config.overrides`
-/// for `path` first via `super::resolve_effective_rules_with_notes` (the same
-/// step `hook::run_hook_with_input` runs ahead of `collect_violations`), since
-/// `collect_violations` never reads `config.overrides` itself. Override notes
-/// (e.g. "override disabled rule X matching pattern Y") are expected here and
-/// discarded; only pipeline notes from `collect_violations` fail loudly, via
-/// the delegation to `detected_rules`.
+/// `detected_rules` alone would ignore `config.overrides`: `collect_violations`
+/// never reads them, so the resolution step `run_hook_with_input` performs
+/// first has to happen here too. Override notes are discarded; the pipeline
+/// notes that must fail loudly are checked inside `detected_rules`.
 fn detected_rules_with_overrides(path: &str, content: &str, config: Config) -> BTreeSet<String> {
     let mut override_notes = Vec::new();
     let resolved = super::resolve_effective_rules_with_notes(config, path, &mut override_notes);
@@ -734,11 +726,8 @@ fn override_の_pattern_に一致しないパスでは_fire_サンプルが発�
 }
 
 // T-491: `git_root` を `/` にすると corpus の仮想パスが production と同じ
-// root 相対形に正規化される。`child-process-injection` (rule_id::ast_security
-// の外側で gate される rule, `hook/tests.rs` T-460 と同じ選択) の fire sample
-// はネストしたパス `/app/api/route.ts` を持つ。root-relative かつ複数
-// segment にまたがる wildcard pattern (`app/api/*.ts`) が一致するのは、
-// virtual path の先頭 `/` が git_root 相対形へ正規化された場合に限る。
+// root 相対形に正規化される。ネストした path を持つ sample を選ぶのは、
+// `app/api/*.ts` が一致するのが正規化された場合に限られるため。
 #[test]
 fn git_root_を_root_にすると_corpus_の仮想パスが_production_と同じ_root_相対形に正規化される() {
     let sample = corpus::SAMPLES
@@ -759,21 +748,19 @@ fn git_root_を_root_にすると_corpus_の仮想パスが_production_と同じ
     );
 }
 
-// U-002: metrics snapshot に override 適用の 2 count を rules 軸と別 key で持たせる。
-// 数える単位は Fire サンプルのみ (override は disable 方向にしか効かないので
-// Clean サンプルの計上先はない)。既存の `Tally::fn_count` は再利用しない
-// (rule 自体の false negative と override の適用漏れは別の失敗モード)。
+// 数えるのは Fire サンプルだけ。override は disable 方向にしか効かないので、
+// Clean サンプルには計上先がない。`Tally::fn_count` は再利用しない。rule 自体の
+// false negative と override の適用漏れは別の失敗モードで、ci.yml は前者を
+// 意図的に gate していない。
 //
-// `leak` (適用漏れ): サンプルの path に一致する override pattern がその rule を
-// 無効化するはずなのに、detect がその rule を検出した件数。
-// `overreach` (過剰適用): どの override pattern にも一致しない path で、
-// detect がその rule を検出しなかった件数 (override が無関係な path まで
-// 沈黙させた場合の signal)。
+// `leak` (適用漏れ): override が無効化するはずの path で rule が検出された件数。
+// `overreach` (過剰適用): override の対象外の path で、base の toggle なら検出
+// される rule が検出されなくなった件数。
 
 /// Override-application confusion counts, at the same report hierarchy level
-/// as `rules` / `toggle_latency_us` (see `MetricsReport`). Measured only over
-/// Fire samples; see the U-002 comment above for why.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+/// as `rules` / `toggle_latency_us` (see `MetricsReport`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OverrideMetrics {
     leak: u32,
     overreach: u32,
@@ -901,8 +888,8 @@ fn override_を無視する実装に差し替えると適用漏れの件数が�
     );
 }
 
-// T-491: gate が回す config は git root を `/` に置き、corpus の仮想パスが
-// production と同じ root 相対形で override の pattern に一致する
+// T-500: gate が回す config は corpus の fire サンプルを 1 件以上 override の
+// 対象にする
 #[test]
 fn gate_の_config_では_corpus_の仮想パスが_override_の_pattern_に一致する() {
     let config = metrics_override_config();
@@ -945,6 +932,39 @@ fn baseline_でも黙るサンプルは過剰適用に数えない() {
     );
 }
 
+// T-499: gate の fixture が MetricsReport の schema からずれると落ちる
+#[test]
+fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
+    // fixture は数値シナリオを表すので手書きのまま置く。schema が動いたときだけ
+    // 落ちればよく、`deny_unknown_fields` 付きの deserialize がその判定になる。
+    for relative in [
+        "scripts/fixtures/precision_gate/bootstrap/head.json",
+        "scripts/fixtures/precision_gate/fail/base.json",
+        "scripts/fixtures/precision_gate/fail/head.json",
+    ] {
+        let raw = read_fixture(relative);
+        serde_json::from_str::<MetricsReport>(&raw)
+            .unwrap_or_else(|e| panic!("{relative} must match the MetricsReport schema: {e}"));
+    }
+
+    // bootstrap の base は override 軸が入る前の形を表すので、軸を足したときに
+    // 初めて schema と一致する。
+    let raw = read_fixture("scripts/fixtures/precision_gate/bootstrap/base.json");
+    assert!(
+        serde_json::from_str::<MetricsReport>(&raw).is_err(),
+        "bootstrap の base は override 軸を持たない形でなければ意味を失う"
+    );
+    let with_axis = raw.trim_end().trim_end_matches('}').to_owned()
+        + r#", "overrides": {"leak": 0, "overreach": 0} }"#;
+    serde_json::from_str::<MetricsReport>(&with_axis)
+        .unwrap_or_else(|e| panic!("bootstrap base must match the schema minus the axis: {e}"));
+}
+
+fn read_fixture(relative: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("{relative}: {e}"))
+}
+
 // T-494: 既存の `rules` 軸の値が override 軸の追加で変わらない
 #[test]
 fn 既存の_rules_軸の値が_override_軸の追加で変わらない() {
@@ -979,11 +999,8 @@ fn 既存の_rules_軸の値が_override_軸の追加で変わらない() {
     assert!((eval.recall - 1.0).abs() < f64::EPSILON);
 }
 
-// U-004: `GUARDRAILS_METRICS_OUT` で書き出した JSON を `scripts/precision_gate.sh`
-// にそのまま base/head として渡し、終了コードで判定できることを確認する。
-// `write_metrics_json` を直接呼ばず必ず `emit_metrics` (env var 分岐) を経由するのは、
-// ci.yml が `GUARDRAILS_METRICS_OUT="$PWD/head.json" cargo test ... metrics_snapshot`
-// で叩くのと同じ経路をここでも通し、env var 分岐自体の回帰を拾うため。
+// `write_metrics_json` を直接呼ばず `emit_metrics` (env var 分岐) を経由する。
+// ci.yml が叩くのと同じ経路を通さないと、env var 分岐自体の回帰を拾えない。
 
 /// `emit_metrics` は process 全体の環境変数を読むため、cargo test の並列実行下で
 /// 複数 test が同時に `GUARDRAILS_METRICS_OUT` を書き換えると競合する。この Mutex は

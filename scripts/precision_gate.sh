@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Precision delta gate (Issue #434 / DR-0019): fails when either axis of the
+# Precision delta gate (ADR-0019): fails when either axis of the
 # precision harness snapshot worsens on head vs base:
 #   - per-rule FP rate (rules.<id>.fp / .tn), compared via integer
 #     cross-multiplication so corpus growth does not skew the ratio;
