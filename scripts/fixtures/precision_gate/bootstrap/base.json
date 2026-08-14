@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "eval": {
+      "tp": 1,
+      "fn": 0,
+      "fp": 0,
+      "tn": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "latency_us_median": 5,
+      "unexpected_fires": 0
+    }
+  },
+  "toggle_latency_us": {}
+}
