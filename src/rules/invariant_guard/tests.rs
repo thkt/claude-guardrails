@@ -57,10 +57,8 @@ fn symlink_経由で綴った_invariants_json_でも判定される() {
     assert_eq!(v[0].rule, rule_id::INVARIANT_GUARD);
 }
 
-// T-595: the declaration file itself is a symlink whose target sits outside the
-// git root, so the edited path resolves out of the repository. The disk read
-// still follows it, so the pins are still enforced and dropping one is still
-// weakening.
+// T-595: the edited path resolves out of the repository, yet the disk read
+// follows the same symlink, so the pins are still enforced.
 #[test]
 fn 根の_invariants_json_が_repository_外への_symlink_でも判定される() {
     let tmp = tempfile::TempDir::new().unwrap();

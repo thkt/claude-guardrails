@@ -129,7 +129,7 @@ fn canonical_path(path: &Path) -> Option<PathBuf> {
 /// the repository stays unfollowed on both sides and still matches.
 pub(crate) fn is_declaration_path(file_path: &str, git_root: &Path) -> bool {
     // `join` keeps an absolute `file_path` as is and anchors a relative one to
-    // the root, matching where the declaration file is looked up.
+    // the root, the same place the declaration file is looked up.
     match (
         canonical_path(&git_root.join(file_path)),
         canonical_path(&git_root.join(INVARIANTS_FILE)),
@@ -253,11 +253,9 @@ fn has_any_pin(table: &Map<String, Value>) -> bool {
 }
 
 /// True when editing `.invariants.json` itself drops a declared pin or changes
-/// its declared value, relative to the pre-edit table on disk. Compares only
-/// states inside this same edit cycle (pre-edit disk read vs. post-edit full
-/// content) with no git/diff/history baseline: ADR-0023 forbids a
-/// history-derived baseline, not this same-cycle disk read. A pin added on top
-/// of unchanged existing pins is not weakening.
+/// its declared value. Both states come from the same edit cycle (pre-edit disk
+/// read, post-edit full content), so ADR-0023's ban on a history-derived
+/// baseline still holds. A pin added on top of unchanged ones is not weakening.
 pub(crate) fn declaration_edit_weakens(git_root: &Path, post_edit_content: &str) -> bool {
     // `Corrupt` shares this arm with `Skip`: no pin can be read, so none can be
     // weakened. `run_invariant_pass` reports the corrupt file on its own.

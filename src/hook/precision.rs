@@ -290,8 +290,8 @@ fn missing_corpus_coverage(catalog: &[&str], samples: &[CorpusSample]) -> Vec<St
 /// `tests/cli/config.rs`. `invariant-guard` needs the same disk-backed
 /// `.invariants.json` pin file at the git root as `invariant` (it judges a
 /// weakening edit to that same declaration file); its coverage lives in
-/// `rules/invariant_guard/tests.rs` (T-582..T-584). Same allowlist precedent
-/// as `UNREGISTERED_RULE_IDS`.
+/// `rules/invariant_guard/tests.rs`. Same allowlist precedent as
+/// `UNREGISTERED_RULE_IDS`.
 const CORPUS_EXEMPT: &[&str] = &[
     rule_id::INVARIANT,
     rule_id::CONFIG_GUARD,
