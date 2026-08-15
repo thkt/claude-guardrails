@@ -63,8 +63,7 @@ fn fold_parent_dirs(absolute: &Path) -> PathBuf {
 /// they are about to be created, so none of them can be a symlink today.
 ///
 /// The walk is not confined to `root`: a spelling outside it can still resolve
-/// inside it, and stopping early would leave such a path unresolved. What
-/// lands outside is rejected by `strip_prefix` afterwards.
+/// inside it. What lands outside is rejected by `strip_prefix` afterwards.
 fn follow_symlinks(lexical: &Path) -> PathBuf {
     if let Ok(canonical) = fs::canonicalize(lexical) {
         return canonical;

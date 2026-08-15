@@ -8,9 +8,9 @@ use crate::config::{GUARDRAILS_CONFIG_FILE, LEGACY_CONFIG_FILE, TOOLS_CONFIG_FIL
 use crate::path_resolve::resolve_under_root;
 use std::path::Path;
 
-/// The spelling is resolved first: a raw comparison misses a `file_path`
-/// written through a symlink, while the git root arrives already resolved.
-/// A nested `.guardrails.json` still goes unguarded, since
+/// A raw comparison would miss a `file_path` spelled through a symlink: the
+/// git root arrives resolved, the spelling does not. A nested
+/// `.guardrails.json` stays unguarded either way, since
 /// `with_overrides_from_root` reads the copies at the git root alone.
 fn is_guardrails_config(file_path: &str, git_root: &Path) -> bool {
     let Some(resolved) = resolve_under_root(Path::new(file_path), git_root) else {
