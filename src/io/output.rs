@@ -269,9 +269,9 @@ mod tests {
         assert!(context_line(false, &[&b], &[&w], &[]).is_none());
     }
 
-    // T-518: json_mode が true のとき hook JSON を組まない
+    // T-518: json_mode が true のとき単独の hook JSON 行を出さない
     #[test]
-    fn json_mode_が_true_のとき_hook_json_を組まない() {
+    fn json_mode_が_true_のとき単独の_hook_json_行を出さない() {
         let v = warning("dom-access");
 
         assert!(context_line(true, &[], &[&v], &[]).is_none());
