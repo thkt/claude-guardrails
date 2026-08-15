@@ -169,3 +169,82 @@ fn old_string_not_found_envelope_carries_specific_note() {
         "expected OldStringNotFound-specific note prefix; got: {stdout}"
     );
 }
+
+// T-535: `.guardrails.json` から行を削る空 `new_string` の Edit が exit 2 で止まる
+//
+// U-004 seam test: `config_guard` judges by `file_path` alone and never reads
+// `content` (src/rules/config_guard.rs), so a deletion edit on
+// `.guardrails.json` must block exactly like a non-empty-`new_string` edit
+// does (T-486). Mirrors `src/hook/tests.rs` T-533 at the CLI/binary level,
+// where the empty-`new_string` early return in `get_file_and_content`
+// (src/content.rs) and the config-load / partition / exit-code plumbing in
+// `run_hook_with_input` (src/hook.rs) are both live.
+#[test]
+fn guardrails_json_から行を削る空_new_string_の_edit_が_exit_2で止まる() {
+    let tmp = tmp_repo();
+    let root = tmp.path().canonicalize().unwrap();
+    fs::write(
+        root.join(".guardrails.json"),
+        "{\n  \"rules\": { \"eval\": true }\n}\n",
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": root.join(".guardrails.json"),
+            "old_string": "\"rules\": { \"eval\": true }",
+            "new_string": ""
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "deleting a line from .guardrails.json via empty new_string must block same as a non-empty edit; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-536: MultiEdit の全 edit が削除でも exit 2 で止まる
+//
+// Same seam as T-535, exercised through `resolve_multi_edit_content`
+// (src/content.rs): every `EditItem.new_string` is empty, so each step is a
+// pure deletion. `config_guard` still fires because it never inspects the
+// reconstructed content, only `file_path`.
+#[test]
+fn multi_edit_の全_edit_が削除でも_exit_2で止まる() {
+    let tmp = tmp_repo();
+    let root = tmp.path().canonicalize().unwrap();
+    fs::write(
+        root.join(".guardrails.json"),
+        "{\n  \"overrides\": [],\n  \"rules\": { \"eval\": true }\n}\n",
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": root.join(".guardrails.json"),
+            "edits": [
+                { "old_string": "\n  \"overrides\": [],", "new_string": "" },
+                { "old_string": "\"rules\": { \"eval\": true }", "new_string": "" }
+            ]
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a MultiEdit whose every edit deletes via empty new_string must still block; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
