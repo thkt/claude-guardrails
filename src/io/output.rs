@@ -86,14 +86,12 @@ fn print_line(line: &str) {
     let _ = out.write_all(format!("{line}\n").as_bytes());
 }
 
-/// The envelope plus the hook payload in one document. Claude Code reads
-/// `hookSpecificOutput` and ignores the envelope keys, so a tool parsing the
-/// envelope keeps reading `data` / `degraded` / `notes` unchanged.
+/// Claude Code ignores envelope keys it does not recognize, so `data` /
+/// `degraded` / `notes` survive alongside `hookSpecificOutput`.
 ///
-/// The flatten also puts both namespaces in one object. A new top-level
-/// envelope key that Claude Code's hook output also defines would be read as a
-/// hook directive instead of envelope content, so check the current `PreToolUse`
-/// output schema in the Claude Code hooks reference before adding one.
+/// A new top-level envelope key that the hook output also defines would be read
+/// as a hook directive instead of envelope content, so check the current
+/// `PreToolUse` output schema before adding one.
 #[derive(Serialize)]
 struct HookEnvelope<T: Serialize> {
     #[serde(flatten)]
@@ -147,8 +145,7 @@ pub(crate) fn emit_hook_context(
     }
 }
 
-/// The advisory payload delivered to the agent, or `None` when this run has
-/// nothing to deliver.
+/// The advisory payload for the agent, `None` when this run has nothing to say.
 ///
 /// A blocking run reaches the agent through the exit-2 stderr path, and a
 /// stdout document there would change its classification.
@@ -187,8 +184,6 @@ pub(crate) fn hook_specific_output(
     })
 }
 
-/// The standalone stdout line carrying the advisory payload.
-///
 /// Under `--json` the envelope carries the same payload, and two JSON documents
 /// on one stream parse as neither.
 fn hook_context_line(
@@ -233,7 +228,6 @@ mod tests {
         }
     }
 
-    /// `hook_specific_output` の結果を、非 `--json` 実行の stdout 1 行に組む。
     fn context_line(
         json_mode: bool,
         blocking: &[&Violation],
