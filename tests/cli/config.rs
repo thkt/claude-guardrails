@@ -427,8 +427,8 @@ fn securityを切るoverrideを書いたrepositoryでstderrのnoteに1と出る(
             "content": "export const x = 1;\n"
         }
     });
-    // `--json` を渡さない、Claude Code が hook を起動するときの形。T-505 と同じ形で
-    // stderr を見る。
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。note は
+    // stderr にしか出ない。
     let output = run_guardrails_with(
         json.to_string().as_bytes(),
         Some(&root),
@@ -460,8 +460,8 @@ fn astsecurityを切るoverrideのnoteは14のまま() {
             "content": "export const x = 1;\n"
         }
     });
-    // `--json` を渡さない、Claude Code が hook を起動するときの形。T-505 と同じ形で
-    // stderr を見る。
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。note は
+    // stderr にしか出ない。
     let output = run_guardrails_with(
         json.to_string().as_bytes(),
         Some(&root),

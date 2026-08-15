@@ -182,8 +182,7 @@ const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL: &[&str] = &[rule_id::EXCESS
 /// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
 /// another, independently-gated module emits the same `rule_id` too.
 /// `rule_id::SECURITY` is emitted both by `rules::security` (the `"security"`
-/// toggle) and by `analysis::ast_security::postmessage::check_post_message_wildcard`
-/// (see the comment on the `ast_security` entry in [`toggle_isolation!`] above),
+/// toggle) and by `analysis::ast_security::postmessage::check_post_message_wildcard`,
 /// so turning `"security"` off does not stop it firing.
 const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER: &[&str] = &[rule_id::SECURITY];
 

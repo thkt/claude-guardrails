@@ -407,12 +407,9 @@ fn every_toggle_fires_its_rules_under_single_toggle_isolation() {
     );
 }
 
-// U-002 (#449): 上の every_toggle_fires_... の逆向き。single-toggle isolation は
-// 「そのtoggleをonにした構成で、数える rule_id が発火するか」を見る。ここでは
-// 「そのtoggleをoffにした構成で、数える rule_id が発火しないか」を見て、
-// toggle_rule_id_count の引き算 (TOGGLE_RULE_ID_COUNT_EXCEPTIONS_*) が実際の
-// 発火と食い違ったら落ちる。TOGGLE_RULE_IDS 自体のmembership (一覧) はどちらの
-// テストでも変えない。
+// 上の every_toggle_fires_... は toggle を on にして発火を見る。off 側は見て
+// いないので、toggle_rule_id_count の引き算が実際の発火と食い違っても落ちない。
+// 以下の 3 本がその軸を見る。
 
 // T-553: 数に含まれる rule_id は、その toggle を off にすると fire サンプルから出ない
 #[test]

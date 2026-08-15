@@ -291,20 +291,15 @@ fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
     );
 }
 
-// `oxlint` は固定の rule_id 集合を持たないので `toggle_rule_id_count` は
-// None を返す。
-
 // T-527: oxlint は数を持たない値を返す
 #[test]
 fn oxlint_は数を持たない値を返す() {
     assert_eq!(toggle_rule_id_count("oxlint"), None);
 }
 
-// U-001: toggle_rule_id_count が、他の toggle からも出る rule_id を数から引く。
 // "security" rule_id は "security" toggle の一覧に載るが、
 // `analysis::ast_security::postmessage::check_post_message_wildcard` も同じ
-// rule_id を独立に発火するので、"security" toggle を切っても止まらない
-// (複数 emitter を持つ rule)。
+// rule_id を独立に発火するので、"security" toggle を切っても止まらない。
 
 // T-550: security は1を返す
 #[test]
