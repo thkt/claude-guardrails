@@ -147,8 +147,7 @@ pub(crate) fn emit_hook_context(
 
 /// The advisory payload for the agent, `None` when this run has nothing to say.
 ///
-/// A blocking run reaches the agent through the exit-2 stderr path, and a
-/// stdout document there would change its classification.
+/// A blocking run reaches the agent through the exit-2 stderr path.
 pub(crate) fn hook_specific_output(
     blocking: &[&Violation],
     warnings: &[&Violation],
