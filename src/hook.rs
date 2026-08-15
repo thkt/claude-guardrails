@@ -301,13 +301,7 @@ fn load_config_or_note(
 ) -> Config {
     match result {
         Ok((c, load_notes)) => {
-            // Mirrors `resolve_effective_rules_with_notes` below: without the
-            // eprintln the note reaches the JSON envelope only, and hook mode
-            // does not emit that envelope.
-            for note in &load_notes {
-                eprintln!("guardrails: {note}");
-            }
-            notes.extend(load_notes);
+            emit_notes(load_notes, notes);
             c
         }
         Err(e) => {
@@ -319,6 +313,19 @@ fn load_config_or_note(
             Config::default()
         }
     }
+}
+
+/// Echoes each note to stderr and appends it to `notes`. Without the eprintln
+/// a note reaches the JSON envelope only, and hook mode does not emit that
+/// envelope — the agent asking why a rule stayed quiet would have nothing to
+/// read. Shared by `load_config_or_note` (load-time notes) and
+/// `resolve_effective_rules_with_notes` (per-file notes) so the two note
+/// sources stay on one path to stderr.
+fn emit_notes(new_notes: Vec<String>, notes: &mut Vec<String>) {
+    for note in &new_notes {
+        eprintln!("guardrails: {note}");
+    }
+    notes.extend(new_notes);
 }
 
 /// Layers the toggles effective for `file_path` onto `config.rules`, right
@@ -334,13 +341,7 @@ fn resolve_effective_rules_with_notes(
     notes: &mut Vec<String>,
 ) -> Config {
     let (rules, override_notes) = config.effective_rules_with_notes(file_path);
-    for note in &override_notes {
-        // Without this the note reaches the JSON envelope only, and hook mode
-        // does not emit that envelope. The agent asking why a rule stayed
-        // quiet would have nothing to read.
-        eprintln!("guardrails: {note}");
-    }
-    notes.extend(override_notes);
+    emit_notes(override_notes, notes);
     config.rules = rules;
     config
 }
