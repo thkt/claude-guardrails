@@ -88,10 +88,11 @@ run_gate() {
   return 0
 }
 
-# self_check exercises both branches the corpus/schema-error path do not
-# reliably reach on a given PR (a FAIL line, and the override-axis bootstrap
-# skip) against fixed fixtures, so a jq/schema drift that silently disables
-# the gate is caught even when the real base/head diff is clean.
+# self_check exercises the branches the corpus/schema-error path does not
+# reliably reach on a given PR (a FAIL line, the override-axis bootstrap
+# skip, and a corpus-shrink FAIL line) against fixed fixtures, so a
+# jq/schema drift that silently disables the gate is caught even when the
+# real base/head diff is clean.
 self_check() {
   local status=0
 
@@ -107,10 +108,16 @@ self_check() {
     status=1
   fi
 
+  echo "precision_gate self-check: shrinking corpus sample count must FAIL the gate"
+  if run_gate "$FIXTURE_DIR/corpus_shrink/base.json" "$FIXTURE_DIR/corpus_shrink/head.json" >/dev/null; then
+    echo "::error::self-check: corpus_shrink/ fixtures did not fail the gate (corpus sample count FAIL branch not exercised — gate logic drifted?)"
+    status=1
+  fi
+
   if [ "$status" -ne 0 ]; then
     return 1
   fi
-  echo "OK: precision_gate self-check passed (FAIL and bootstrap-skip branches both exercised)"
+  echo "OK: precision_gate self-check passed (FAIL, bootstrap-skip, and corpus-shrink branches all exercised)"
 }
 
 if [ "${1:-}" = "--self-check" ]; then
