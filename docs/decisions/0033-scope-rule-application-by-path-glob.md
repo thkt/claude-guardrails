@@ -38,7 +38,7 @@ override の `rules` キーは top-level `rules` と同じ toggle 名であり�
 
 override がマッチした file で rule を無効化すると、`effective_rules_with_notes` が無効化した rule 名とマッチした pattern、無効化した toggle が止める `rule_id` 数を記した note を積む (例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts] (testAssertion: 1 rule_id(s))`)。件数は `rules::toggle_rule_id_count` (`rules::toggle_isolation!` の唯一の対応表から導出) から取り、toggle ごとに並べて合計しない。`security` の `rule_id` は registry 側と `ast_security` 側の両方から出るため、複数 toggle の件数を足すと実際に止まる検査の数を上回る。`oxlint` のように固定 `rule_id` 集合を持たない toggle は数の代わりに external linter と出す。hook はこの note を `resolve_effective_rules_with_notes` (`src/hook.rs`) で JSON envelope の `notes` と stderr の両方に流す。
 
-`overrides` entry の `files` に compile できない glob pattern があると、`Config::compile_override_entry` はその entry を丸ごと `Err` で返し、`Config::merge` が失敗した pattern を `Config::invalid_override_patterns` へ集約する。`effective_rules_with_notes` は呼び出しのたびに (対象 file がどの entry にもマッチしなくても) `invalid_override_patterns` の各 pattern について `override entry dropped: glob pattern "..." failed to compile` という note を積む。この note も同じ `resolve_effective_rules_with_notes` 経路で JSON envelope の `notes` と stderr に流れる。
+`overrides` entry の `files` に compile できない glob pattern があると、`Config::compile_override_entry` はその entry を丸ごと `Err` で返し、`Config::merge_capturing_notes` が失敗した pattern を `override entry dropped: glob pattern "..." failed to compile` という note に変換する。この note は `Config::with_project_overrides` が config を読み込むたびに 1 回だけ積まれ、`Config` 自身はこの note を field として保持しない。`effective_rules_with_notes` は `file_path` に依存する note (無効化した rule 名とマッチした pattern、symlink 解決) だけを返し、compile 失敗の note を再度積むことはない。hook 側は読み込み時の note を `load_config_or_note`、file 単位の note を `resolve_effective_rules_with_notes` (いずれも `src/hook.rs`) がそれぞれ受け取り、同じ JSON envelope の `notes` と stderr に流す。
 
 ### `overrides` の entry 単位 glob 失敗は ADR-0004 の config エラー軸と別軸
 
@@ -51,7 +51,7 @@ ADR-0004 の「config エラー」軸 (fail-open with defaults、`Config::with_p
 | `.guardrails.json` の parse | config 全体を `Config::default()` へ (fail-open)                |
 | `overrides` entry の glob   | 当該 entry のみ drop、他 entry と `rules` は保持 (fail-partial) |
 
-entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` で失敗した pattern 文字列を返すことで閉じ込める。`Config::merge` は当該 entry を drop し、pattern を `Config::invalid_override_patterns` へ集めて note 化に回す。
+entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` で失敗した pattern 文字列を返すことで閉じ込める。`Config::merge_capturing_notes` は当該 entry を drop し、pattern を note に変換して呼び出し元 (`Config::with_project_overrides`) へ返す。
 
 ### Consequences
 
@@ -72,6 +72,7 @@ entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が 
 ### Verification
 
 - `src/config/tests.rs` で、`overrides` 未指定時は空のまま読めること、`files`/`rules` を保持すること、compile 不能な glob を含む entry だけが drop され他 entry と基底 `rules` は影響を受けないこと、pattern 一致/不一致で toggle が変わる/変わらないこと、同じ rule key を複数 entry が指定したときは後方が勝つこと、別 rule key は消えないこと、`..` で root の外に出る path はどの override にもマッチしないこと、`src/*.ts` が `src/api/db.ts` にマッチしないこと、絶対パスの pattern は git-root 相対のマッチ対象に一致しないこと、相対パスの `file_path` は git root へ join してから同じ override が当たること、filesystem root を越える `..` で始まる絶対 `file_path` はどの override にもマッチしないことを assert
-- `src/hook/tests.rs` で、override が registry 経由の rule (`sensitive-file`) と registry 外で gate される rule (`ast_security` 経由の `child-process-injection`) の両方を止めること、override が rule を無効化すると note に無効化した rule 名とマッチした pattern が乗ることを assert
+- `src/config/tests.rs` の T-507〜T-509 で、compile 不能な glob を含む config を `with_overrides_from_root` で読むと戻り値の note にその pattern が乗ること、compile できる glob だけの config では note が空になること、compile 不能な entry だけが落ちて他の entry と基底 `rules` は保たれることを assert。T-510 は同じ config を `effective_rules_with_notes` に渡しても compile 失敗の note が (読み込み時に一度出たにもかかわらず) 再度は乗らないことを assert し、note が読み込み時の 1 回に限られることを pin している
+- `src/hook/tests.rs` で、override が registry 経由の rule (`sensitive-file`) と registry 外で gate される rule (`ast_security` 経由の `child-process-injection`) の両方を止めること、override が rule を無効化すると note に無効化した rule 名とマッチした pattern が乗ることを assert。T-511 は `load_config_or_note` から渡った読み込み時の compile 失敗 note を `resolve_effective_rules_with_notes` が重複させないこと、hook 経路を通した note が 1 件のままであることを assert
 - `src/path_resolve/tests.rs` で、symlink のディレクトリを含むパスと symlink そのものを指すパスが実体へ解決されること、未作成のディレクトリを含むパスが最寄りの実在祖先まで遡って解決されること、root の外へ出るパスが `None` になることを assert。実装を 2 通り (symlink を辿らない形、親を 1 段だけ canonicalize する形) に壊して落ちることを確認した
 - `tests/cli/config.rs` で実バイナリを通し、`overrides` の対象パスへの Write は exit 0 で通り、対象外パスへの同じ content は exit 2 で block されることを assert。対象外へ向く symlink を経由した Write が exit 2 で止まり note が出ることも同じファイルで assert。同じファイルの T-464 は compile 不能 glob を書いた config で JSON envelope の `notes` に当該 pattern を含む note が乗ることを assert し、green
