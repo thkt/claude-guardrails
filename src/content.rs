@@ -226,8 +226,7 @@ pub(crate) fn get_file_and_content(
 
     let structured_full = reconstruct_structured_full(input, &file_path, project_root);
 
-    // An empty snippet is a deletion, not a failure to acquire content, and a
-    // `.json` target still yields the reconstructed post-edit full text.
+    // An empty snippet is a deletion, not a failure to acquire content.
     if content.is_empty() && structured_full.as_full_str().is_none() {
         return None;
     }

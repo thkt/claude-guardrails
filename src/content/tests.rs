@@ -736,8 +736,8 @@ fn degraded_reason_note_contains_actionable_text() {
     assert!(note.contains("edit 2"));
 }
 
-// T-530: an empty snippet does not mean no content — `reconstruct_structured_full`
-// replays the deletion against the on-disk `.json` and produces the full document.
+// T-530: an empty snippet does not mean no content. `reconstruct_structured_full`
+// replays the deletion against the on-disk `.json`.
 #[test]
 fn new_string_が空の_edit_でも_jsonの_post_edit_全文が返る() {
     let dir = tempfile::TempDir::new().unwrap();
