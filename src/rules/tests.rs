@@ -292,8 +292,7 @@ fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
 }
 
 // `oxlint` は固定の rule_id 集合を持たないので `toggle_rule_id_count` は
-// None を返す。1 対 1 toggle (旧 T-524) と astSecurity (旧 T-525) は
-// T-552/T-551 が同じ assertion を引き継ぐので、ここでは重複させない。
+// None を返す。
 
 // T-527: oxlint は数を持たない値を返す
 #[test]
@@ -305,8 +304,7 @@ fn oxlint_は数を持たない値を返す() {
 // "security" rule_id は "security" toggle の一覧に載るが、
 // `analysis::ast_security::postmessage::check_post_message_wildcard` も同じ
 // rule_id を独立に発火するので、"security" toggle を切っても止まらない
-// (複数 emitter を持つ rule)。T-551/T-552 は既存挙動 (excessive-nesting 除外、
-// 1 対 1 toggle) が今回の変更で崩れないことを固定する回帰アンカー。
+// (複数 emitter を持つ rule)。
 
 // T-550: security は1を返す
 #[test]

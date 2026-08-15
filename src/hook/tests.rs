@@ -708,10 +708,9 @@ fn 複数の_toggle_を切る_override_の_note_は_toggle_ごとに数を並べ
         "got: {note}"
     );
     assert!(note.contains("security stops 1 rule_id(s)"), "got: {note}");
-    // rule_id::SECURITY は registry 側と ast_security 側の両方から出るので
-    // "security" toggle の数から引かれ、単純合計 (14 + 2 = 16) にはならない。
+    // 14 と 1 が並んでいても、単純合計 (14 + 1 = 15) にはならない。
     assert!(
-        !note.contains("16"),
+        !note.contains("15"),
         "counts must not be summed; got: {note}"
     );
 }

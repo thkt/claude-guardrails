@@ -174,10 +174,9 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
-/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
-/// it runs unconditionally regardless of any toggle. `excessive-nesting` runs
-/// unconditionally from `src/hook.rs`, so turning `astSecurity` off leaves it
-/// firing.
+/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it.
+/// `excessive-nesting` runs unconditionally from `src/hook.rs`, so turning
+/// `astSecurity` off leaves it firing.
 const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL: &[&str] = &[rule_id::EXCESSIVE_NESTING];
 
 /// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
@@ -192,6 +191,11 @@ const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER: &[&str] = &[rule_id::SECURI
 /// name (e.g. `"astSecurity"`) is set to `false`. `None` when the toggle gates
 /// no fixed set: `"oxlint"` runs an external linter instead of first-party
 /// `rule_id`s.
+///
+/// Both exception lists assume the other emitter is still on, so the count is
+/// the one for a config where every other toggle keeps its default. Turning
+/// `astSecurity` off first makes this undercount `"security"` by one, since the
+/// wildcard check that kept `rule_id::SECURITY` alive is gone by then.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
