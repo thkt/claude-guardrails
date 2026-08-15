@@ -472,15 +472,12 @@ impl Config {
         (rules, notes)
     }
 
-    /// Text appended, outside the bracketed rule(s)/pattern(s) lists, to an
-    /// override-disable note: how many `rule_id`s each disabled toggle stops
-    /// firing. Counts come from `rules::toggle_rule_id_count`, the one place
-    /// the toggle -> `rule_id` correspondence lives (`rules::toggle_isolation!`).
+    /// How many `rule_id`s each disabled toggle stops firing, appended outside
+    /// the bracketed lists so the existing note format stays greppable.
     ///
-    /// Per toggle, not summed: `security` is emitted by the registry rule and
-    /// by `ast_security`'s postMessage path alike, so adding the two toggles'
-    /// counts would claim more stopped checks than exist. A toggle gating no
-    /// fixed set (`oxlint` runs an external linter) is named instead of counted.
+    /// Per toggle, never summed: `security` is emitted by the registry rule
+    /// and by `ast_security`'s postMessage path alike, so adding two toggles'
+    /// counts would claim more stopped checks than exist.
     fn stopped_rule_id_summary(disabled: &[&str]) -> String {
         let parts: Vec<String> = disabled
             .iter()

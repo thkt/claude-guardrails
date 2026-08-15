@@ -291,15 +291,9 @@ fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
     );
 }
 
-// --- toggle -> rule_id count (#435 U-001) ---
-//
-// `toggle_rule_id_count` looks up, from a `.guardrails.json` toggle's serde
-// name (e.g. "astSecurity"), how many rule_ids stop firing when that toggle
-// is set to false. Two exceptions carve the count away from a plain list
-// length: `excessive-nesting` fires unconditionally in `src/hook.rs`, so it
-// drops out of `astSecurity`'s count; a toggle with no fixed rule_id mapping
-// (e.g. `oxlint`, which gates an external linter run rather than first-party
-// rule_ids) has no count to report.
+// 数が `TOGGLE_RULE_IDS` の素の要素数と一致しない 2 例を下で固定する。
+// `excessive-nesting` は `astSecurity` の一覧に載るが無条件に走るので数から
+// 外れ、`oxlint` は固定の rule_id 集合を持たない。
 
 // T-524: rule_id と 1 対 1 の toggle は 1 を返す
 #[test]

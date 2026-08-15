@@ -539,9 +539,8 @@ fn override_が_rule_を無効化すると無効化された_rule_名と一致�
     );
 }
 
-// U-002: override が無効化した toggle の note に、止まった rule_id 数が併記される。
-// `effective_rules_with_notes` の note は `[rule(s)]` / `[pattern(s)]` を角括弧で
-// 囲むので、数がその形式と混ざらないことを角括弧の外だけを見て確認する。
+// note の `[rule(s)]` / `[pattern(s)]` は角括弧で囲まれるので、数が角括弧の
+// 外に出ていることを、中身を除いた文字列で確認する。
 
 /// `[...]` の中身を取り除いた文字列。数が角括弧の外に置かれていることを、
 /// rule 名や pattern 文字列に紛れず確認するための helper。

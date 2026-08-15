@@ -99,24 +99,20 @@ pub(crate) mod rule_id {
     }
 }
 
-/// `.guardrails.json` toggle name -> the first-party `rule_id`s it gates
-/// when `true`. The one place the toggle/`rule_id` correspondence lives:
-/// [`toggle_rule_id_count`] (production) and `hook::precision`'s
-/// `toggle_isolation_cases` (test-only single-toggle isolation `Config`s)
-/// both derive from this one invocation instead of a second hand-written
-/// table. A macro rather than a plain data table because the isolation-config
-/// side must assign a named `RulesConfig` field (`config.rules.$field =
-/// true`), which data cannot express without reflection.
+/// `.guardrails.json` toggle name -> the first-party `rule_id`s it gates.
+///
+/// Production counting and the precision harness's isolation configs both
+/// derive from this one invocation, so neither keeps a second hand-written
+/// table. A macro rather than data because the isolation side assigns a named
+/// `RulesConfig` field, which data cannot express without reflection.
 macro_rules! toggle_isolation {
     ( $( $field:ident => $name:literal : [ $( $rule:literal ),* $(,)? ] );* $(;)? ) => {
         pub(crate) const TOGGLE_RULE_IDS: &[(&str, &[&str])] = &[
             $( ($name, &[ $( $rule ),* ]) ),*
         ];
 
-        /// Single-toggle isolation configs (`.rules` all off except
-        /// `$field`) for the precision harness: per-toggle latency
-        /// diagnostics, the single-toggle fire check, and override
-        /// leak/overreach tallies.
+        /// Single-toggle isolation configs for the precision harness:
+        /// `.rules` all off except `$field`.
         #[cfg(test)]
         pub(crate) fn toggle_isolation_cases()
         -> Vec<(&'static str, Config, &'static [&'static str])> {
@@ -176,19 +172,15 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
-/// `rule_id`s excluded from [`toggle_rule_id_count`]'s answer even though
-/// [`TOGGLE_RULE_IDS`] lists them under a toggle, because they do not
-/// actually stop firing when that toggle turns off. `excessive-nesting`
-/// (listed under `astSecurity`) runs unconditionally from `src/hook.rs`,
-/// independent of `astSecurity`.
+/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it.
+/// `excessive-nesting` runs unconditionally from `src/hook.rs`, so turning
+/// `astSecurity` off leaves it firing.
 const TOGGLE_RULE_ID_COUNT_EXCEPTIONS: &[&str] = &[rule_id::EXCESSIVE_NESTING];
 
-/// Number of `rule_id`s that stop firing when the `.guardrails.json` toggle
-/// named `toggle_name` (its serde name, e.g. `"astSecurity"`) is set to
-/// `false`. `None` when `toggle_name` gates no fixed `rule_id` set (e.g.
-/// `"oxlint"`, which delegates to an external linter run rather than a
-/// first-party `rule_id`). Called from `Config::stopped_rule_id_summary`
-/// to append the count to override-disable notes.
+/// Number of `rule_id`s that stop firing when the toggle named by its serde
+/// name (e.g. `"astSecurity"`) is set to `false`. `None` when the toggle gates
+/// no fixed set: `"oxlint"` runs an external linter instead of first-party
+/// `rule_id`s.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
