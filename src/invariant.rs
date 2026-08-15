@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 /// Central declaration file, read from the git root (same anchor as
 /// `.guardrails.json`).
-const INVARIANTS_FILE: &str = ".invariants.json";
+pub(crate) const INVARIANTS_FILE: &str = ".invariants.json";
 
 /// One blocking invariant finding. `line` is `None` because a pin names a JSON
 /// path, not a source line, in a file that may have been fully reconstructed.
