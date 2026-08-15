@@ -227,12 +227,21 @@ pub(crate) fn check_invariants(
 /// content) with no git/diff/history baseline: ADR-0023 forbids a
 /// history-derived baseline, not this same-cycle disk read. A pin added on top
 /// of unchanged existing pins is not weakening (#451 U-001).
+fn has_any_pin(table: &Map<String, Value>) -> bool {
+    table
+        .values()
+        .any(|declared| declared.as_object().is_some_and(|pins| !pins.is_empty()))
+}
+
 pub(crate) fn declaration_edit_weakens(git_root: &Path, post_edit_content: &str) -> bool {
     let InvariantLoad::Table(before) = load_invariant_table(git_root) else {
         return false;
     };
+    // Content that is not a JSON object declares no pin at all, so it drops
+    // every one of them. Unparseable content lands here too: the next run
+    // classifies it as `Corrupt` and stops enforcing the pins.
     let Ok(Value::Object(after)) = serde_json::from_str::<Value>(post_edit_content) else {
-        return false;
+        return has_any_pin(&before);
     };
 
     for (file_key, declared) in &before {

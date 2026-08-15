@@ -35,19 +35,20 @@ fn pin_を足す編集では_violation_が出ない() {
     assert!(v.is_empty(), "{v:?}");
 }
 
-// T-584: symlink 経由で綴った `.invariants.json` でも判定される
+// T-584: the spelling holds no `..`, so only symlink resolution can turn
+// `sub/alias/` back into the root and reach the declaration file under it.
 #[test]
 fn symlink_経由で綴った_invariants_json_でも判定される() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     fs::write(
-        root.join(".invariants.json"),
+        root.join(INVARIANTS_FILE),
         r#"{"config.json": {"featureFlag": true}}"#,
     )
     .unwrap();
-    std::os::unix::fs::symlink(&root, root.join("link")).unwrap();
-    // `link` は root 自身を指すので、綴りを畳むと root 直下の `.invariants.json` になる。
-    let spelled = root.join("link").join("..").join(".invariants.json");
+    fs::create_dir(root.join("sub")).unwrap();
+    std::os::unix::fs::symlink(&root, root.join("sub").join("alias")).unwrap();
+    let spelled = root.join("sub").join("alias").join(INVARIANTS_FILE);
 
     let v = check(spelled.to_str().unwrap(), "{}", Some(&root));
 

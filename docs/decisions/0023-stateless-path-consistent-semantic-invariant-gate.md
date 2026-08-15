@@ -54,7 +54,7 @@ The gate is a pure post-edit conformance check: declared scalar versus resolved 
 
 ### Trade-offs
 
-The stateless model accepts that the gate cannot detect a drift that the same edit also re-pins in `.invariants.json` (the human owns that file's honesty). This is deliberate: making the gate police its own declaration file would require the baseline this ADR forbids.
+The stateless model accepts that the gate cannot detect a drift that the same edit also re-pins in `.invariants.json` (the human owns that file's honesty). Guarding the declaration file itself is a separate rule, added by the amendment below; the gate in `check_invariants` stays baseline-free.
 
 ### References
 
@@ -65,3 +65,33 @@ Source audit: `docs/audit/2026-06-24-014746-adr-gaps.md` (candidate G1 = finding
 - A requirement appears for history-aware drift detection on pinned values: build it as a separate mechanism, do not fold a baseline into this gate.
 - The Claude Code hook input contract or `content.rs` changes how paths are resolved before reading: re-derive the canonical-key consistency and update `canonical_relative_key` in lockstep.
 - A coupling test that fails when the key path and the read path diverge becomes feasible: add it and downgrade the symlink rule from review-enforced to test-enforced.
+
+## Amendment 2026-08-15: 宣言ファイル自身の弱体化は同一 edit cycle の比較で止める
+
+issue #451 で、`.invariants.json` から pin を消す編集を誰も止めないことが判明した。`check_invariants` は pin された対象ファイルの scalar しか見ないため、宣言そのものを消す編集は素通りする。AI agent は自分を縛る pin を外して、次の編集で自由に値を変えられる。
+
+採用: `src/rules/invariants_guard.rs` を `check_invariants` から独立した rule として足し、`src/invariant.rs` の `declaration_edit_weakens` が pin の消失と値の変更を判定する。
+
+### baseline 禁止との関係
+
+この rule は本 ADR が禁じる baseline を持たない。比較する 2 つの状態は同じ edit cycle の中に閉じている。
+
+| 比較対象         | 出どころ                                     | history 参照 |
+| ---------------- | -------------------------------------------- | ------------ |
+| 編集前の pin 集合 | `load_invariant_table` による disk 読み取り | 無し         |
+| 編集後の pin 集合 | hook 入力から再構成した post-edit 全文       | 無し         |
+
+git、diff、時刻はどれも読まない。禁止しているのは history から導いた baseline であり、同じ hook 実行の中で disk を 1 回読むことは対象外。`check_invariants` 自体は変更しておらず、post-edit scalar と宣言値の直接比較のままになる。
+
+### JSON object でない post-edit 内容
+
+pin を持てない形 (配列、`null`、parse 不能) は、宣言の消失と同じ扱いで弱体化と判定する。次の実行が `Corrupt` として読み、pin の照合が止まるため。編集前に pin が 1 件も無ければ、どの形でも弱体化にはならない。
+
+### Related
+
+- `src/invariant.rs` (`declaration_edit_weakens`, `has_any_pin`)
+- `src/rules/invariants_guard.rs` (path 一致と Critical の violation)
+- `src/invariant/tests.rs` T-578〜T-581, T-588〜T-590
+- `src/rules/invariants_guard/tests.rs` T-582〜T-584
+- `tests/cli/config.rs` T-585〜T-587
+- issue #451

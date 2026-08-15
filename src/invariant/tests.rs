@@ -645,3 +645,47 @@ fn invariants_json_を空オブジェクトにする編集が弱体化と判定�
 
     assert!(declaration_edit_weakens(tmp.path(), post_edit));
 }
+
+// T-588: a JSON value that is not an object holds no pins, so it drops every
+// declared pin just as `{}` does.
+#[test]
+fn invariants_json_を配列にする編集が弱体化と判定される() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+
+    assert!(declaration_edit_weakens(tmp.path(), "[]"));
+    assert!(declaration_edit_weakens(tmp.path(), "null"));
+}
+
+// T-589: unparseable content is the fail-closed direction. The next run reads
+// it as `Corrupt` and the pins stop being enforced, so the edit that produces
+// it weakens them.
+#[test]
+fn invariants_json_を壊れた_json_にする編集が弱体化と判定される() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+
+    assert!(declaration_edit_weakens(tmp.path(), "{ broken"));
+}
+
+// T-590: with no pin declared beforehand, no shape of new content can weaken
+// one. A human writing the file for the first time must not be blocked.
+#[test]
+fn pin_が_1_件も無いときは配列にしても弱体化と判定されない() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": {} }"#,
+    )
+    .unwrap();
+
+    assert!(!declaration_edit_weakens(tmp.path(), "[]"));
+}
