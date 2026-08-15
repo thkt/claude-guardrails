@@ -238,10 +238,8 @@ fn read_optional_config(path: &Path) -> Result<Option<String>, ConfigError> {
 impl Config {
     // Uses CWD (not file_path) as trust boundary to prevent
     // LLM-controlled paths from influencing config discovery.
-    /// On success also returns notes for glob patterns that failed to
-    /// compile (see `invalid_pattern_note`), so a caller sees them at load
-    /// time instead of only when `effective_rules_with_notes` happens to run
-    /// against a matching file.
+    /// Returns the load-time notes alongside the config (see
+    /// `invalid_pattern_note`).
     pub fn with_project_overrides(self) -> Result<(Self, Vec<String>), ConfigError> {
         let cwd = env::current_dir().map_err(ConfigError::WorkingDir)?;
         self.with_overrides_from_root(&cwd)
@@ -293,28 +291,22 @@ impl Config {
     }
 
     /// `merge` plus the load-time notes for any `overrides[].files` pattern
-    /// that failed to compile. Shares `invalid_pattern_note`'s wording with
-    /// `effective_rules_with_notes` so the same defect reads the same
-    /// regardless of which caller surfaces it.
+    /// that failed to compile.
     fn merge_with_notes(self, project: ProjectConfig) -> (Self, Vec<String>) {
         let mut notes = Vec::new();
         let merged = self.merge_capturing_notes(project, &mut notes);
         (merged, notes)
     }
 
-    /// `merge` without a caller wanting the load-time compile-failure notes:
-    /// production always wants them (`merge_with_notes`), so this convenience
-    /// form is test-only, kept for the direct `.merge()` call sites that only
-    /// assert on the merged fields.
+    /// Note-discarding form for tests that assert on the merged fields alone.
     #[cfg(test)]
     fn merge(self, project: ProjectConfig) -> Self {
         let mut discarded_notes = Vec::new();
         self.merge_capturing_notes(project, &mut discarded_notes)
     }
 
-    /// Shared `merge` body. `notes` collects one `invalid_pattern_note` per
-    /// `overrides[].files` glob that failed to compile — the only diagnostic
-    /// this step produces — without keeping that list on `Config` itself.
+    /// Shared `merge` body. Failed patterns go out through `notes` rather
+    /// than onto `Config`, which carries settings and not diagnostics.
     fn merge_capturing_notes(mut self, project: ProjectConfig, notes: &mut Vec<String>) -> Self {
         self.source = ConfigSource::Explicit;
         if let Some(enabled) = project.enabled {

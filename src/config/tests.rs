@@ -511,15 +511,21 @@ fn 後続の_override_は先行の_override_が設定した別の_rule_key_を�
     assert!(!rules.flaky_test);
 }
 
-/// tmp git root に `.guardrails.json` を書き、そこから読んだ Config を返す。
-/// `TempDir` は呼び出し側が束縛したまま保持すること。捨てるとディレクトリごと
-/// 消え、git root が失われて override 解決が別の経路に落ちる。
-fn repo_with_config(json: &str) -> (tempfile::TempDir, Config) {
+/// tmp git root に `.guardrails.json` を書き、そこから読んだ Config と
+/// 読み込み時の note を返す。`TempDir` は呼び出し側が束縛したまま保持すること。
+/// 捨てるとディレクトリごと消え、git root が失われて override 解決が別の経路に
+/// 落ちる。
+fn repo_with_config_and_notes(json: &str) -> (tempfile::TempDir, Config, Vec<String>) {
     let tmp = tmp_repo();
     fs::write(tmp.path().join(GUARDRAILS_CONFIG_FILE), json).unwrap();
-    let (config, _notes) = Config::default()
+    let (config, notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
+    (tmp, config, notes)
+}
+
+fn repo_with_config(json: &str) -> (tempfile::TempDir, Config) {
+    let (tmp, config, _notes) = repo_with_config_and_notes(json);
     (tmp, config)
 }
 
@@ -722,16 +728,9 @@ fn rules_に直接書いた_config_guard_の無効化は効く() {
 // T-507: compile できない glob を含む config を読むと、戻り値の note にその pattern が入る
 #[test]
 fn compile_できない_glob_を含む_config_を読むと_戻り値の_note_にその_pattern_が入る() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+    let (_tmp, _config, notes) = repo_with_config_and_notes(
         r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}"#,
-    )
-    .unwrap();
-
-    let (_config, notes) = Config::default()
-        .with_overrides_from_root(tmp.path())
-        .unwrap();
+    );
 
     assert!(
         notes.iter().any(|n| n.contains("src/[invalid")),
@@ -742,16 +741,9 @@ fn compile_できない_glob_を含む_config_を読むと_戻り値の_note_に
 // T-508: compile できる glob だけの config では note が空になる
 #[test]
 fn compile_できる_glob_だけの_config_では_note_が空になる() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+    let (_tmp, _config, notes) = repo_with_config_and_notes(
         r#"{"overrides": [{"files": ["src/**/*.test.ts"], "rules": {"testAssertion": false}}]}"#,
-    )
-    .unwrap();
-
-    let (_config, notes) = Config::default()
-        .with_overrides_from_root(tmp.path())
-        .unwrap();
+    );
 
     assert!(notes.is_empty(), "expected no notes; got: {notes:?}");
 }
@@ -759,9 +751,7 @@ fn compile_できる_glob_だけの_config_では_note_が空になる() {
 // T-509: compile できない entry だけが落ち、同じ config の他の entry と基底 rules は保たれる
 #[test]
 fn compile_できない_entry_だけが落ち_同じ_config_の他の_entry_と基底_rules_は保たれる() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+    let (_tmp, config, notes) = repo_with_config_and_notes(
         r#"{
             "rules": {"testAssertion": false},
             "overrides": [
@@ -769,12 +759,7 @@ fn compile_できない_entry_だけが落ち_同じ_config_の他の_entry_と�
                 {"files": ["src/**/*.spec.ts"], "rules": {"testAssertion": true}}
             ]
         }"#,
-    )
-    .unwrap();
-
-    let (config, notes) = Config::default()
-        .with_overrides_from_root(tmp.path())
-        .unwrap();
+    );
 
     assert!(!config.rules.test_assertion);
     assert_eq!(config.overrides.len(), 1);
@@ -789,16 +774,9 @@ fn compile_できない_entry_だけが落ち_同じ_config_の他の_entry_と�
 // T-510: `effective_rules_with_notes` は compile 失敗の note を返さない
 #[test]
 fn effective_rules_with_notes_は_compile_失敗の_note_を返さない() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+    let (tmp, config, load_notes) = repo_with_config_and_notes(
         r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}"#,
-    )
-    .unwrap();
-
-    let (config, load_notes) = Config::default()
-        .with_overrides_from_root(tmp.path())
-        .unwrap();
+    );
     // Precondition: the load path already reported the compile failure once
     // (T-507). `effective_rules_with_notes` must not report it again.
     assert!(
