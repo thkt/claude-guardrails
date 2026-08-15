@@ -703,10 +703,13 @@ fn 複数の_toggle_を切る_override_の_note_は_toggle_ごとに数を並べ
         .iter()
         .find(|n| n.contains("astSecurity"))
         .unwrap_or_else(|| panic!("expected an override note; got: {notes:?}"));
-    assert!(note.contains("astSecurity: 14 rule_id(s)"), "got: {note}");
-    assert!(note.contains("security: 2 rule_id(s)"), "got: {note}");
-    // `security` の rule_id は registry 側と ast_security 側の両方から出るので、
-    // 14 + 2 を足した数は実際に止まる検査の数を上回る。
+    assert!(
+        note.contains("astSecurity stops 14 rule_id(s)"),
+        "got: {note}"
+    );
+    assert!(note.contains("security stops 1 rule_id(s)"), "got: {note}");
+    // rule_id::SECURITY は registry 側と ast_security 側の両方から出るので
+    // "security" toggle の数から引かれ、単純合計 (14 + 2 = 16) にはならない。
     assert!(
         !note.contains("16"),
         "counts must not be summed; got: {note}"
