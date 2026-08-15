@@ -360,10 +360,14 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
         severity: "Critical",
         description: r"Blocks an edit to `.invariants.json` itself that drops a declared pin or changes its declared value, independent of the drift check above",
         why: r"An agent that can rewrite the declaration file can weaken the very pin meant to stop it, bypassing the drift check without touching the file the pin protects",
-        when_to_disable: Some("Projects that do not pin invariant values"),
+        when_to_disable: Some(
+            "Projects that do not pin invariant values. Deletion is not blocked either way: guardrails inspects only Write/Edit/MultiEdit tool input, so `rm .invariants.json` reaches no hook",
+        ),
         description_ja: r"`.invariants.json` 自体への編集が宣言済み pin を落とす、または宣言値を変えるものであれば、上記のドリフト検知とは独立にブロック",
         why_ja: r"宣言ファイルを書き換えられる agent は、pin が守ろうとしているファイルに触れずに pin 自体を弱められる。上記のドリフト検知はこれを検出できない",
-        when_to_disable_ja: Some("不変値を固定しないプロジェクト"),
+        when_to_disable_ja: Some(
+            "不変値を固定しないプロジェクト。削除もこの rule では止まらない: guardrails は Write/Edit/MultiEdit の tool input のみを見るため、`rm .invariants.json` はどの hook にも届かない",
+        ),
     },
     RuleDoc {
         table: Table::Rules,
