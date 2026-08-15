@@ -746,12 +746,11 @@ fn new_string_が空の_edit_でも_jsonの_post_edit_全文が返る() {
     let root = fs::canonicalize(dir.path()).unwrap();
     let path = root.join("flags.json");
     fs::write(&path, "{ \"a\": 1, \"b\": 2 }").unwrap();
-    let path_str = path.to_string_lossy().into_owned();
 
     let input = ToolInput {
         tool_name: ToolName::Edit,
         tool_input: ToolInputData {
-            file_path: Some(path_str),
+            file_path: Some(path.to_string_lossy().into_owned()),
             old_string: Some(", \"b\": 2".to_owned()),
             new_string: Some(String::new()),
             ..ToolInputData::default()
