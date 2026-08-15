@@ -959,6 +959,21 @@ fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
         .unwrap_or_else(|e| panic!("bootstrap base must match the schema minus the axis: {e}"));
 }
 
+// T-558: self_check() (scripts/precision_gate.sh) が corpus_shrink/ の
+// fixture も叩くのに、T-499 の deserialize 対象リストはそれを含んでいなかった。
+// bootstrap/fail と同じ形で corpus_shrink/base.json・head.json を足す。
+#[test]
+fn 追加した_self_check_fixture_が_metricsreport_の_schema_と一致する() {
+    for relative in [
+        "scripts/fixtures/precision_gate/corpus_shrink/base.json",
+        "scripts/fixtures/precision_gate/corpus_shrink/head.json",
+    ] {
+        let raw = read_fixture(relative);
+        serde_json::from_str::<MetricsReport>(&raw)
+            .unwrap_or_else(|e| panic!("{relative} must match the MetricsReport schema: {e}"));
+    }
+}
+
 fn read_fixture(relative: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("{relative}: {e}"))
