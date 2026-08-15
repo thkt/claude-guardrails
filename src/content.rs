@@ -220,11 +220,20 @@ pub(crate) fn get_file_and_content(
         }
     };
 
-    if file_path.is_empty() || content.is_empty() {
+    if file_path.is_empty() {
         return None;
     }
 
     let structured_full = reconstruct_structured_full(input, &file_path, project_root);
+
+    // An empty snippet alone is not a failure to acquire content: an empty
+    // `new_string`/`content` is a legitimate deletion edit, and a `.json`
+    // target can still supply the reconstructed post-edit full file via
+    // `structured_full`. Skip only when neither source has content — the
+    // snippet is empty and there is no full text to fall back on either.
+    if content.is_empty() && structured_full.as_full_str().is_none() {
+        return None;
+    }
 
     Some(ResolvedTarget {
         file_path,

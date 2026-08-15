@@ -735,3 +735,63 @@ fn degraded_reason_note_contains_actionable_text() {
     let note = DegradedReason::MultiEditMidFailure(2).note();
     assert!(note.contains("edit 2"));
 }
+
+// T-530: an empty `new_string` is a legitimate deletion edit. On a `.json`
+// file, `reconstruct_structured_full` can still replay the deletion against
+// the on-disk content and produce the full post-edit document, so
+// `get_file_and_content` must not bail out just because the Edit snippet
+// itself is empty.
+#[test]
+fn new_string_が空の_edit_でも_jsonの_post_edit_全文が返る() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // Canonicalize so the macOS `/var` -> `/private/var` symlink does not trip
+    // the `starts_with(project_root)` path-traversal guard.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{ \"a\": 1, \"b\": 2 }").unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path_str),
+            old_string: Some(", \"b\": 2".to_owned()),
+            new_string: Some(String::new()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root))
+        .expect("empty new_string deletion on a reconstructable .json file must still resolve");
+    assert_eq!(target.structured_full.as_full_str(), Some("{ \"a\": 1 }"));
+}
+
+// T-531: an empty `file_path` names no target file at all, regardless of
+// whether content was supplied. Narrowing the early-return condition to
+// "content could not be obtained" must not stop treating a missing target as
+// an acquisition failure.
+#[test]
+fn file_path_が空の入力は従来どおり取得失敗として扱われる() {
+    let input = make_write_input(Some(""), Some("const x = 1;"));
+    assert!(get_file_and_content(&input, None).is_none());
+}
+
+// T-532: for a file type `reconstruct_structured_full` cannot rebuild (only
+// `.json` qualifies), an empty Edit snippet leaves no full content to fall
+// back on either. `get_file_and_content` must keep skipping this case exactly
+// as it did before the early-return condition was narrowed.
+#[test]
+fn 全文を再構成できない種類のファイルで_content_が空のときは従来どおり_skip_する() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = temp_ts_file(&tmp, "file.ts", "const a = 1;\n");
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("const a = 1;\n".to_owned()),
+            new_string: Some(String::new()),
+            ..ToolInputData::default()
+        },
+    };
+    assert!(get_file_and_content(&input, None).is_none());
+}
