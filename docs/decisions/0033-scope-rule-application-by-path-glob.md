@@ -34,7 +34,7 @@ glob は `GlobBuilder::literal_separator(true)` で compile する。default の
 
 マッチ対象は絶対パスでも cwd 相対パスでもなく、常に git root からの相対パスに正規化した文字列である。`..` で git root の外へ出る `file_path` はどの override にもマッチしない (path-traversal boundary の再利用)。
 
-override の `rules` キーは top-level `rules` と同じ toggle 名であり、`rule_id` ではない。1 toggle が複数 `rule_id` を束ねる既存の粒度は override でも変わらないため、path 単位で `astSecurity` を切ると、その path に属する 14 個の `rule_id` (`child-process-injection`、`err-stack-exposure`、`postmessage-origin-missing` 等、README `AST Security Rules` 参照) が丸ごと切れる。同様に `security` を切ると `security`/`dangerous-inner-html` の 2 個の `rule_id` が同時に切れる。1 個の `rule_id` だけを path 単位で切る手段はない。
+override の `rules` キーは top-level `rules` と同じ toggle 名であり、`rule_id` ではない。1 toggle が複数 `rule_id` を束ねる既存の粒度は override でも変わらないため、path 単位で `astSecurity` を切ると、その path に属する 14 個の `rule_id` (`child-process-injection`、`err-stack-exposure`、`postmessage-origin-missing` 等、README `AST Security Rules` 参照) が丸ごと切れる。同様に `security` を切ると `dangerous-inner-html` が切れる。`security` の `rule_id` は `ast_security` 側の postMessage 検査からも出るため、この toggle だけでは止まらない。1 個の `rule_id` だけを path 単位で切る手段はない。
 
 override がマッチした file で rule を無効化すると、`effective_rules_with_notes` が無効化した rule 名とマッチした pattern、無効化した toggle が止める `rule_id` 数を記した note を積む (例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts] (testAssertion stops 1 rule_id(s))`)。件数は `rules::toggle_rule_id_count` (`rules::toggle_isolation!` の唯一の対応表から導出) から取り、toggle ごとに並べて合計しない。`security` の `rule_id` は registry 側と `ast_security` 側の両方から出るため、複数 toggle の件数を足すと実際に止まる検査の数を上回る。`oxlint` のように固定 `rule_id` 集合を持たない toggle は数の代わりに external linter と出す。hook はこの note を `resolve_effective_rules_with_notes` (`src/hook.rs`) で JSON envelope の `notes` と stderr の両方に流す。
 

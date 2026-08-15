@@ -447,6 +447,20 @@ fn 例外に挙げた_rule_id_は_その_toggle_を_off_にしても出続ける
     );
 }
 
+// T-598: 同じ rule_id を出す emitter が 2 つあるとき、片方の toggle を off に
+// しても出続ける。この前提が崩れると MULTI_EMITTER の引き算が過剰になる。
+#[test]
+fn 複数の_emitter_を持つ_rule_id_は_片方の_toggle_を_off_にしても出続ける() {
+    let mut config = Config::default();
+    config.rules.security = false;
+    let detected = detected_rules("src/app.ts", "target.postMessage(payload, '*');\n", &config);
+    assert!(
+        detected.contains(rule_id::SECURITY),
+        "security を off にしたら postMessage 経由の security が発火しなくなった \
+         (multi-emitter exception が崩れた?): {detected:?}"
+    );
+}
+
 // T-267: should-fire sample は検出で tp、未検出で fn に計上される。
 #[test]
 fn fire_samples_tally_tp_when_detected_and_fn_when_missed() {
