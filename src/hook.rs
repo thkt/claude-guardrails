@@ -10,7 +10,7 @@ use crate::hook_exit::HookExitCode;
 use crate::invariant::{degraded_note, run_invariant_pass};
 use crate::io::output::{
     emit_hook_context, emit_human_violations, emit_json_if_enabled, hook_specific_output,
-    render_error, show_config_hint,
+    render_error, show_config_hint, JsonEmission,
 };
 use crate::io::stdin::parse_stdin;
 use crate::rules::{self, non_comment_lines, Violation, ViolationOrigin};
@@ -408,7 +408,13 @@ where
                 input.tool_name
             );
         }
-        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new(), None);
+        emit_json_if_enabled(
+            json_mode,
+            JsonEmission {
+                notes,
+                ..Default::default()
+            },
+        );
         return 0;
     };
 
@@ -418,7 +424,13 @@ where
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new(), None);
+        emit_json_if_enabled(
+            json_mode,
+            JsonEmission {
+                notes,
+                ..Default::default()
+            },
+        );
         return 0;
     }
 
@@ -476,11 +488,13 @@ where
     emit_hook_context(json_mode, hook_output.as_ref());
     emit_json_if_enabled(
         json_mode,
-        &blocking_refs,
-        &warning_refs,
-        notes,
-        info_notes,
-        hook_output,
+        JsonEmission {
+            blocking: &blocking_refs,
+            warnings: &warning_refs,
+            notes,
+            info_notes,
+            hook_specific_output: hook_output,
+        },
     );
     emit_human_violations(&blocking_refs, &warning_refs);
     let outcome = if !blocking.is_empty() {

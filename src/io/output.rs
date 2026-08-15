@@ -100,21 +100,26 @@ struct HookEnvelope<T: Serialize> {
     hook_specific_output: Option<HookSpecificOutput>,
 }
 
-pub(crate) fn emit_json_if_enabled(
-    json_mode: bool,
-    blocking: &[&Violation],
-    warnings: &[&Violation],
-    notes: Vec<String>,
-    info_notes: Vec<String>,
-    hook_specific_output: Option<HookSpecificOutput>,
-) {
+/// `blocking` / `warnings` and `notes` / `info_notes` are two pairs of
+/// same-typed neighbours, so positional arguments let a swap compile while
+/// inverting the decision or the `degraded` flag.
+#[derive(Default)]
+pub(crate) struct JsonEmission<'a> {
+    pub blocking: &'a [&'a Violation],
+    pub warnings: &'a [&'a Violation],
+    pub notes: Vec<String>,
+    pub info_notes: Vec<String>,
+    pub hook_specific_output: Option<HookSpecificOutput>,
+}
+
+pub(crate) fn emit_json_if_enabled(json_mode: bool, emission: JsonEmission<'_>) {
     if !json_mode {
         return;
     }
-    let report = build_json_report(blocking, warnings);
+    let report = build_json_report(emission.blocking, emission.warnings);
     print_json_line(&HookEnvelope {
-        envelope: SuccessEnvelope::with_notes_and_info(report, notes, info_notes),
-        hook_specific_output,
+        envelope: SuccessEnvelope::with_notes_and_info(report, emission.notes, emission.info_notes),
+        hook_specific_output: emission.hook_specific_output,
     });
 }
 
