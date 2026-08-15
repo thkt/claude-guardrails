@@ -590,6 +590,79 @@ fn 同じ_content_を_docs_配下へ書くと_exit_0で通る() {
     );
 }
 
+// T-585: pin を消す Write が exit 2 で止まる
+#[test]
+fn pin_を消す_write_が_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{"config.json": {"featureFlag": true}}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join(".invariants.json"),
+            "content": "{}"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "dropping a declared pin from .invariants.json must block; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-586: pin を足す Write が exit 0 で通る
+#[test]
+fn pin_を足す_write_が_exit_0で通る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{"config.json": {"featureFlag": true}}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join(".invariants.json"),
+            "content": r#"{"config.json": {"featureFlag": true}, "other.json": {"apiBase": "https://x"}}"#
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "adding a pin on top of unchanged existing pins must not block; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-587: pin が無い repository では発火しない
+#[test]
+fn pinが無いrepositoryでは発火しない() {
+    let tmp = tmp_repo();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join(".invariants.json"),
+            "content": r#"{"config.json": {"featureFlag": true}}"#
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a repository with no pre-existing .invariants.json must not trigger the guard; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // T-488: `severity.blockThreshold` を `critical` にした repository でも設定ファイルへの Write は exit 2 で止まる
 #[test]
 fn blockthreshold_を_critical_にしても設定ファイルへの_write_は_exit_2で止まる() {
