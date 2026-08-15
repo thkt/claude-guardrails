@@ -174,10 +174,19 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
-/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it.
-/// `excessive-nesting` runs unconditionally from `src/hook.rs`, so turning
-/// `astSecurity` off leaves it firing.
-const TOGGLE_RULE_ID_COUNT_EXCEPTIONS: &[&str] = &[rule_id::EXCESSIVE_NESTING];
+/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
+/// it runs unconditionally regardless of any toggle. `excessive-nesting` runs
+/// unconditionally from `src/hook.rs`, so turning `astSecurity` off leaves it
+/// firing.
+const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL: &[&str] = &[rule_id::EXCESSIVE_NESTING];
+
+/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
+/// another, independently-gated module emits the same `rule_id` too.
+/// `rule_id::SECURITY` is emitted both by `rules::security` (the `"security"`
+/// toggle) and by `analysis::ast_security::postmessage::check_post_message_wildcard`
+/// (see the comment on the `ast_security` entry in [`toggle_isolation!`] above),
+/// so turning `"security"` off does not stop it firing.
+const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER: &[&str] = &[rule_id::SECURITY];
 
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
 /// name (e.g. `"astSecurity"`) is set to `false`. `None` when the toggle gates
@@ -190,7 +199,10 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
         .map(|(_, rules)| {
             rules
                 .iter()
-                .filter(|rule| !TOGGLE_RULE_ID_COUNT_EXCEPTIONS.contains(rule))
+                .filter(|rule| {
+                    !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL.contains(rule)
+                        && !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER.contains(rule)
+                })
                 .count()
         })
 }
