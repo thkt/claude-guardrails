@@ -170,7 +170,7 @@ toggle_isolation! {
     cors_wildcard => "corsWildcard": ["cors-wildcard"];
     service_worker => "serviceWorker": ["service-worker-scope-root"];
     jwt_client => "jwtClient": ["jwt-client-decode"];
-    invariant => "invariant": ["invariant"];
+    invariant => "invariant": ["invariant", "invariant-guard"];
     config_guard => "configGuard": ["config-guard"];
 }
 

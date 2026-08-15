@@ -355,6 +355,18 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
     },
     RuleDoc {
         table: Table::Rules,
+        key: "invariant",
+        rule_id: Some(rule_id::INVARIANT_GUARD),
+        severity: "Critical",
+        description: r"Blocks an edit to `.invariants.json` itself that drops a declared pin or changes its declared value, independent of the drift check above",
+        why: r"An agent that can rewrite the declaration file can weaken the very pin meant to stop it, bypassing the drift check without touching the file the pin protects",
+        when_to_disable: Some("Projects that do not pin invariant values"),
+        description_ja: r"`.invariants.json` 自体への編集が宣言済み pin を落とす、または宣言値を変えるものであれば、上記のドリフト検知とは独立にブロック",
+        why_ja: r"宣言ファイルを書き換えられる agent は、pin が守ろうとしているファイルに触れずに pin 自体を弱められる。上記のドリフト検知はこれを検出できない",
+        when_to_disable_ja: Some("不変値を固定しないプロジェクト"),
+    },
+    RuleDoc {
+        table: Table::Rules,
         key: "configGuard",
         rule_id: Some(rule_id::CONFIG_GUARD),
         severity: "Critical",
