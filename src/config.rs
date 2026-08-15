@@ -245,14 +245,21 @@ fn read_optional_config(path: &Path) -> Result<Option<String>, ConfigError> {
 impl Config {
     // Uses CWD (not file_path) as trust boundary to prevent
     // LLM-controlled paths from influencing config discovery.
-    pub fn with_project_overrides(self) -> Result<Self, ConfigError> {
+    /// On success also returns notes for glob patterns that failed to
+    /// compile (see `invalid_pattern_note`), so a caller sees them at load
+    /// time instead of only when `effective_rules_with_notes` happens to run
+    /// against a matching file.
+    pub fn with_project_overrides(self) -> Result<(Self, Vec<String>), ConfigError> {
         let cwd = env::current_dir().map_err(ConfigError::WorkingDir)?;
         self.with_overrides_from_root(&cwd)
     }
 
-    fn with_overrides_from_root(mut self, start: &Path) -> Result<Self, ConfigError> {
+    fn with_overrides_from_root(
+        mut self,
+        start: &Path,
+    ) -> Result<(Self, Vec<String>), ConfigError> {
         let Some(git_root) = Self::find_git_root(start) else {
-            return Ok(self);
+            return Ok((self, Vec::new()));
         };
         self.git_root = Some(git_root.clone());
 
@@ -263,7 +270,7 @@ impl Config {
                     path: agent_neutral_path,
                     source: e,
                 })?;
-            return Ok(self.merge(project));
+            return Ok(self.merge_with_notes(project));
         }
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
@@ -274,9 +281,9 @@ impl Config {
                     source: e,
                 })?;
             if let Some(project) = tools.guardrails {
-                return Ok(self.merge(project));
+                return Ok(self.merge_with_notes(project));
             }
-            return Ok(self);
+            return Ok((self, Vec::new()));
         }
 
         let legacy_path = git_root.join(LEGACY_CONFIG_FILE);
@@ -286,10 +293,24 @@ impl Config {
                     path: legacy_path,
                     source: e,
                 })?;
-            return Ok(self.merge(project));
+            return Ok(self.merge_with_notes(project));
         }
 
-        Ok(self)
+        Ok((self, Vec::new()))
+    }
+
+    /// `merge` plus the load-time notes for any `overrides[].files` pattern
+    /// that failed to compile (`invalid_override_patterns` after the merge).
+    /// Shares `invalid_pattern_note`'s wording with `effective_rules_with_notes`
+    /// so the same defect reads the same regardless of which caller surfaces it.
+    fn merge_with_notes(self, project: ProjectConfig) -> (Self, Vec<String>) {
+        let merged = self.merge(project);
+        let notes = merged
+            .invalid_override_patterns
+            .iter()
+            .map(|pattern| Self::invalid_pattern_note(pattern))
+            .collect();
+        (merged, notes)
     }
 
     fn merge(mut self, project: ProjectConfig) -> Self {
@@ -364,6 +385,14 @@ impl Config {
         }
     }
 
+    /// Wording for one `invalid_override_patterns` entry, shared by
+    /// `merge_with_notes` (load-time) and `effective_rules_with_notes`
+    /// (per-file) so the same dropped-entry defect reads identically from
+    /// either caller.
+    fn invalid_pattern_note(pattern: &str) -> String {
+        format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
+    }
+
     pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
         start
             .ancestors()
@@ -405,9 +434,7 @@ impl Config {
         let mut notes: Vec<String> = self
             .invalid_override_patterns
             .iter()
-            .map(|pattern| {
-                format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
-            })
+            .map(|pattern| Self::invalid_pattern_note(pattern))
             .collect();
 
         // Skipping the normalization below keeps its cost off every hook

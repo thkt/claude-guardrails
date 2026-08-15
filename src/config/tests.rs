@@ -101,7 +101,7 @@ fn with_project_overrides_from_guardrails_json() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(!config.rules.biome);
@@ -122,7 +122,7 @@ fn with_project_overrides_guardrails_json_takes_priority_over_tools_json() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     // .guardrails.json wins: biome disabled, oxlint stays default-on
@@ -144,7 +144,7 @@ fn with_project_overrides_guardrails_json_takes_priority_over_legacy() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(!config.rules.biome);
@@ -169,7 +169,7 @@ fn with_project_overrides_from_tools_json() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(!config.rules.biome);
@@ -185,7 +185,7 @@ fn with_project_overrides_from_legacy_config() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(!config.rules.biome);
@@ -206,7 +206,7 @@ fn with_project_overrides_tools_json_takes_priority() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(!config.rules.biome);
@@ -216,7 +216,7 @@ fn with_project_overrides_tools_json_takes_priority() {
 #[test]
 fn with_project_overrides_no_config_returns_unchanged() {
     let tmp = tmp_repo();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(config.rules.biome);
@@ -251,7 +251,7 @@ fn with_project_overrides_tools_json_without_guardrails_key() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(config.rules.biome);
@@ -273,7 +273,7 @@ fn with_project_overrides_tools_json_without_guardrails_ignores_legacy() {
     )
     .unwrap();
 
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(config.rules.biome);
@@ -292,7 +292,7 @@ fn merge_sets_explicit_source() {
 fn with_overrides_with_config_sets_explicit_source() {
     let tmp = tmp_repo_with_claude();
     fs::write(tmp.path().join(TOOLS_CONFIG_FILE), r#"{"guardrails": {}}"#).unwrap();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert_eq!(config.source, ConfigSource::Explicit);
@@ -314,7 +314,7 @@ fn oxlint_deny_from_tools_json() {
         r#"{"guardrails": {"oxlint": {"deny": ["eslint/curly"]}}}"#,
     )
     .unwrap();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert_eq!(config.oxlint_config.deny, vec!["eslint/curly"]);
@@ -330,7 +330,7 @@ fn oxlint_allow_from_tools_json() {
         r#"{"guardrails": {"oxlint": {"allow": ["eslint/no-console"]}}}"#,
     )
     .unwrap();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert_eq!(config.oxlint_config.allow, vec!["eslint/no-console"]);
@@ -358,7 +358,7 @@ fn biome_false_normal_operation() {
         r#"{"guardrails": {"rules": {"biome": false}}}"#,
     )
     .unwrap();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     assert!(!config.rules.biome);
@@ -517,7 +517,7 @@ fn 後続の_override_は先行の_override_が設定した別の_rule_key_を�
 fn repo_with_config(json: &str) -> (tempfile::TempDir, Config) {
     let tmp = tmp_repo();
     fs::write(tmp.path().join(GUARDRAILS_CONFIG_FILE), json).unwrap();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
     (tmp, config)
@@ -592,7 +592,7 @@ fn 絶対パスで書いた_pattern_は_git_root_相対のマッチ対象に一�
         ),
     )
     .unwrap();
-    let config = Config::default()
+    let (config, _notes) = Config::default()
         .with_overrides_from_root(tmp.path())
         .unwrap();
 
@@ -717,4 +717,71 @@ fn rules_に直接書いた_config_guard_の無効化は効く() {
 
     let rules = config.effective_rules(tmp.path().join(".guardrails.json"));
     assert!(!rules.config_guard);
+}
+
+// T-507: compile できない glob を含む config を読むと、戻り値の note にその pattern が入る
+#[test]
+fn compile_できない_glob_を含む_config_を読むと_戻り値の_note_にその_pattern_が入る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+
+    let (_config, notes) = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    assert!(
+        notes.iter().any(|n| n.contains("src/[invalid")),
+        "expected a note naming the failed pattern; got: {notes:?}"
+    );
+}
+
+// T-508: compile できる glob だけの config では note が空になる
+#[test]
+fn compile_できる_glob_だけの_config_では_note_が空になる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["src/**/*.test.ts"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+
+    let (_config, notes) = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    assert!(notes.is_empty(), "expected no notes; got: {notes:?}");
+}
+
+// T-509: compile できない entry だけが落ち、同じ config の他の entry と基底 rules は保たれる
+#[test]
+fn compile_できない_entry_だけが落ち_同じ_config_の他の_entry_と基底_rules_は保たれる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{
+            "rules": {"testAssertion": false},
+            "overrides": [
+                {"files": ["src/[invalid"], "rules": {"flakyTest": false}},
+                {"files": ["src/**/*.spec.ts"], "rules": {"testAssertion": true}}
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let (config, notes) = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    assert!(!config.rules.test_assertion);
+    assert_eq!(config.overrides.len(), 1);
+    assert_eq!(
+        config.overrides[0].files[0].glob().glob(),
+        "src/**/*.spec.ts"
+    );
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("src/[invalid"));
 }

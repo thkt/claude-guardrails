@@ -295,9 +295,21 @@ fn resolve_project_root_or_note(
     }
 }
 
-fn load_config_or_note(result: Result<Config, ConfigError>, notes: &mut Vec<String>) -> Config {
+fn load_config_or_note(
+    result: Result<(Config, Vec<String>), ConfigError>,
+    notes: &mut Vec<String>,
+) -> Config {
     match result {
-        Ok(c) => c,
+        Ok((c, load_notes)) => {
+            // Mirrors `resolve_effective_rules_with_notes` below: without the
+            // eprintln the note reaches the JSON envelope only, and hook mode
+            // does not emit that envelope.
+            for note in &load_notes {
+                eprintln!("guardrails: {note}");
+            }
+            notes.extend(load_notes);
+            c
+        }
         Err(e) => {
             let note = format!(
                 "config error (using defaults: all rules enabled, block_threshold=high): {e}"
@@ -363,7 +375,7 @@ fn run_hook_with_input<F>(
     json_mode: bool,
 ) -> i32
 where
-    F: FnOnce() -> Result<Config, ConfigError>,
+    F: FnOnce() -> Result<(Config, Vec<String>), ConfigError>,
 {
     let mut notes = Vec::new();
     let project_root = resolve_project_root_or_note(project_root_result, &mut notes);
