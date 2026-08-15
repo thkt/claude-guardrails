@@ -120,12 +120,6 @@ pub struct Config {
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
     pub overrides: Vec<OverrideEntry>,
-    /// `overrides[].files` patterns that failed to compile as a glob, in
-    /// config-declaration order. The entry holding one is dropped whole
-    /// (`compile_override_entry`); keeping the pattern here is what lets
-    /// `effective_rules_with_notes` report that drop instead of staying
-    /// silent about it.
-    pub invalid_override_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,7 +161,6 @@ impl Default for Config {
             source: ConfigSource::Default,
             git_root: None,
             overrides: Vec::new(),
-            invalid_override_patterns: Vec::new(),
         }
     }
 }
@@ -245,14 +238,19 @@ fn read_optional_config(path: &Path) -> Result<Option<String>, ConfigError> {
 impl Config {
     // Uses CWD (not file_path) as trust boundary to prevent
     // LLM-controlled paths from influencing config discovery.
-    pub fn with_project_overrides(self) -> Result<Self, ConfigError> {
+    /// Returns the load-time notes alongside the config (see
+    /// `invalid_pattern_note`).
+    pub fn with_project_overrides(self) -> Result<(Self, Vec<String>), ConfigError> {
         let cwd = env::current_dir().map_err(ConfigError::WorkingDir)?;
         self.with_overrides_from_root(&cwd)
     }
 
-    fn with_overrides_from_root(mut self, start: &Path) -> Result<Self, ConfigError> {
+    fn with_overrides_from_root(
+        mut self,
+        start: &Path,
+    ) -> Result<(Self, Vec<String>), ConfigError> {
         let Some(git_root) = Self::find_git_root(start) else {
-            return Ok(self);
+            return Ok((self, Vec::new()));
         };
         self.git_root = Some(git_root.clone());
 
@@ -263,7 +261,7 @@ impl Config {
                     path: agent_neutral_path,
                     source: e,
                 })?;
-            return Ok(self.merge(project));
+            return Ok(self.merge_with_notes(project));
         }
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
@@ -274,9 +272,9 @@ impl Config {
                     source: e,
                 })?;
             if let Some(project) = tools.guardrails {
-                return Ok(self.merge(project));
+                return Ok(self.merge_with_notes(project));
             }
-            return Ok(self);
+            return Ok((self, Vec::new()));
         }
 
         let legacy_path = git_root.join(LEGACY_CONFIG_FILE);
@@ -286,13 +284,22 @@ impl Config {
                     path: legacy_path,
                     source: e,
                 })?;
-            return Ok(self.merge(project));
+            return Ok(self.merge_with_notes(project));
         }
 
-        Ok(self)
+        Ok((self, Vec::new()))
     }
 
-    fn merge(mut self, project: ProjectConfig) -> Self {
+    /// Note-discarding form for tests that assert on the merged fields alone.
+    #[cfg(test)]
+    fn merge(self, project: ProjectConfig) -> Self {
+        self.merge_with_notes(project).0
+    }
+
+    /// Failed patterns leave through the returned notes rather than onto
+    /// `Config`, which carries settings and not diagnostics.
+    fn merge_with_notes(mut self, project: ProjectConfig) -> (Self, Vec<String>) {
+        let mut notes = Vec::new();
         self.source = ConfigSource::Explicit;
         if let Some(enabled) = project.enabled {
             self.enabled = enabled;
@@ -323,17 +330,19 @@ impl Config {
         }
         if let Some(raw_overrides) = project.overrides {
             let mut overrides = Vec::new();
-            let mut invalid_patterns = Vec::new();
             for raw in raw_overrides {
                 match Self::compile_override_entry(raw) {
                     Ok(entry) => overrides.push(entry),
-                    Err(failed_patterns) => invalid_patterns.extend(failed_patterns),
+                    Err(failed_patterns) => notes.extend(
+                        failed_patterns
+                            .iter()
+                            .map(|pattern| Self::invalid_pattern_note(pattern)),
+                    ),
                 }
             }
             self.overrides = overrides;
-            self.invalid_override_patterns = invalid_patterns;
         }
-        self
+        (self, notes)
     }
 
     /// Compiles an override entry's glob patterns with `literal_separator(true)`
@@ -342,8 +351,8 @@ impl Config {
     /// (<https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator>).
     /// An entry with any glob that fails to compile is dropped whole; other
     /// entries in the same config are kept. The failing pattern(s) are
-    /// returned so the caller can populate `invalid_override_patterns` and
-    /// the hook boundary can surface a note instead of dropping the entry
+    /// returned so `merge_with_notes` can turn them into notes and the
+    /// hook boundary can surface those instead of dropping the entry
     /// silently.
     fn compile_override_entry(raw: ProjectOverrideEntry) -> Result<OverrideEntry, Vec<String>> {
         let mut files = Vec::with_capacity(raw.files.len());
@@ -362,6 +371,12 @@ impl Config {
         } else {
             Err(failed_patterns)
         }
+    }
+
+    /// Load-time only. This note does not depend on `file_path`, so emitting
+    /// it per file would repeat one config defect on every hook invocation.
+    fn invalid_pattern_note(pattern: &str) -> String {
+        format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
     }
 
     pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -392,23 +407,15 @@ impl Config {
     ///
     /// The notes are for the hook boundary to surface: one per matching
     /// entry that disables at least one rule (rule names + matched
-    /// patterns), one when resolution moved the path, and one per
-    /// `invalid_override_patterns` pattern. The last reports a config-file
-    /// defect rather than a match result, so it is emitted on every call,
-    /// `file_path` escaping `git_root` included.
+    /// patterns), and one when resolution moved the path. A glob that failed
+    /// to compile is not among them (see `invalid_pattern_note`).
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
     ) -> (RulesConfig, Vec<String>) {
         let file_path = file_path.as_ref();
         let mut rules = self.rules.clone();
-        let mut notes: Vec<String> = self
-            .invalid_override_patterns
-            .iter()
-            .map(|pattern| {
-                format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
-            })
-            .collect();
+        let mut notes: Vec<String> = Vec::new();
 
         // Skipping the normalization below keeps its cost off every hook
         // invocation in a repository that writes no `overrides` key.

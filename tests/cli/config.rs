@@ -410,6 +410,80 @@ fn evalを切るoverrideのnoteが既存の書式のまま読める() {
     );
 }
 
+// T-512: JSON envelope の notes に compile 失敗の note がちょうど 1 件入る
+#[test]
+fn json_envelope_の_notes_に_compile_失敗の_note_がちょうど_1_件入る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    let notes = parsed["notes"].as_array().expect("notes must be an array");
+    // T-464 only checked `.any(...)`, which passes whether the note appears
+    // once or is duplicated across the load-time and per-file note paths.
+    // Counting catches a regression that emits the same compile-failure note
+    // more than once.
+    let matching = notes
+        .iter()
+        .filter(|n| n.as_str().unwrap_or("").contains("src/[invalid"))
+        .count();
+    assert_eq!(
+        matching, 1,
+        "expected exactly one note naming the uncompilable override glob \"src/[invalid\"; got: {notes:?}"
+    );
+}
+
+// T-513: `--json` 無しの hook mode でも同じ note が stderr に 1 行だけ出る
+#[test]
+fn json_無しの_hook_mode_でも同じ_note_が_stderr_に_1_行だけ出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。T-466 / T-505
+    // と同じ形で stderr を見るが、ここは件数を数える。
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let occurrences = stderr
+        .matches("glob pattern \"src/[invalid\" failed to compile")
+        .count();
+    assert_eq!(
+        occurrences, 1,
+        "expected the compile-failure note on stderr exactly once; got: {stderr:?}"
+    );
+}
+
 /// `src/allowed/**` で eval を切る config と `src/allowed/esc -> ../protected`
 /// を持つ repository を組み、`TempDir` と実体の root を返す。`TempDir` を落とす
 /// とディレクトリごと消えるので、呼び出し側で束縛したまま保持する。

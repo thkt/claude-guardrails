@@ -148,10 +148,13 @@ fn json_edit_degraded_content_fails_open_with_note() {
         &input,
         Ok(root.clone()),
         || {
-            Ok(Config {
-                git_root: Some(root_for_config),
-                ..Config::default()
-            })
+            Ok((
+                Config {
+                    git_root: Some(root_for_config),
+                    ..Config::default()
+                },
+                Vec::new(),
+            ))
         },
         false,
     );
@@ -427,7 +430,7 @@ fn resolve_project_root_or_note_pushes_note_on_err() {
 #[test]
 fn load_config_or_note_returns_config_and_skips_notes_on_ok() {
     let mut notes = Vec::new();
-    let result = load_config_or_note(Ok(Config::default()), &mut notes);
+    let result = load_config_or_note(Ok((Config::default(), Vec::new())), &mut notes);
     assert!(result.enabled);
     assert!(notes.is_empty(), "no note expected on Ok, got: {notes:?}");
 }
@@ -684,5 +687,32 @@ fn rule_id_と_1_対_1_の_toggle_では数が_1_と出る() {
         strip_bracketed(override_note).contains('1'),
         "expected the stopped rule_id count (1) outside the bracketed rule(s)/pattern(s) \
          lists; got: {override_note}"
+    );
+}
+
+// T-511: hook 経路では compile 失敗の note がちょうど 1 件出る
+//
+// `load_config_or_note` と `resolve_effective_rules_with_notes` を production と
+// 同じ順に呼ぶ。読み込み時に 1 回出た note を後段が重ねないことを見る。
+#[test]
+fn hook_経路では_compile_失敗の_note_がちょうど_1_件出る() {
+    let file_path = "/src/app.ts";
+    let pattern = "src/[invalid";
+    let load_notes = vec![format!(
+        "override entry dropped: glob pattern \"{pattern}\" failed to compile"
+    )];
+
+    let mut notes = Vec::new();
+    let config = load_config_or_note(Ok((Config::default(), load_notes)), &mut notes);
+    let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
+
+    let compile_failure_notes: Vec<&String> = notes
+        .iter()
+        .filter(|n| n.contains("failed to compile"))
+        .collect();
+    assert_eq!(
+        compile_failure_notes.len(),
+        1,
+        "expected exactly one compile-failure note through the hook path; got: {notes:?}"
     );
 }
