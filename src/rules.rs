@@ -10,6 +10,7 @@ mod flaky_test;
 mod generated_file;
 mod hardcoded_secrets;
 mod http_resource;
+pub(crate) mod invariant_guard;
 mod jwt_client;
 mod naming;
 pub(crate) mod no_use_effect;
@@ -96,6 +97,7 @@ pub(crate) mod rule_id {
         TEST_ENDPOINT_PROD_GUARD = "test-endpoint-prod-guard",
         INVARIANT = "invariant",
         CONFIG_GUARD = "config-guard",
+        INVARIANT_GUARD = "invariant-guard",
     }
 }
 
@@ -168,7 +170,7 @@ toggle_isolation! {
     cors_wildcard => "corsWildcard": ["cors-wildcard"];
     service_worker => "serviceWorker": ["service-worker-scope-root"];
     jwt_client => "jwtClient": ["jwt-client-decode"];
-    invariant => "invariant": ["invariant"];
+    invariant => "invariant": ["invariant", "invariant-guard"];
     config_guard => "configGuard": ["config-guard"];
 }
 

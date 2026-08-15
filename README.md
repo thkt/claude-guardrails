@@ -182,7 +182,7 @@ See `src/rules/` for custom rules that complement external linters.
 | `serviceWorker` | Medium | Service Worker registration with root scope (`{ scope: '/' }`). Suggests narrowing to a specific path | Root scope intercepts every navigation on the origin, so one misregistration hijacks the whole site | Projects intentionally serving the worker site-wide |
 | `jwtClient` | Medium | Client-side JWT decode (`jwtDecode`, `jwt_decode`, `atob(token.split('.'))`). Suggests server-side `jwtVerify` | JWT payload is base64url. It is readable but also editable without a signature check, so trusting it on the client is an authorization bypass | Server-only JWT decode paths (e.g., Node-only files) |
 | `astSecurity` | Mixed | AST-based: command/regex/require injection, stack exposure, path traversal, prototype pollution, bidi chars, env-var fallback, insecure RNG, unsafe HTML injection, client env leak, SSR secret bleed, postMessage origin (see below) | Aggregated AST checks. Each sub-rule has its own threat (see the sub-rule table below) | Non-Node.js projects |
-| `invariant` | High | Blocks an edit that drifts a `.json` value away from the scalar pinned for it in `.invariants.json` (feature flags, i18n strings, design tokens) | A pinned value is a contract the rest of the app depends on; a silent edit that changes it ships a behavior change no human approved | Projects that do not pin invariant values |
+| `invariant` | Mixed | Pinned-value gate: blocks an edit that drifts a `.json` value away from its pinned scalar, and an edit to `.invariants.json` itself that weakens a pin (see below) | Two rule_ids under one toggle. Each has its own threat (see the sub-rule table below) | Projects that do not pin invariant values. Deletion is out of reach either way: guardrails inspects only Write/Edit/MultiEdit tool input, so `rm .invariants.json` reaches no hook |
 | `configGuard` | Critical | Blocks an edit to the config files guardrails reads at the git root (`.guardrails.json`, `.claude/tools.json`, `.claude-guardrails.json`) | An agent that rewrites the config can switch off the rule that would stop its next edit, and an `overrides` entry reads as a test-path exclusion in the diff | Repositories where an agent is expected to set up the config and a human cannot |
 <!-- END GENERATED: rules-table -->
 
@@ -220,6 +220,17 @@ Deep security checks using the [oxc](https://oxc.rs) parser. These analyze the A
 | `ssr-secret-bleed` | High | Prevents server-only secrets from leaking to the browser via SSR returns. Flags secret-named properties (`apiKey`, `token`, …) or `process.env.*` secret values returned from `getServerSideProps` / `'use server'` Server Actions, since Next.js serializes those returns into the client payload. | The SSR return is serialized into the HTML payload. Every visitor receives the secret, including the ones who never authenticate |
 | `postmessage-origin-missing` | High | `window.addEventListener('message', handler)` whose inline handler never reads `event.origin`. Without an origin check, the page accepts cross-origin postMessages from arbitrary senders. External handler references and param-side destructure are out of scope (1-file static analysis). | Any embedded iframe or popup can send a message and the handler trusts it, so the page runs commands chosen by an attacker |
 <!-- END GENERATED: ast-security-rules-table -->
+
+### Invariant Rules (`invariant`)
+
+Two rule_ids share the `invariant` toggle. One guards the pinned values themselves, the other guards the file that declares them.
+
+<!-- BEGIN GENERATED: invariant-rules-table -->
+| Sub-rule (rule_id) | Severity | Description | Why it matters |
+| --- | --- | --- | --- |
+| `invariant` | High | Blocks an edit that drifts a `.json` value away from the scalar pinned for it in `.invariants.json` (feature flags, i18n strings, design tokens) | A pinned value is a contract the rest of the app depends on; a silent edit that changes it ships a behavior change no human approved |
+| `invariant-guard` | Critical | Blocks an edit to `.invariants.json` itself that drops a declared pin or changes its declared value, independent of the drift check above | An agent that can rewrite the declaration file can weaken the very pin meant to stop it, bypassing the drift check without touching the file the pin protects |
+<!-- END GENERATED: invariant-rules-table -->
 
 ## Subcommands
 

@@ -287,8 +287,16 @@ fn missing_corpus_coverage(catalog: &[&str], samples: &[CorpusSample]) -> Vec<St
 /// (T-22), not here. `config-guard` needs a git root to match against, and
 /// `harness_config` builds a `Config` without one, so no corpus path reaches
 /// it; its coverage lives in `rules/config_guard/tests.rs` and
-/// `tests/cli/config.rs`. Same allowlist precedent as `UNREGISTERED_RULE_IDS`.
-const CORPUS_EXEMPT: &[&str] = &[rule_id::INVARIANT, rule_id::CONFIG_GUARD];
+/// `tests/cli/config.rs`. `invariant-guard` needs the same disk-backed
+/// `.invariants.json` pin file at the git root as `invariant` (it judges a
+/// weakening edit to that same declaration file); its coverage lives in
+/// `rules/invariant_guard/tests.rs`. Same allowlist precedent as
+/// `UNREGISTERED_RULE_IDS`.
+const CORPUS_EXEMPT: &[&str] = &[
+    rule_id::INVARIANT,
+    rule_id::CONFIG_GUARD,
+    rule_id::INVARIANT_GUARD,
+];
 
 // T-266: 全 first-party rule_id に should-fire / should-not-fire 両 sample が存在する (corpus 網羅 gate)。
 #[test]

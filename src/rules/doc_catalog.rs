@@ -37,6 +37,8 @@ enum Table {
     Security,
     /// `### AST Security Rules (`astSecurity`)` — rule_id-level, 4 columns.
     AstSecurity,
+    /// `### Invariant Rules (`invariant`)` — rule_id-level, 4 columns.
+    Invariant,
 }
 
 /// README language. `severity` and `key` are shared; prose differs per language
@@ -68,7 +70,12 @@ struct RuleDoc {
     when_to_disable_ja: Option<&'static str>,
 }
 
-const TABLES: [Table; 3] = [Table::Rules, Table::Security, Table::AstSecurity];
+const TABLES: [Table; 4] = [
+    Table::Rules,
+    Table::Security,
+    Table::AstSecurity,
+    Table::Invariant,
+];
 const LANGS: [Lang; 2] = [Lang::En, Lang::Ja];
 
 fn marker_name(table: Table) -> &'static str {
@@ -76,6 +83,7 @@ fn marker_name(table: Table) -> &'static str {
         Table::Rules => "rules-table",
         Table::Security => "security-rules-table",
         Table::AstSecurity => "ast-security-rules-table",
+        Table::Invariant => "invariant-rules-table",
     }
 }
 
@@ -96,6 +104,8 @@ fn heading(table: Table, lang: Lang) -> &'static str {
         (Lang::Ja, Table::Rules) => "\n### ルール\n",
         (Lang::Ja, Table::Security) => "\n### セキュリティルール（",
         (Lang::Ja, Table::AstSecurity) => "\n### ASTセキュリティルール（",
+        (Lang::En, Table::Invariant) => "\n### Invariant Rules (",
+        (Lang::Ja, Table::Invariant) => "\n### 不変値ルール（",
     }
 }
 
@@ -111,13 +121,17 @@ fn header(table: Table, lang: Lang) -> &'static str {
         (Lang::Ja, Table::Rules) => "| ルール | 重大度 | 説明 | なぜ重要か | 無効化する場面 |",
         (Lang::Ja, Table::Security) => "| サブルール (rule_id) | 重大度 | 説明 | なぜ重要か |",
         (Lang::Ja, Table::AstSecurity) => "| サブルール | 重大度 | 説明 | なぜ重要か |",
+        (Lang::En, Table::Invariant) => {
+            "| Sub-rule (rule_id) | Severity | Description | Why it matters |"
+        }
+        (Lang::Ja, Table::Invariant) => "| サブルール (rule_id) | 重大度 | 説明 | なぜ重要か |",
     }
 }
 
 fn separator(table: Table) -> &'static str {
     match table {
         Table::Rules => "| --- | --- | --- | --- | --- |",
-        Table::Security | Table::AstSecurity => "| --- | --- | --- | --- |",
+        Table::Security | Table::AstSecurity | Table::Invariant => "| --- | --- | --- | --- |",
     }
 }
 

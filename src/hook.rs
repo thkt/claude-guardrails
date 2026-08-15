@@ -233,6 +233,19 @@ fn collect_violations(
         ));
     }
 
+    // Guards the declaration file itself, not a pinned value drifting in the
+    // file it declares. Gated on `structured_full` because a weakening edit can
+    // only be judged from the reconstructed post-edit content.
+    if config.rules.invariant {
+        if let Some(content) = structured_full {
+            violations.extend(rules::invariant_guard::check(
+                file_path,
+                content,
+                config.git_root.as_deref(),
+            ));
+        }
+    }
+
     (violations, notes)
 }
 
@@ -423,7 +436,12 @@ where
     // instead of silent; an unpinned file stays quiet.
     if config.rules.invariant {
         if let ContentResolution::Degraded(_) = &target.structured_full {
-            if let Some(note) = degraded_note(&target.file_path, config.git_root.as_deref()) {
+            let pin_note = degraded_note(&target.file_path, config.git_root.as_deref());
+            let guard_note = rules::invariant_guard::degraded_note(
+                &target.file_path,
+                config.git_root.as_deref(),
+            );
+            for note in pin_note.into_iter().chain(guard_note) {
                 eprintln!("guardrails: invariant: {note}");
                 notes.push(note);
             }

@@ -58,6 +58,7 @@ pub(crate) const UNREGISTERED_RULE_IDS: &[&str] = &[
     rule_id::TEST_ASSERTION, // test_assertion::check_program (AST 経路、run_ast_rules dispatch)
     rule_id::INVARIANT, // invariant::run_invariant_pass (collect_violations、is_js 非依存の独立パス)
     rule_id::CONFIG_GUARD, // config_guard::check (collect_violations、git root が要る独立パス)
+    rule_id::INVARIANT_GUARD, // invariant_guard::check (collect_violations、invariant トグル配下の独立パス)
 ];
 
 pub(in crate::rules) fn check_rule(rule: &Rule, content: &str, file_path: &str) -> Vec<Violation> {
