@@ -233,6 +233,22 @@ fn collect_violations(
         ));
     }
 
+    // Independent of `run_invariant_pass` above: this guards the declaration
+    // file itself (a pin dropped or weakened in `.invariants.json`), not a
+    // pinned value drifting in the file it declares. Gated on the same
+    // `invariant` toggle since it is the same feature's self-edit path, and
+    // on `structured_full` since a weakening edit can only be judged from the
+    // reconstructed post-edit `.json` content.
+    if config.rules.invariant {
+        if let Some(content) = structured_full {
+            violations.extend(rules::invariants_guard::check(
+                file_path,
+                content,
+                config.git_root.as_deref(),
+            ));
+        }
+    }
+
     (violations, notes)
 }
 
