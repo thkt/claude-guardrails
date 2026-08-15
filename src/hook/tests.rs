@@ -692,13 +692,8 @@ fn rule_id_と_1_対_1_の_toggle_では数が_1_と出る() {
 
 // T-511: hook 経路では compile 失敗の note がちょうど 1 件出る
 //
-// Reproduces the two steps `run_hook_with_input` chains in production
-// (`load_config_or_note` then `resolve_effective_rules_with_notes`): the
-// closure result stands in for what `Config::with_project_overrides` returns
-// once it has already loaded a config whose `overrides` held one
-// uncompilable glob. `merge_capturing_notes` (U-001) reports that failure
-// once, in `load_notes`; `Config` itself carries no record of it, so this
-// asserts `resolve_effective_rules_with_notes` does not add a second one.
+// `load_config_or_note` と `resolve_effective_rules_with_notes` を production と
+// 同じ順に呼ぶ。読み込み時に 1 回出た note を後段が重ねないことを見る。
 #[test]
 fn hook_経路では_compile_失敗の_note_がちょうど_1_件出る() {
     let file_path = "/src/app.ts";

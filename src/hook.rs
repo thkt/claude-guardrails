@@ -315,12 +315,9 @@ fn load_config_or_note(
     }
 }
 
-/// Echoes each note to stderr and appends it to `notes`. Without the eprintln
-/// a note reaches the JSON envelope only, and hook mode does not emit that
-/// envelope — the agent asking why a rule stayed quiet would have nothing to
-/// read. Shared by `load_config_or_note` (load-time notes) and
-/// `resolve_effective_rules_with_notes` (per-file notes) so the two note
-/// sources stay on one path to stderr.
+/// Echoes each note to stderr on top of appending it. Without the echo a note
+/// rides the JSON envelope alone, which hook mode does not emit, leaving the
+/// human reading a debug log nothing to go on.
 fn emit_notes(new_notes: Vec<String>, notes: &mut Vec<String>) {
     for note in &new_notes {
         eprintln!("guardrails: {note}");

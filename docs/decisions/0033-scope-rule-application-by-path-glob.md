@@ -38,7 +38,7 @@ override の `rules` キーは top-level `rules` と同じ toggle 名であり�
 
 override がマッチした file で rule を無効化すると、`effective_rules_with_notes` が無効化した rule 名とマッチした pattern、無効化した toggle が止める `rule_id` 数を記した note を積む (例: `override disabled rule(s) [testAssertion] for pattern(s) [src/**/*.test.ts] (testAssertion: 1 rule_id(s))`)。件数は `rules::toggle_rule_id_count` (`rules::toggle_isolation!` の唯一の対応表から導出) から取り、toggle ごとに並べて合計しない。`security` の `rule_id` は registry 側と `ast_security` 側の両方から出るため、複数 toggle の件数を足すと実際に止まる検査の数を上回る。`oxlint` のように固定 `rule_id` 集合を持たない toggle は数の代わりに external linter と出す。hook はこの note を `resolve_effective_rules_with_notes` (`src/hook.rs`) で JSON envelope の `notes` と stderr の両方に流す。
 
-`overrides` entry の `files` に compile できない glob pattern があると、`Config::compile_override_entry` はその entry を丸ごと `Err` で返し、`Config::merge_capturing_notes` が失敗した pattern を `override entry dropped: glob pattern "..." failed to compile` という note に変換する。この note は `Config::with_project_overrides` が config を読み込むたびに 1 回だけ積まれ、`Config` 自身はこの note を field として保持しない。`effective_rules_with_notes` は `file_path` に依存する note (無効化した rule 名とマッチした pattern、symlink 解決) だけを返し、compile 失敗の note を再度積むことはない。hook 側は読み込み時の note を `load_config_or_note`、file 単位の note を `resolve_effective_rules_with_notes` (いずれも `src/hook.rs`) がそれぞれ受け取り、同じ JSON envelope の `notes` と stderr に流す。
+`overrides` entry の `files` に compile できない glob pattern があると、`Config::compile_override_entry` はその entry を丸ごと `Err` で返し、`Config::merge_with_notes` が失敗した pattern を `override entry dropped: glob pattern "..." failed to compile` という note に変換する。この note は `Config::with_project_overrides` が config を読み込むたびに 1 回だけ積まれ、`Config` 自身はこの note を field として保持しない。`effective_rules_with_notes` は `file_path` に依存する note (無効化した rule 名とマッチした pattern、symlink 解決) だけを返し、compile 失敗の note を再度積むことはない。hook 側は読み込み時の note を `load_config_or_note`、file 単位の note を `resolve_effective_rules_with_notes` (いずれも `src/hook.rs`) がそれぞれ受け取り、同じ JSON envelope の `notes` と stderr に流す。
 
 ### `overrides` の entry 単位 glob 失敗は ADR-0004 の config エラー軸と別軸
 
@@ -51,7 +51,7 @@ ADR-0004 の「config エラー」軸 (fail-open with defaults、`Config::with_p
 | `.guardrails.json` の parse | config 全体を `Config::default()` へ (fail-open)                |
 | `overrides` entry の glob   | 当該 entry のみ drop、他 entry と `rules` は保持 (fail-partial) |
 
-entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` で失敗した pattern 文字列を返すことで閉じ込める。`Config::merge_capturing_notes` は当該 entry を drop し、pattern を note に変換して呼び出し元 (`Config::with_project_overrides`) へ返す。
+entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が `Result::Err(Vec<String>)` で失敗した pattern 文字列を返すことで閉じ込める。`Config::merge_with_notes` は当該 entry を drop し、pattern を note に変換して呼び出し元 (`Config::with_project_overrides`) へ返す。
 
 ### Consequences
 

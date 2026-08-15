@@ -290,24 +290,16 @@ impl Config {
         Ok((self, Vec::new()))
     }
 
-    /// `merge` plus the load-time notes for any `overrides[].files` pattern
-    /// that failed to compile.
-    fn merge_with_notes(self, project: ProjectConfig) -> (Self, Vec<String>) {
-        let mut notes = Vec::new();
-        let merged = self.merge_capturing_notes(project, &mut notes);
-        (merged, notes)
-    }
-
     /// Note-discarding form for tests that assert on the merged fields alone.
     #[cfg(test)]
     fn merge(self, project: ProjectConfig) -> Self {
-        let mut discarded_notes = Vec::new();
-        self.merge_capturing_notes(project, &mut discarded_notes)
+        self.merge_with_notes(project).0
     }
 
-    /// Shared `merge` body. Failed patterns go out through `notes` rather
-    /// than onto `Config`, which carries settings and not diagnostics.
-    fn merge_capturing_notes(mut self, project: ProjectConfig, notes: &mut Vec<String>) -> Self {
+    /// Failed patterns leave through the returned notes rather than onto
+    /// `Config`, which carries settings and not diagnostics.
+    fn merge_with_notes(mut self, project: ProjectConfig) -> (Self, Vec<String>) {
+        let mut notes = Vec::new();
         self.source = ConfigSource::Explicit;
         if let Some(enabled) = project.enabled {
             self.enabled = enabled;
@@ -350,7 +342,7 @@ impl Config {
             }
             self.overrides = overrides;
         }
-        self
+        (self, notes)
     }
 
     /// Compiles an override entry's glob patterns with `literal_separator(true)`
@@ -359,7 +351,7 @@ impl Config {
     /// (<https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator>).
     /// An entry with any glob that fails to compile is dropped whole; other
     /// entries in the same config are kept. The failing pattern(s) are
-    /// returned so `merge_capturing_notes` can turn them into notes and the
+    /// returned so `merge_with_notes` can turn them into notes and the
     /// hook boundary can surface those instead of dropping the entry
     /// silently.
     fn compile_override_entry(raw: ProjectOverrideEntry) -> Result<OverrideEntry, Vec<String>> {
@@ -381,11 +373,8 @@ impl Config {
         }
     }
 
-    /// Wording for one dropped-entry note, produced only by
-    /// `merge_capturing_notes` at load time. `effective_rules_with_notes`
-    /// does not call this: that note does not depend on `file_path`, so
-    /// re-emitting it per file would repeat the same load-time defect on
-    /// every hook invocation instead of reporting it once.
+    /// Load-time only. This note does not depend on `file_path`, so emitting
+    /// it per file would repeat one config defect on every hook invocation.
     fn invalid_pattern_note(pattern: &str) -> String {
         format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
     }
@@ -418,11 +407,8 @@ impl Config {
     ///
     /// The notes are for the hook boundary to surface: one per matching
     /// entry that disables at least one rule (rule names + matched
-    /// patterns), and one when resolution moved the path. A glob pattern
-    /// that failed to compile is not among them — that defect does not
-    /// depend on `file_path`, and `merge_capturing_notes` already reports it
-    /// once at load time, so this call stays a pure function of `self.rules`
-    /// / `self.overrides` and `file_path`.
+    /// patterns), and one when resolution moved the path. A glob that failed
+    /// to compile is not among them (see `invalid_pattern_note`).
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
