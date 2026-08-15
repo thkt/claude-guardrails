@@ -785,3 +785,31 @@ fn compile_できない_entry_だけが落ち_同じ_config_の他の_entry_と�
     assert_eq!(notes.len(), 1);
     assert!(notes[0].contains("src/[invalid"));
 }
+
+// T-510: `effective_rules_with_notes` は compile 失敗の note を返さない
+#[test]
+fn effective_rules_with_notes_は_compile_失敗の_note_を返さない() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+
+    let (config, load_notes) = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+    // Precondition: the load path already reported the compile failure once
+    // (T-507). `effective_rules_with_notes` must not report it again.
+    assert!(
+        load_notes.iter().any(|n| n.contains("failed to compile")),
+        "precondition unmet: load path produced no compile-failure note; got: {load_notes:?}"
+    );
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    assert!(
+        !notes.iter().any(|n| n.contains("failed to compile")),
+        "effective_rules_with_notes must not emit a load-time compile-failure note; got: {notes:?}"
+    );
+}

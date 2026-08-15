@@ -120,12 +120,6 @@ pub struct Config {
     pub source: ConfigSource,
     pub git_root: Option<PathBuf>,
     pub overrides: Vec<OverrideEntry>,
-    /// `overrides[].files` patterns that failed to compile as a glob, in
-    /// config-declaration order. The entry holding one is dropped whole
-    /// (`compile_override_entry`); keeping the pattern here is what lets
-    /// `effective_rules_with_notes` report that drop instead of staying
-    /// silent about it.
-    pub invalid_override_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,7 +161,6 @@ impl Default for Config {
             source: ConfigSource::Default,
             git_root: None,
             overrides: Vec::new(),
-            invalid_override_patterns: Vec::new(),
         }
     }
 }
@@ -300,20 +293,29 @@ impl Config {
     }
 
     /// `merge` plus the load-time notes for any `overrides[].files` pattern
-    /// that failed to compile (`invalid_override_patterns` after the merge).
-    /// Shares `invalid_pattern_note`'s wording with `effective_rules_with_notes`
-    /// so the same defect reads the same regardless of which caller surfaces it.
+    /// that failed to compile. Shares `invalid_pattern_note`'s wording with
+    /// `effective_rules_with_notes` so the same defect reads the same
+    /// regardless of which caller surfaces it.
     fn merge_with_notes(self, project: ProjectConfig) -> (Self, Vec<String>) {
-        let merged = self.merge(project);
-        let notes = merged
-            .invalid_override_patterns
-            .iter()
-            .map(|pattern| Self::invalid_pattern_note(pattern))
-            .collect();
+        let mut notes = Vec::new();
+        let merged = self.merge_capturing_notes(project, &mut notes);
         (merged, notes)
     }
 
-    fn merge(mut self, project: ProjectConfig) -> Self {
+    /// `merge` without a caller wanting the load-time compile-failure notes:
+    /// production always wants them (`merge_with_notes`), so this convenience
+    /// form is test-only, kept for the direct `.merge()` call sites that only
+    /// assert on the merged fields.
+    #[cfg(test)]
+    fn merge(self, project: ProjectConfig) -> Self {
+        let mut discarded_notes = Vec::new();
+        self.merge_capturing_notes(project, &mut discarded_notes)
+    }
+
+    /// Shared `merge` body. `notes` collects one `invalid_pattern_note` per
+    /// `overrides[].files` glob that failed to compile — the only diagnostic
+    /// this step produces — without keeping that list on `Config` itself.
+    fn merge_capturing_notes(mut self, project: ProjectConfig, notes: &mut Vec<String>) -> Self {
         self.source = ConfigSource::Explicit;
         if let Some(enabled) = project.enabled {
             self.enabled = enabled;
@@ -344,15 +346,17 @@ impl Config {
         }
         if let Some(raw_overrides) = project.overrides {
             let mut overrides = Vec::new();
-            let mut invalid_patterns = Vec::new();
             for raw in raw_overrides {
                 match Self::compile_override_entry(raw) {
                     Ok(entry) => overrides.push(entry),
-                    Err(failed_patterns) => invalid_patterns.extend(failed_patterns),
+                    Err(failed_patterns) => notes.extend(
+                        failed_patterns
+                            .iter()
+                            .map(|pattern| Self::invalid_pattern_note(pattern)),
+                    ),
                 }
             }
             self.overrides = overrides;
-            self.invalid_override_patterns = invalid_patterns;
         }
         self
     }
@@ -363,8 +367,8 @@ impl Config {
     /// (<https://docs.rs/globset/0.4.20/globset/struct.GlobBuilder.html#method.literal_separator>).
     /// An entry with any glob that fails to compile is dropped whole; other
     /// entries in the same config are kept. The failing pattern(s) are
-    /// returned so the caller can populate `invalid_override_patterns` and
-    /// the hook boundary can surface a note instead of dropping the entry
+    /// returned so `merge_capturing_notes` can turn them into notes and the
+    /// hook boundary can surface those instead of dropping the entry
     /// silently.
     fn compile_override_entry(raw: ProjectOverrideEntry) -> Result<OverrideEntry, Vec<String>> {
         let mut files = Vec::with_capacity(raw.files.len());
@@ -385,10 +389,11 @@ impl Config {
         }
     }
 
-    /// Wording for one `invalid_override_patterns` entry, shared by
-    /// `merge_with_notes` (load-time) and `effective_rules_with_notes`
-    /// (per-file) so the same dropped-entry defect reads identically from
-    /// either caller.
+    /// Wording for one dropped-entry note, produced only by
+    /// `merge_capturing_notes` at load time. `effective_rules_with_notes`
+    /// does not call this: that note does not depend on `file_path`, so
+    /// re-emitting it per file would repeat the same load-time defect on
+    /// every hook invocation instead of reporting it once.
     fn invalid_pattern_note(pattern: &str) -> String {
         format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
     }
@@ -421,21 +426,18 @@ impl Config {
     ///
     /// The notes are for the hook boundary to surface: one per matching
     /// entry that disables at least one rule (rule names + matched
-    /// patterns), one when resolution moved the path, and one per
-    /// `invalid_override_patterns` pattern. The last reports a config-file
-    /// defect rather than a match result, so it is emitted on every call,
-    /// `file_path` escaping `git_root` included.
+    /// patterns), and one when resolution moved the path. A glob pattern
+    /// that failed to compile is not among them — that defect does not
+    /// depend on `file_path`, and `merge_capturing_notes` already reports it
+    /// once at load time, so this call stays a pure function of `self.rules`
+    /// / `self.overrides` and `file_path`.
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
     ) -> (RulesConfig, Vec<String>) {
         let file_path = file_path.as_ref();
         let mut rules = self.rules.clone();
-        let mut notes: Vec<String> = self
-            .invalid_override_patterns
-            .iter()
-            .map(|pattern| Self::invalid_pattern_note(pattern))
-            .collect();
+        let mut notes: Vec<String> = Vec::new();
 
         // Skipping the normalization below keeps its cost off every hook
         // invocation in a repository that writes no `overrides` key.
