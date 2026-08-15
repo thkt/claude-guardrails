@@ -489,7 +489,7 @@ impl Config {
         let parts: Vec<String> = disabled
             .iter()
             .map(|&name| match toggle_rule_id_count(name) {
-                Some(count) => format!("{name}: {count} rule_id(s)"),
+                Some(count) => format!("{name} stops {count} rule_id(s)"),
                 None => format!("{name}: external linter"),
             })
             .collect();

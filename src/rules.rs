@@ -177,12 +177,24 @@ toggle_isolation! {
 /// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it.
 /// `excessive-nesting` runs unconditionally from `src/hook.rs`, so turning
 /// `astSecurity` off leaves it firing.
-const TOGGLE_RULE_ID_COUNT_EXCEPTIONS: &[&str] = &[rule_id::EXCESSIVE_NESTING];
+const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL: &[&str] = &[rule_id::EXCESSIVE_NESTING];
+
+/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
+/// another, independently-gated module emits the same `rule_id` too.
+/// `rule_id::SECURITY` is emitted both by `rules::security` (the `"security"`
+/// toggle) and by `analysis::ast_security::postmessage::check_post_message_wildcard`,
+/// so turning `"security"` off does not stop it firing.
+const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER: &[&str] = &[rule_id::SECURITY];
 
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
 /// name (e.g. `"astSecurity"`) is set to `false`. `None` when the toggle gates
 /// no fixed set: `"oxlint"` runs an external linter instead of first-party
 /// `rule_id`s.
+///
+/// Both exception lists assume the other emitter is still on, so the count is
+/// the one for a config where every other toggle keeps its default. Turning
+/// `astSecurity` off first makes this undercount `"security"` by one, since the
+/// wildcard check that kept `rule_id::SECURITY` alive is gone by then.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
@@ -190,7 +202,10 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
         .map(|(_, rules)| {
             rules
                 .iter()
-                .filter(|rule| !TOGGLE_RULE_ID_COUNT_EXCEPTIONS.contains(rule))
+                .filter(|rule| {
+                    !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL.contains(rule)
+                        && !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER.contains(rule)
+                })
                 .count()
         })
 }

@@ -791,3 +791,23 @@ fn effective_rules_with_notes_は_compile_失敗の_note_を返さない() {
         "effective_rules_with_notes must not emit a load-time compile-failure note; got: {notes:?}"
     );
 }
+
+// T-555: 数そのものではなく、`stops N rule_id(s)` という文言を見る。数が何を
+// 数えたものかは、この書式でしか利用者に伝わらない。
+#[test]
+fn security_を切る_override_の_note_が_1_と出る() {
+    let (tmp, config) =
+        repo_with_config(r#"{"overrides": [{"files": ["**"], "rules": {"security": false}}]}"#);
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("security"))
+        .unwrap_or_else(|| panic!("expected an override note naming security; got: {notes:?}"));
+    assert!(
+        note.contains("security stops 1 rule_id(s)"),
+        "expected the note to read the count as checks that stop when security is turned off; \
+         got: {note}"
+    );
+}

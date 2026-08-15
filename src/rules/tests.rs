@@ -291,32 +291,32 @@ fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
     );
 }
 
-// 数が `TOGGLE_RULE_IDS` の素の要素数と一致しない 2 例を下で固定する。
-// `excessive-nesting` は `astSecurity` の一覧に載るが無条件に走るので数から
-// 外れ、`oxlint` は固定の rule_id 集合を持たない。
-
-// T-524: rule_id と 1 対 1 の toggle は 1 を返す
-#[test]
-fn rule_id_と_1_対_1_の_toggle_は_1_を返す() {
-    assert_eq!(toggle_rule_id_count("sensitiveFile"), Some(1));
-}
-
-// T-525: astSecurity は excessive-nesting を除いた数を返す
-#[test]
-fn ast_security_は_excessive_nesting_を除いた数を返す() {
-    assert_eq!(toggle_rule_id_count("astSecurity"), Some(14));
-}
-
-// T-526: security は 2 を返す
-#[test]
-fn security_は_2_を返す() {
-    assert_eq!(toggle_rule_id_count("security"), Some(2));
-}
-
 // T-527: oxlint は数を持たない値を返す
 #[test]
 fn oxlint_は数を持たない値を返す() {
     assert_eq!(toggle_rule_id_count("oxlint"), None);
+}
+
+// "security" rule_id は "security" toggle の一覧に載るが、
+// `analysis::ast_security::postmessage::check_post_message_wildcard` も同じ
+// rule_id を独立に発火するので、"security" toggle を切っても止まらない。
+
+// T-550: security は1を返す
+#[test]
+fn security_は1を返す() {
+    assert_eq!(toggle_rule_id_count("security"), Some(1));
+}
+
+// T-551: astSecurity は14を返す
+#[test]
+fn ast_security_は14を返す() {
+    assert_eq!(toggle_rule_id_count("astSecurity"), Some(14));
+}
+
+// T-552: rule_id と1対1の toggle は1を返す
+#[test]
+fn rule_id_と1対1の_toggle_は1を返す() {
+    assert_eq!(toggle_rule_id_count("sensitiveFile"), Some(1));
 }
 
 #[test]
