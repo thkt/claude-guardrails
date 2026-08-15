@@ -289,7 +289,7 @@ guardrails --json < tool-call.json
 
 > **BREAKING (v0.15+)**: the `GUARDRAILS_JSON=1` env from v0.14 is removed. Use `--json` instead.
 
-> **Do not add `--json` to your hook command.** stdout carries one document: with `--json` it is the envelope, otherwise it is the PreToolUse hook JSON that delivers advisory findings to the AI. Adding the flag to the hook silences that delivery. Use `--json` for tooling that reads guardrails directly.
+> **Adding `--json` to your hook command keeps advisory delivery working.** stdout still carries one document: with `--json` the envelope keys and `hookSpecificOutput` ride in the same object. Claude Code reads only `hookSpecificOutput`, and a tool parsing the envelope keeps reading `data` / `degraded` / `notes`.
 
 > **BREAKING (v0.15+)**: success output is wrapped in a `SuccessEnvelope` (`{ data, degraded, notes }`) per [ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md). The pre-envelope shape (`{ violations, decision, exit_code }`) is gone — the process exit code remains the source of truth for hook decisions.
 

@@ -309,17 +309,76 @@ fn blocking_を含む_write_では_stdout_が空のままになる() {
     );
 }
 
-// T-522: --json を付けた advisory の実行では stdout に envelope だけが出る
+// T-548: --json を付けた advisory の実行では envelope と hook JSON が同じ 1 つの
+// オブジェクトに載る
 #[test]
-fn json_を付けた_advisory_の実行では_stdout_に_envelope_だけが出る() {
+fn json_を付けた_advisory_の実行では_envelope_と_hook_json_が同居する() {
     let json = advisory_only_write();
     let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be one JSON document");
     assert!(parsed.get("data").is_some(), "expected envelope: {parsed}");
+    assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    let context = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext must be a string");
+    assert!(context.contains("dom-access"), "context: {context}");
+}
+
+// T-546: --json を付けた blocking の実行では hookSpecificOutput が載らない
+#[test]
+fn json_を付けた_blocking_の実行では_hookspecificoutput_が載らない() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "eval(userInput);"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be one JSON document");
     assert!(
         parsed.get("hookSpecificOutput").is_none(),
-        "the envelope owns stdout under --json: {parsed}"
+        "the exit-2 stderr path already reaches the agent: {parsed}"
+    );
+}
+
+// T-547: --json を付けた pass の実行では hookSpecificOutput が載らない
+#[test]
+fn json_を付けた_pass_の実行では_hookspecificoutput_が載らない() {
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "/src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with_args(json.to_string().as_bytes(), &["--json"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be one JSON document");
+    assert!(
+        parsed.get("hookSpecificOutput").is_none(),
+        "nothing to deliver to the agent: {parsed}"
+    );
+}
+
+// T-549: --json 無しの advisory の実行では stdout が hook JSON だけのままになる
+#[test]
+fn json_無しの_advisory_の実行では_stdout_が_hook_json_だけのままになる() {
+    let json = advisory_only_write();
+    let output = run_guardrails_json(&json.to_string());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be one JSON document");
+    assert!(parsed.get("hookSpecificOutput").is_some(), "{parsed}");
+    assert!(
+        parsed.get("data").is_none(),
+        "the envelope needs --json: {parsed}"
     );
 }

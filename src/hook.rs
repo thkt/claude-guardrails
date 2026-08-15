@@ -9,7 +9,8 @@ use crate::content::{get_file_and_content, ContentResolution, ToolInput, ToolNam
 use crate::hook_exit::HookExitCode;
 use crate::invariant::{degraded_note, run_invariant_pass};
 use crate::io::output::{
-    emit_hook_context, emit_human_violations, emit_json_if_enabled, render_error, show_config_hint,
+    emit_hook_context, emit_human_violations, emit_json_if_enabled, hook_specific_output,
+    render_error, show_config_hint,
 };
 use crate::io::stdin::parse_stdin;
 use crate::rules::{self, non_comment_lines, Violation, ViolationOrigin};
@@ -407,7 +408,7 @@ where
                 input.tool_name
             );
         }
-        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new());
+        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new(), None);
         return 0;
     };
 
@@ -417,7 +418,7 @@ where
     show_config_hint(&config);
 
     if !config.enabled {
-        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new());
+        emit_json_if_enabled(json_mode, &[], &[], notes, Vec::new(), None);
         return 0;
     }
 
@@ -471,8 +472,16 @@ where
 
     let blocking_refs: Vec<&Violation> = blocking.iter().collect();
     let warning_refs: Vec<&Violation> = warnings.iter().collect();
-    emit_hook_context(json_mode, &blocking_refs, &warning_refs, &notes);
-    emit_json_if_enabled(json_mode, &blocking_refs, &warning_refs, notes, info_notes);
+    let hook_output = hook_specific_output(&blocking_refs, &warning_refs, &notes);
+    emit_hook_context(json_mode, hook_output.as_ref());
+    emit_json_if_enabled(
+        json_mode,
+        &blocking_refs,
+        &warning_refs,
+        notes,
+        info_notes,
+        hook_output,
+    );
     emit_human_violations(&blocking_refs, &warning_refs);
     let outcome = if !blocking.is_empty() {
         HookExitCode::Blocking

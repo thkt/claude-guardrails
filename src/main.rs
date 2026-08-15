@@ -36,8 +36,8 @@ const SYSEXIT_USAGE: i32 = 64;
     after_help = "\
 Hook mode (no subcommand): reads tool input JSON from stdin and emits violations.
 Advisory findings also go to stdout as PreToolUse hook JSON, which is the channel
-the AI reads for a non-blocking run. With --json: the structured envelope takes
-stdout instead and the hook JSON is suppressed, so the AI sees neither.
+the AI reads for a non-blocking run. With --json: the structured envelope and
+that hook JSON ride in one object, so both channels stay readable.
 
 Exit codes (hook mode). Per the PreToolUse contract only exit 2 blocks the tool
 call; 0 allows and 1/64/70 are non-blocking (the tool proceeds). stderr reaches

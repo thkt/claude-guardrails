@@ -291,7 +291,7 @@ guardrails --json < tool-call.json
 
 > **BREAKING (v0.15+)**: v0.14 で利用できた `GUARDRAILS_JSON=1` env は削除されました。代わりに `--json` を使ってください。
 
-> **hook の `command` に `--json` を足さないでください。** stdout に出る document は 1 つで、`--json` のときは envelope、そうでないときは advisory を AI へ届ける PreToolUse hook JSON です。hook にフラグを足すとこの配送が止まります。`--json` は guardrails を直接読むツール向けです。
+> **hook の `command` に `--json` を足しても advisory は届きます。** stdout に出る document は 1 つのままで、`--json` のときは envelope のキーと `hookSpecificOutput` が同じオブジェクトに載ります。Claude Code は `hookSpecificOutput` だけを読み、envelope を読むツールは `data`/`degraded`/`notes` をそのまま読めます。
 
 > **BREAKING (v0.15+)**: 成功時の出力は[ADR-0005](docs/decisions/0005-json-envelope-and-sysexits-adoption.md)に従って `SuccessEnvelope` (`{ data, degraded, notes }`) で wrap されます。旧 schema (`{ violations, decision, exit_code }`) は廃止 — hook 判定はプロセス終了コードを参照してください。
 
