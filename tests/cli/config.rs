@@ -347,6 +347,69 @@ fn hook_mode_で_override_のnoteがstderrに出る() {
     );
 }
 
+// T-505: astSecurity を切る override を書いた repository で stderr の note に rule_id 数が出る
+#[test]
+fn astsecurity_を切る_overrideを書いたrepositoryでstderrのnoteにrule_id数が出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"astSecurity": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "export const x = 1;\n"
+        }
+    });
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。T-466 と同じ形で
+    // stderr を見る。
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("override disabled rule(s) [astSecurity]")
+            && stderr.contains("astSecurity: 14 rule_id(s)"),
+        "expected the override note on stderr to carry astSecurity's own count; got: {stderr:?}"
+    );
+}
+
+// T-506: eval を切る override の note が既存の書式のまま読める
+#[test]
+fn evalを切るoverrideのnoteが既存の書式のまま読める() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"eval": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "eval(userInput);\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("override disabled rule(s) [eval] for pattern(s) [src/allowed/**] (eval: 1 rule_id(s))"),
+        "expected the T-466 note format to still hold, now with the rule_id count appended; got: {stderr:?}"
+    );
+}
+
 /// `src/allowed/**` で eval を切る config と `src/allowed/esc -> ../protected`
 /// を持つ repository を組み、`TempDir` と実体の root を返す。`TempDir` を落とす
 /// とディレクトリごと消えるので、呼び出し側で束縛したまま保持する。

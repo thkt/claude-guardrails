@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::{OverrideEntry, ProjectRulesConfig};
-use crate::rules::{rule_id, Severity};
+use crate::rules::{rule_id, toggle_rule_id_count, Severity};
 use globset::Glob;
 
 fn make_violation(rule: &str, severity: Severity) -> Violation {
@@ -536,5 +536,153 @@ fn override_が_rule_を無効化すると無効化された_rule_名と一致�
             .any(|n| n.contains("eval") && n.contains(pattern)),
         "expected a note naming the disabled rule (\"eval\") and the matching override pattern \
          (\"{pattern}\"); got: {notes:?}"
+    );
+}
+
+// note の `[rule(s)]` / `[pattern(s)]` は角括弧で囲まれるので、数が角括弧の
+// 外に出ていることを、中身を除いた文字列で確認する。
+
+/// `[...]` の中身を取り除いた文字列。数が角括弧の外に置かれていることを、
+/// rule 名や pattern 文字列に紛れず確認するための helper。
+fn strip_bracketed(note: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    for c in note.chars() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth = (depth - 1).max(0),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+// T-502: astSecurity を切る override の note に rule_id 数が入る
+#[test]
+fn astsecurity_を切る_override_の_note_に_rule_id_数が入る() {
+    let file_path = "/src/app/api/users/route.ts";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig =
+        serde_json::from_str(r#"{"astSecurity": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(file_path).unwrap().compile_matcher()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
+
+    let expected_count =
+        toggle_rule_id_count("astSecurity").expect("astSecurity gates a fixed rule_id set");
+    let override_note = notes
+        .iter()
+        .find(|n| n.contains("astSecurity"))
+        .unwrap_or_else(|| panic!("expected an override note naming astSecurity; got: {notes:?}"));
+    assert!(
+        strip_bracketed(override_note).contains(&expected_count.to_string()),
+        "expected the stopped rule_id count ({expected_count}) outside the bracketed \
+         rule(s)/pattern(s) lists; got: {override_note}"
+    );
+}
+
+// T-523: 複数の toggle を切る override の note は toggle ごとに数を並べ、合計しない
+#[test]
+fn 複数の_toggle_を切る_override_の_note_は_toggle_ごとに数を並べる() {
+    let file_path = "/src/app.ts";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig =
+        serde_json::from_str(r#"{"astSecurity": false, "security": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(file_path).unwrap().compile_matcher()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("astSecurity"))
+        .unwrap_or_else(|| panic!("expected an override note; got: {notes:?}"));
+    assert!(note.contains("astSecurity: 14 rule_id(s)"), "got: {note}");
+    assert!(note.contains("security: 2 rule_id(s)"), "got: {note}");
+    // `security` の rule_id は registry 側と ast_security 側の両方から出るので、
+    // 14 + 2 を足した数は実際に止まる検査の数を上回る。
+    assert!(
+        !note.contains("16"),
+        "counts must not be summed; got: {note}"
+    );
+}
+
+// T-503: oxlint を切る override の note には数の代わりに外部 linter であることが出る
+#[test]
+fn oxlint_を切る_override_の_note_には数の代わりに外部_linter_であることが出る() {
+    let file_path = "/src/app.ts";
+    let pattern = "**/app.ts";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig = serde_json::from_str(r#"{"oxlint": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(pattern).unwrap().compile_matcher()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
+
+    assert_eq!(
+        toggle_rule_id_count("oxlint"),
+        None,
+        "precondition: oxlint delegates to an external linter run, not a fixed rule_id set"
+    );
+    let override_note = notes
+        .iter()
+        .find(|n| n.contains("oxlint"))
+        .unwrap_or_else(|| panic!("expected an override note naming oxlint; got: {notes:?}"));
+    assert!(
+        override_note.to_lowercase().contains("external linter"),
+        "expected the note to say oxlint is an external linter instead of a rule_id count; \
+         got: {override_note}"
+    );
+    assert!(
+        !strip_bracketed(override_note)
+            .chars()
+            .any(|c| c.is_ascii_digit()),
+        "oxlint gates no fixed rule_id set, so no digit count should appear outside the \
+         bracketed rule(s)/pattern(s) lists; got: {override_note}"
+    );
+}
+
+// T-504: rule_id と 1 対 1 の toggle では数が 1 と出る
+#[test]
+fn rule_id_と_1_対_1_の_toggle_では数が_1_と出る() {
+    let file_path = "/project/.env";
+    let mut config = Config::default();
+    let override_rules: ProjectRulesConfig =
+        serde_json::from_str(r#"{"sensitiveFile": false}"#).unwrap();
+    config.overrides = vec![OverrideEntry {
+        files: vec![Glob::new(file_path).unwrap().compile_matcher()],
+        rules: override_rules,
+    }];
+
+    let mut notes = Vec::new();
+    let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
+
+    let expected_count =
+        toggle_rule_id_count("sensitiveFile").expect("sensitiveFile gates a fixed rule_id set");
+    assert_eq!(
+        expected_count, 1,
+        "precondition: sensitiveFile is 1:1 with its rule_id (sensitive-file)"
+    );
+    let override_note = notes
+        .iter()
+        .find(|n| n.contains("sensitiveFile"))
+        .unwrap_or_else(|| {
+            panic!("expected an override note naming sensitiveFile; got: {notes:?}")
+        });
+    assert!(
+        strip_bracketed(override_note).contains('1'),
+        "expected the stopped rule_id count (1) outside the bracketed rule(s)/pattern(s) \
+         lists; got: {override_note}"
     );
 }

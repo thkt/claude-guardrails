@@ -1,5 +1,5 @@
 use crate::path_resolve::{self, Resolved};
-use crate::rules::Severity;
+use crate::rules::{toggle_rule_id_count, Severity};
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
@@ -462,13 +462,35 @@ impl Config {
             let disabled = rules.disabled_since(&before);
             if !disabled.is_empty() {
                 notes.push(format!(
-                    "override disabled rule(s) [{}] for pattern(s) [{}]",
+                    "override disabled rule(s) [{}] for pattern(s) [{}]{}",
                     disabled.join(", "),
                     matched_patterns.join(", "),
+                    Self::stopped_rule_id_summary(&disabled),
                 ));
             }
         }
         (rules, notes)
+    }
+
+    /// How many `rule_id`s each disabled toggle stops firing, appended outside
+    /// the bracketed lists so the existing note format stays greppable.
+    ///
+    /// Per toggle, never summed: `security` is emitted by the registry rule
+    /// and by `ast_security`'s postMessage path alike, so adding two toggles'
+    /// counts would claim more stopped checks than exist.
+    fn stopped_rule_id_summary(disabled: &[&str]) -> String {
+        let parts: Vec<String> = disabled
+            .iter()
+            .map(|&name| match toggle_rule_id_count(name) {
+                Some(count) => format!("{name}: {count} rule_id(s)"),
+                None => format!("{name}: external linter"),
+            })
+            .collect();
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", parts.join("; "))
+        }
     }
 }
 
