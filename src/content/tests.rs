@@ -736,11 +736,8 @@ fn degraded_reason_note_contains_actionable_text() {
     assert!(note.contains("edit 2"));
 }
 
-// T-530: an empty `new_string` is a legitimate deletion edit. On a `.json`
-// file, `reconstruct_structured_full` can still replay the deletion against
-// the on-disk content and produce the full post-edit document, so
-// `get_file_and_content` must not bail out just because the Edit snippet
-// itself is empty.
+// T-530: an empty snippet does not mean no content — `reconstruct_structured_full`
+// replays the deletion against the on-disk `.json` and produces the full document.
 #[test]
 fn new_string_が空の_edit_でも_jsonの_post_edit_全文が返る() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -766,20 +763,16 @@ fn new_string_が空の_edit_でも_jsonの_post_edit_全文が返る() {
     assert_eq!(target.structured_full.as_full_str(), Some("{ \"a\": 1 }"));
 }
 
-// T-531: an empty `file_path` names no target file at all, regardless of
-// whether content was supplied. Narrowing the early-return condition to
-// "content could not be obtained" must not stop treating a missing target as
-// an acquisition failure.
+// T-531: an empty `file_path` names no target, so the presence of content
+// cannot rescue it.
 #[test]
 fn file_path_が空の入力は従来どおり取得失敗として扱われる() {
     let input = make_write_input(Some(""), Some("const x = 1;"));
     assert!(get_file_and_content(&input, None).is_none());
 }
 
-// T-532: for a file type `reconstruct_structured_full` cannot rebuild (only
-// `.json` qualifies), an empty Edit snippet leaves no full content to fall
-// back on either. `get_file_and_content` must keep skipping this case exactly
-// as it did before the early-return condition was narrowed.
+// T-532: `reconstruct_structured_full` rebuilds `.json` alone, so a `.ts`
+// deletion has no full text to fall back on.
 #[test]
 fn 全文を再構成できない種類のファイルで_content_が空のときは従来どおり_skip_する() {
     let tmp = tempfile::TempDir::new().unwrap();

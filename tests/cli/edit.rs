@@ -170,15 +170,9 @@ fn old_string_not_found_envelope_carries_specific_note() {
     );
 }
 
-// T-535: `.guardrails.json` から行を削る空 `new_string` の Edit が exit 2 で止まる
-//
-// U-004 seam test: `config_guard` judges by `file_path` alone and never reads
-// `content` (src/rules/config_guard.rs), so a deletion edit on
-// `.guardrails.json` must block exactly like a non-empty-`new_string` edit
-// does (T-486). Mirrors `src/hook/tests.rs` T-533 at the CLI/binary level,
-// where the empty-`new_string` early return in `get_file_and_content`
-// (src/content.rs) and the config-load / partition / exit-code plumbing in
-// `run_hook_with_input` (src/hook.rs) are both live.
+// T-535: the unit-level counterpart (T-533) stops at `collect_violations` and
+// cannot see the exit code, which the config-load and partition plumbing in
+// `run_hook_with_input` decides.
 #[test]
 fn guardrails_json_から行を削る空_new_string_の_edit_が_exit_2で止まる() {
     let tmp = tmp_repo();
@@ -210,19 +204,16 @@ fn guardrails_json_から行を削る空_new_string_の_edit_が_exit_2で止ま
     );
 }
 
-// T-536: MultiEdit の全 edit が削除でも exit 2 で止まる
-//
-// Same seam as T-535, exercised through `resolve_multi_edit_content`
-// (src/content.rs): every `EditItem.new_string` is empty, so each step is a
-// pure deletion. `config_guard` still fires because it never inspects the
-// reconstructed content, only `file_path`.
+// T-536: `join_new_strings` joins with newlines, so two or more deleting edits
+// already yield non-empty content. A single deleting edit is the only MultiEdit
+// shape that reaches the same empty-content path as a bare Edit.
 #[test]
 fn multi_edit_の全_edit_が削除でも_exit_2で止まる() {
     let tmp = tmp_repo();
     let root = tmp.path().canonicalize().unwrap();
     fs::write(
         root.join(".guardrails.json"),
-        "{\n  \"overrides\": [],\n  \"rules\": { \"eval\": true }\n}\n",
+        "{\n  \"rules\": { \"eval\": true }\n}\n",
     )
     .unwrap();
     let json = serde_json::json!({
@@ -230,7 +221,6 @@ fn multi_edit_の全_edit_が削除でも_exit_2で止まる() {
         "tool_input": {
             "file_path": root.join(".guardrails.json"),
             "edits": [
-                { "old_string": "\n  \"overrides\": [],", "new_string": "" },
                 { "old_string": "\"rules\": { \"eval\": true }", "new_string": "" }
             ]
         }
