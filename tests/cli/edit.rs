@@ -205,8 +205,7 @@ fn guardrails_json_から行を削る空_new_string_の_edit_が_exit_2で止ま
 }
 
 // T-536: `join_new_strings` joins with newlines, so two or more deleting edits
-// already yield non-empty content. A single deleting edit is the only MultiEdit
-// shape that reaches the same empty-content path as a bare Edit.
+// already yield non-empty content and never reach the empty-content path.
 #[test]
 fn multi_edit_の全_edit_が削除でも_exit_2で止まる() {
     let tmp = tmp_repo();
@@ -235,6 +234,40 @@ fn multi_edit_の全_edit_が削除でも_exit_2で止まる() {
         output.status.code(),
         Some(2),
         "a MultiEdit whose every edit deletes via empty new_string must still block; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// T-537: `edits: []` writes nothing, yet `reconstruct_structured_full` returns
+// the unchanged `.json` as `Full`, so the target resolves and `config_guard`
+// judges the path. Blocking a call that rewrites zero bytes is the fail-closed
+// direction guardrails already takes for a no-op edit on a violating file.
+#[test]
+fn edits_が空配列の_multi_edit_も_exit_2で止まる() {
+    let tmp = tmp_repo();
+    let root = tmp.path().canonicalize().unwrap();
+    fs::write(
+        root.join(".guardrails.json"),
+        "{\n  \"rules\": { \"eval\": true }\n}\n",
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": root.join(".guardrails.json"),
+            "edits": []
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "an empty-edits MultiEdit on .guardrails.json must block; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }

@@ -240,6 +240,7 @@ issue #454 で報告された false negative を記録する。`get_file_and_con
 | 状態                                                          | 判定                                                                | `get_file_and_content` の挙動                                             |
 | ------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | 空 content (削除編集)                                         | snippet (`content` / `new_string`) が空                             | skip しない。`structured_full` が `Full` を持てば `ResolvedTarget` を返す |
+| no-op (`MultiEdit` の `edits: []`)                            | snippet が空、`structured_full` は無変更の全文                      | skip しない。path 単位の rule はこの形でも発火する                        |
 | 取得失敗 (`file_path` 欠落)                                   | `file_path` が空                                                    | 常に `None` (変更前と同じ)                                                |
 | 取得失敗 (snippet も `structured_full` も content を持たない) | `content.is_empty()` かつ `structured_full.as_full_str()` が `None` | `None`                                                                    |
 
@@ -250,5 +251,5 @@ issue #454 で報告された false negative を記録する。`get_file_and_con
 - `src/content.rs` (`get_file_and_content` の早期 return 条件)
 - `src/content/tests.rs` T-530 (`.json` の空 `new_string` 削除で `structured_full` から全文が返る), T-531 (`file_path` 空は従来どおり取得失敗), T-532 (`structured_full` が組めない種類のファイルで空 content は従来どおり skip)
 - `src/hook/tests.rs` T-533 (`.guardrails.json` の空 `new_string` 削除で `config_guard` が発火), T-534 (pin 済み `.json` の空 `new_string` 削除で invariant gate に届く)
-- `tests/cli/edit.rs` T-535 (`.guardrails.json` の空 `new_string` 削除が exit 2 で止まる), T-536 (単一 edit の MultiEdit も同じ経路で止まる)
+- `tests/cli/edit.rs` T-535 (`.guardrails.json` の空 `new_string` 削除が exit 2 で止まる), T-536 (単一 edit の MultiEdit も同じ経路で止まる), T-537 (`edits: []` の MultiEdit も止まる)
 - issue #454
