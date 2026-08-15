@@ -410,6 +410,72 @@ fn evalを切るoverrideのnoteが既存の書式のまま読める() {
     );
 }
 
+// T-556: security を切る override を書いた repository で stderr の note に1と出る
+#[test]
+fn securityを切るoverrideを書いたrepositoryでstderrのnoteに1と出る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"security": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "export const x = 1;\n"
+        }
+    });
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。T-505 と同じ形で
+    // stderr を見る。
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("override disabled rule(s) [security]")
+            && stderr.contains("security stops 1 rule_id(s)"),
+        "expected the override note on stderr to carry security's own count; got: {stderr:?}"
+    );
+}
+
+// T-557: astSecurity を切る override の note は14のまま
+#[test]
+fn astsecurityを切るoverrideのnoteは14のまま() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"overrides": [{"files": ["src/allowed/**"], "rules": {"astSecurity": false}}]}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/allowed/app.ts"),
+            "content": "export const x = 1;\n"
+        }
+    });
+    // `--json` を渡さない、Claude Code が hook を起動するときの形。T-505 と同じ形で
+    // stderr を見る。
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(&root),
+        &[("NO_COLOR", "1")],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("override disabled rule(s) [astSecurity]")
+            && stderr.contains("astSecurity stops 14 rule_id(s)"),
+        "expected astSecurity's count to stay 14 through the real binary; got: {stderr:?}"
+    );
+}
+
 // T-512: JSON envelope の notes に compile 失敗の note がちょうど 1 件入る
 #[test]
 fn json_envelope_の_notes_に_compile_失敗の_note_がちょうど_1_件入る() {
