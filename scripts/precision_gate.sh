@@ -3,6 +3,9 @@
 # precision harness snapshot worsens on head vs base:
 #   - per-rule FP rate (rules.<id>.fp / .tn), compared via integer
 #     cross-multiplication so corpus growth does not skew the ratio;
+#   - per-rule corpus sample count (rules.<id>.tp+fn+fp+tn), which must not
+#     shrink, so a PR that drops a rule's corpus fixtures fails instead of
+#     silently losing coverage;
 #   - the override-application axis (overrides.leak / .overreach), which
 #     must not increase (see src/hook/precision.rs OverrideMetrics doc).
 # `jq` must error (not read null) on any schema drift, and this script must
@@ -30,11 +33,18 @@ def rule_report:
     else
       ($h.fp // error("head rule \($rule): fp field missing")) as $hfp
       | ($h.tn // error("head rule \($rule): tn field missing")) as $htn
+      | ($h.tp // error("head rule \($rule): tp field missing")) as $htp
+      | ($h.fn // error("head rule \($rule): fn field missing")) as $hfn
       | ($br.fp // error("base rule \($rule): fp field missing")) as $bfp
       | ($br.tn // error("base rule \($rule): tn field missing")) as $btn
-      | if ($hfp * ($bfp + $btn)) > ($bfp * ($hfp + $htn)) then
+      | ($br.tp // error("base rule \($rule): tp field missing")) as $btp
+      | ($br.fn // error("base rule \($rule): fn field missing")) as $bfn
+      | (if ($hfp * ($bfp + $btn)) > ($bfp * ($hfp + $htn)) then
           "FAIL \($rule): FP rate worsened, base \($bfp)/\($bfp + $btn) -> head \($hfp)/\($hfp + $htn)"
-        else empty end
+        else empty end),
+      (if ($htp + $hfn + $hfp + $htn) < ($btp + $bfn + $bfp + $btn) then
+          "FAIL \($rule): corpus sample count shrank, base \($btp + $bfn + $bfp + $btn) -> head \($htp + $hfn + $hfp + $htn)"
+        else empty end)
     end;
 
 # base predating the override axis (U-002) is a bootstrap, not a failure:
