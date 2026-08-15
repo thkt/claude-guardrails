@@ -97,6 +97,11 @@ fn prefetch_json_emits_success_envelope_when_cached() {
     );
     assert_eq!(parsed["degraded"], false, "cached path is not degraded");
     assert_eq!(parsed["notes"], serde_json::json!([]));
+    // T-545: hook 用のキーは hook mode の envelope にだけ載る
+    assert!(
+        parsed.get("hookSpecificOutput").is_none(),
+        "prefetch has no agent advisory to deliver: {parsed}"
+    );
 }
 
 #[test]

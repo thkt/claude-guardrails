@@ -86,20 +86,41 @@ fn print_line(line: &str) {
     let _ = out.write_all(format!("{line}\n").as_bytes());
 }
 
-pub(crate) fn emit_json_if_enabled(
-    json_mode: bool,
-    blocking: &[&Violation],
-    warnings: &[&Violation],
-    notes: Vec<String>,
-    info_notes: Vec<String>,
-) {
+/// Claude Code ignores envelope keys it does not recognize, so `data` /
+/// `degraded` / `notes` survive alongside `hookSpecificOutput`.
+///
+/// A new top-level envelope key that the hook output also defines would be read
+/// as a hook directive instead of envelope content, so check the current
+/// `PreToolUse` output schema before adding one.
+#[derive(Serialize)]
+struct HookEnvelope<T: Serialize> {
+    #[serde(flatten)]
+    envelope: SuccessEnvelope<T>,
+    #[serde(rename = "hookSpecificOutput", skip_serializing_if = "Option::is_none")]
+    hook_specific_output: Option<HookSpecificOutput>,
+}
+
+/// `blocking` / `warnings` and `notes` / `info_notes` are two pairs of
+/// same-typed neighbours, so positional arguments let a swap compile while
+/// inverting the decision or the `degraded` flag.
+#[derive(Default)]
+pub(crate) struct JsonEmission<'a> {
+    pub blocking: &'a [&'a Violation],
+    pub warnings: &'a [&'a Violation],
+    pub notes: Vec<String>,
+    pub info_notes: Vec<String>,
+    pub hook_specific_output: Option<HookSpecificOutput>,
+}
+
+pub(crate) fn emit_json_if_enabled(json_mode: bool, emission: JsonEmission<'_>) {
     if !json_mode {
         return;
     }
-    let report = build_json_report(blocking, warnings);
-    print_json_line(&SuccessEnvelope::with_notes_and_info(
-        report, notes, info_notes,
-    ));
+    let report = build_json_report(emission.blocking, emission.warnings);
+    print_json_line(&HookEnvelope {
+        envelope: SuccessEnvelope::with_notes_and_info(report, emission.notes, emission.info_notes),
+        hook_specific_output: emission.hook_specific_output,
+    });
 }
 
 /// The hook runs on every edit, so an unbounded list would spend the agent's
@@ -107,7 +128,7 @@ pub(crate) fn emit_json_if_enabled(
 const MAX_CONTEXT_VIOLATIONS: usize = 10;
 
 #[derive(Serialize)]
-struct HookSpecificOutput {
+pub(crate) struct HookSpecificOutput {
     #[serde(rename = "hookEventName")]
     hook_event_name: &'static str,
     #[serde(rename = "additionalContext")]
@@ -115,35 +136,29 @@ struct HookSpecificOutput {
 }
 
 #[derive(Serialize)]
-struct HookOutput {
+struct HookOutput<'a> {
     #[serde(rename = "hookSpecificOutput")]
-    hook_specific_output: HookSpecificOutput,
+    hook_specific_output: &'a HookSpecificOutput,
 }
 
 pub(crate) fn emit_hook_context(
     json_mode: bool,
-    blocking: &[&Violation],
-    warnings: &[&Violation],
-    notes: &[String],
+    hook_specific_output: Option<&HookSpecificOutput>,
 ) {
-    if let Some(line) = hook_context_line(json_mode, blocking, warnings, notes) {
+    if let Some(line) = hook_context_line(json_mode, hook_specific_output) {
         print_line(&line);
     }
 }
 
-/// The stdout line carrying advisory text to the agent, or `None` when this
-/// run has nothing to deliver there.
+/// The advisory payload for the agent, `None` when this run has nothing to say.
 ///
-/// Under `--json` the envelope owns stdout, and two JSON documents on one
-/// stream parse as neither. A blocking run reaches the agent through the exit-2
-/// stderr path, and a stdout document there would change its classification.
-pub(crate) fn hook_context_line(
-    json_mode: bool,
+/// A blocking run reaches the agent through the exit-2 stderr path.
+pub(crate) fn hook_specific_output(
     blocking: &[&Violation],
     warnings: &[&Violation],
     notes: &[String],
-) -> Option<String> {
-    if json_mode || !blocking.is_empty() {
+) -> Option<HookSpecificOutput> {
+    if !blocking.is_empty() {
         return None;
     }
     if warnings.is_empty() && notes.is_empty() {
@@ -167,11 +182,23 @@ pub(crate) fn hook_context_line(
         let _ = write!(context, "guardrails: {note}");
     }
 
+    Some(HookSpecificOutput {
+        hook_event_name: "PreToolUse",
+        additional_context: context,
+    })
+}
+
+/// Under `--json` the envelope carries the same payload, and two JSON documents
+/// on one stream parse as neither.
+fn hook_context_line(
+    json_mode: bool,
+    hook_specific_output: Option<&HookSpecificOutput>,
+) -> Option<String> {
+    if json_mode {
+        return None;
+    }
     let output = HookOutput {
-        hook_specific_output: HookSpecificOutput {
-            hook_event_name: "PreToolUse",
-            additional_context: context,
-        },
+        hook_specific_output: hook_specific_output?,
     };
     Some(serde_json::to_string(&output).expect("hook context serialization is infallible"))
 }
@@ -205,12 +232,22 @@ mod tests {
         }
     }
 
+    fn context_line(
+        json_mode: bool,
+        blocking: &[&Violation],
+        warnings: &[&Violation],
+        notes: &[String],
+    ) -> Option<String> {
+        let output = hook_specific_output(blocking, warnings, notes);
+        hook_context_line(json_mode, output.as_ref())
+    }
+
     // T-516: advisory があるとき hook JSON の hookEventName が PreToolUse になる
     #[test]
     fn advisory_があるとき_hook_json_の_hookeventname_が_pretooluse_になる() {
         let v = warning("dom-access");
 
-        let line = hook_context_line(false, &[], &[&v], &[]).unwrap();
+        let line = context_line(false, &[], &[&v], &[]).unwrap();
 
         let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse");
@@ -227,15 +264,15 @@ mod tests {
         let b = warning("eval");
         let w = warning("dom-access");
 
-        assert!(hook_context_line(false, &[&b], &[&w], &[]).is_none());
+        assert!(context_line(false, &[&b], &[&w], &[]).is_none());
     }
 
-    // T-518: json_mode が true のとき hook JSON を組まない
+    // T-518: json_mode が true のとき単独の hook JSON 行を出さない
     #[test]
-    fn json_mode_が_true_のとき_hook_json_を組まない() {
+    fn json_mode_が_true_のとき単独の_hook_json_行を出さない() {
         let v = warning("dom-access");
 
-        assert!(hook_context_line(true, &[], &[&v], &[]).is_none());
+        assert!(context_line(true, &[], &[&v], &[]).is_none());
     }
 
     // T-519: advisory が上限を超えるとき文面に残件数が出る
@@ -246,7 +283,7 @@ mod tests {
             .collect();
         let refs: Vec<&Violation> = many.iter().collect();
 
-        let line = hook_context_line(false, &[], &refs, &[]).unwrap();
+        let line = context_line(false, &[], &refs, &[]).unwrap();
 
         let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
         let context = parsed["hookSpecificOutput"]["additionalContext"]
@@ -258,7 +295,7 @@ mod tests {
     // note だけでも hook JSON を組む
     #[test]
     fn note_だけでも_hook_json_を組む() {
-        let line = hook_context_line(false, &[], &[], &["config note".to_owned()]).unwrap();
+        let line = context_line(false, &[], &[], &["config note".to_owned()]).unwrap();
 
         assert!(line.contains("config note"), "line: {line}");
     }
@@ -266,7 +303,45 @@ mod tests {
     // 出すものが何も無ければ hook JSON を組まない
     #[test]
     fn 出すものが何も無ければ_hook_json_を組まない() {
-        assert!(hook_context_line(false, &[], &[], &[]).is_none());
+        assert!(context_line(false, &[], &[], &[]).is_none());
+    }
+
+    fn envelope_json(hook_specific_output: Option<HookSpecificOutput>) -> String {
+        serde_json::to_string(&HookEnvelope {
+            envelope: SuccessEnvelope::with_notes_and_info(
+                serde_json::json!({"violations": []}),
+                Vec::new(),
+                Vec::new(),
+            ),
+            hook_specific_output,
+        })
+        .unwrap()
+    }
+
+    // T-543: hook payload があるとき envelope と同じオブジェクトに載る
+    #[test]
+    fn hook_payload_があるとき_envelope_と同じオブジェクトに載る() {
+        let v = warning("dom-access");
+        let json = envelope_json(hook_specific_output(&[], &[&v], &[]));
+
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.get("data").is_some(), "json: {json}");
+        assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    }
+
+    // T-544: hook payload の有無で envelope のキー順が変わらない
+    #[test]
+    fn hook_payload_の有無で_envelope_のキー順が変わらない() {
+        // 生の文字列で見る。`serde_json::Value` は BTreeMap でキーを並べ替えるため、
+        // parse したあとの assert では順序を観測できない。
+        let without = envelope_json(None);
+        let v = warning("dom-access");
+        let with = envelope_json(hook_specific_output(&[], &[&v], &[]));
+
+        let prefix = r#"{"data":{"violations":[]},"degraded":false,"notes":[]"#;
+        assert_eq!(without, format!("{prefix}}}"), "without: {without}");
+        assert!(with.starts_with(prefix), "with: {with}");
+        assert!(with.contains(r#","hookSpecificOutput":{"#), "with: {with}");
     }
 
     #[test]

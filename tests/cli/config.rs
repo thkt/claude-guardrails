@@ -514,6 +514,16 @@ fn json_envelope_の_notes_に_compile_失敗の_note_がちょうど_1_件入�
         matching, 1,
         "expected exactly one note naming the uncompilable override glob \"src/[invalid\"; got: {notes:?}"
     );
+    // T-550: 同じ note が `notes` と `additionalContext` の両方に届く。envelope を
+    // 読むツールは配列を、AI agent は文面を読むため、片方だけでは足りない。
+    let context = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext must carry the note to the agent");
+    assert_eq!(
+        context,
+        "guardrails: override entry dropped: glob pattern \"src/[invalid\" failed to compile",
+        "the agent reads the same note as prose; got: {context}"
+    );
 }
 
 // T-513: `--json` 無しの hook mode でも同じ note が stderr に 1 行だけ出る

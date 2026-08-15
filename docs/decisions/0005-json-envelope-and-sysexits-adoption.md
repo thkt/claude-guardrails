@@ -8,15 +8,15 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-guardrails は Claude Code の PreToolUse hook として動作する CLI で、出力経路は (a) stderr に human-readable、(b) stdout に構造化 JSON、(c) terminal exit code の 3 つを持つ。stdout は `--json` のとき envelope を、hook mode で advisory があるとき PreToolUse hook JSON を運ぶ (#439、両者は排他)。AI agent が hook 結果を機械的に解釈する際、`error.code` (JSON) と exit code (terminal) が同じ分類軸を表裏で表現すれば、retry policy / branch logic / 報告生成を一貫したロジックで書ける。
+guardrails は Claude Code の PreToolUse hook として動作する CLI で、出力経路は (a) stderr に human-readable、(b) stdout に構造化 JSON、(c) terminal exit code の 3 つを持つ。stdout は hook mode で advisory があるとき PreToolUse hook JSON を運び、`--json` のときは envelope のキーと `hookSpecificOutput` を 1 つのオブジェクトに同居させる (#439、#448)。AI agent が hook 結果を機械的に解釈する際、`error.code` (JSON) と exit code (terminal) が同じ分類軸を表裏で表現すれば、retry policy/branch logic/報告生成を一貫したロジックで書ける。
 
-過去、guardrails は exit code を `0` / `1` のみで運用し、JSON 出力は pre-envelope 形 (`{ violations, decision, exit_code }`) を返していた。これでは:
+過去、guardrails は exit code を `0`/`1` のみで運用し、JSON 出力は pre-envelope 形 (`{ violations, decision, exit_code }`) を返していた。これでは:
 
 - AI agent が「input が壊れていた」「panic で内部 error」「lint pass」「lint fail」を exit code から区別できない (全部 1)
 - JSON 出力に degradation signal (oxlint 不在等) を載せる場所がない
 - hook 入力契約違反と security violation が同じ exit code だと、retry すべきか判断不能
 
-`SuccessEnvelope` / `ErrorEnvelope` shape を導入し、hook protocol (0=allow, 1=advisory, 2=blocking) と sysexits.h を組み合わせた 5 種 exit code 体系に再編する必要があった。同時に prefetch subcommand (oxlint 取得) は hook protocol の外なので別 4 種を採用する mixed scheme になっている。
+`SuccessEnvelope`/`ErrorEnvelope` shape を導入し、hook protocol (0=allow, 1=advisory, 2=blocking) と sysexits.h を組み合わせた 5 種 exit code 体系に再編する必要があった。同時に prefetch subcommand (oxlint 取得) は hook protocol の外なので別 4 種を採用する mixed scheme になっている。
 
 ## Decision Drivers
 
@@ -43,9 +43,7 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 
 ```json
 {
-  "data": {
-    /* command-specific payload */
-  },
+  "data": {/* command-specific payload */},
   "degraded": false,
   "notes": []
 }
@@ -56,6 +54,12 @@ guardrails は Claude Code の PreToolUse hook として動作する CLI で、�
 | `data`     | object   | Yes      | command-specific schema は呼び出し側で定義 (hook mode は `data.violations` + `data.decision`)。diff-aware mode on では各 violation に `origin` field (`"introduced"` / `"preexisting"`) が付き、off では field 自体が省略されバイト互換 ([ADR-0020](0020-diff-aware-demotion-of-preexisting-violations.md)) |
 | `degraded` | bool     | Yes      | 機能低下フラグ。oxlint 不在や snippet fallback で `true`。機能低下 note のみが立て、diff-aware の降格件数報告 note では立たない                                                                                                                                                                             |
 | `notes`    | string[] | Yes      | 機能低下の理由・補足。diff-aware on で第 2 pass が完走した場合は降格件数報告が末尾に続く。`degraded: true` ⇔ 機能低下 note が 1 件以上。降格件数報告のみの notes は non-empty でも `degraded: false`                                                                                                        |
+
+hook mode で advisory を AI へ届ける実行では、この 3 キーの後ろに `hookSpecificOutput` が続く (#448)。
+
+| Field                | Type   | Required | Notes                                                                                                                                                                      |
+| -------------------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hookSpecificOutput` | object | No       | Claude Code の PreToolUse hook 契約が定める `{ hookEventName, additionalContext }`。hook mode の advisory 実行にだけ載る。blocking と pass の実行、prefetch では省略される |
 
 エラー時 (`ErrorEnvelope` in `src/io/envelope.rs`):
 
@@ -108,7 +112,7 @@ prefetch (`guardrails prefetch`) は hook の外で oxlint 取得を行う。hoo
 hook mode と prefetch subcommand で exit code 体系が違うのは intentional。
 
 - hook mode (0/1/2/64/70): Claude Code hook protocol が 0/1/2 で挙動分岐するため。1/2 は sysexits.h 外 (convention)、64/70 は sysexits.h 由来。
-- prefetch (0/64/65/74): hook の外なので 1/2 を使わない。sysexits.h の `EX_USAGE` / `EX_DATAERR` / `EX_IOERR` を素直に採用。
+- prefetch (0/64/65/74): hook の外なので 1/2 を使わない。sysexits.h の `EX_USAGE`/`EX_DATAERR`/`EX_IOERR` を素直に採用。
 
 ### sysexits 9 種 → 5 種 / 4 種への縮約根拠
 
@@ -144,18 +148,20 @@ prefetch は外部 IO 中心 (download + cache) なので `EX_DATAERR` (65) と 
 
 envelope schema と exit code は次のテストで pin されている。
 
-| 対象                                             | テスト                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SuccessEnvelope` shape                          | `success_envelope_ok_is_not_degraded` / `success_envelope_with_notes_sets_degraded` / `success_envelope_with_empty_notes_is_not_degraded` / `success_envelope_with_info_only_is_not_degraded` / `success_envelope_orders_degradations_before_info` (`src/io/envelope.rs`) |
-| `ErrorEnvelope` shape                            | `error_envelope_wraps_payload_under_error_key` / `error_payload_omits_optional_next_step` / `error_payload_omits_empty_candidates` / `error_payload_includes_present_optional_fields` (`src/io/envelope.rs`)                                                              |
-| `error.code` SCREAMING_SNAKE_CASE                | `error_code_serializes_screaming_snake_case` (`src/io/envelope.rs`)                                                                                                                                                                                                       |
-| `error.code` ↔ sysexits 数値                     | `error_code_exit_code_matches_sysexits_h` (`src/io/envelope.rs`)                                                                                                                                                                                                          |
-| Hook 5 種 exit code                              | T-001 `pass_is_zero` / T-002 `advisory_is_one` / T-003 `blocking_is_two` / T-004 `input_error_is_sysexits_usage` / T-005 `internal_is_sysexits_software` (`src/hook_exit.rs`)                                                                                             |
-| Hook mode JSON envelope (e2e)                    | `tests/cli/json_envelope.rs` の `--json` envelope 検証群                                                                                                                                                                                                                  |
-| Hook mode の stdout 排他 (e2e)                   | `advisory_だけの_write_では_stdout_の_hook_json_に_rule_id_が含まれる` / `blocking_を含む_write_では_stdout_が空のままになる` / `json_を付けた_advisory_の実行では_stdout_に_envelope_だけが出る` (`tests/cli/json_envelope.rs`)                                          |
-| violation payload の `origin` field (diff-aware) | `format_json_report_omits_origin_when_absent` / `format_json_report_emits_origin_when_present` (`src/io/reporter.rs`)                                                                                                                                                     |
+| 対象                                             | テスト                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SuccessEnvelope` shape                          | `success_envelope_ok_is_not_degraded` / `success_envelope_with_notes_sets_degraded` / `success_envelope_with_empty_notes_is_not_degraded` / `success_envelope_with_info_only_is_not_degraded` / `success_envelope_orders_degradations_before_info` (`src/io/envelope.rs`)                                              |
+| `ErrorEnvelope` shape                            | `error_envelope_wraps_payload_under_error_key` / `error_payload_omits_optional_next_step` / `error_payload_omits_empty_candidates` / `error_payload_includes_present_optional_fields` (`src/io/envelope.rs`)                                                                                                           |
+| `error.code` SCREAMING_SNAKE_CASE                | `error_code_serializes_screaming_snake_case` (`src/io/envelope.rs`)                                                                                                                                                                                                                                                    |
+| `error.code` ↔ sysexits 数値                     | `error_code_exit_code_matches_sysexits_h` (`src/io/envelope.rs`)                                                                                                                                                                                                                                                       |
+| Hook 5 種 exit code                              | T-001 `pass_is_zero` / T-002 `advisory_is_one` / T-003 `blocking_is_two` / T-004 `input_error_is_sysexits_usage` / T-005 `internal_is_sysexits_software` (`src/hook_exit.rs`)                                                                                                                                          |
+| Hook mode JSON envelope (e2e)                    | `tests/cli/json_envelope.rs` の `--json` envelope 検証群                                                                                                                                                                                                                                                               |
+| Hook mode の stdout 1 document (e2e)             | `advisory_だけの_write_では_stdout_の_hook_json_に_rule_id_が含まれる` / `blocking_を含む_write_では_stdout_が空のままになる` / `json_無しの_advisory_の実行では_stdout_が_hook_json_だけのままになる` (`tests/cli/json_envelope.rs`)                                                                                  |
+| `hookSpecificOutput` の同居と省略 (e2e)          | `json_を付けた_advisory_の実行では_envelope_と_hook_json_が同居する` / `json_を付けた_blocking_の実行では_hookspecificoutput_が載らない` / `json_を付けた_pass_の実行では_hookspecificoutput_が載らない` (`tests/cli/json_envelope.rs`) / `prefetch_json_emits_success_envelope_when_cached` (`tests/cli/prefetch.rs`) |
+| `hookSpecificOutput` 同居時のキー順              | `hook_payload_があるとき_envelope_と同じオブジェクトに載る` / `hook_payload_の有無で_envelope_のキー順が変わらない` (`src/io/output.rs`)                                                                                                                                                                               |
+| violation payload の `origin` field (diff-aware) | `format_json_report_omits_origin_when_absent` / `format_json_report_emits_origin_when_present` (`src/io/reporter.rs`)                                                                                                                                                                                                  |
 
-新規 exit code / envelope field 追加 PR では、上記テストの新規追加または既存 update を description に明示する。
+新規 exit code/envelope field 追加 PR では、上記テストの新規追加または既存 update を description に明示する。
 
 ## Pros and Cons of the Options
 
@@ -169,14 +175,14 @@ envelope schema と exit code は次のテストで pin されている。
 ### pre-envelope 形維持 + exit code 0/1 のみ
 
 - Good, 既存実装変更ゼロ
-- Bad, AI agent が input 不正 / panic / lint fail を区別できない
+- Bad, AI agent が input 不正/panic/lint fail を区別できない
 - Bad, degradation signal を載せる場所がない
 
 ### sysexits.h フル準拠 (9 種以上)
 
 - Good, scout 等の他 CLI と exit code 解釈を共有できる
 - Bad, hook protocol の 1/2 と衝突する (1 は EX_OK の隣で意味不明、2 はそもそも sysexits.h 範囲外)
-- Bad, 75 TEMP_FAILURE / 124 TIMEOUT が hook 経路で発生しない (使われない code がノイズ)
+- Bad, 75 TEMP_FAILURE/124 TIMEOUT が hook 経路で発生しない (使われない code がノイズ)
 
 ### hook と prefetch で 1 つの exit code 体系を兼用
 
@@ -206,26 +212,26 @@ envelope schema と exit code は次のテストで pin されている。
 ### Reassessment Triggers
 
 - `error.retryable: true` を出すべき失敗パスが発生した場合 (例: 外部 secret store fetch を hook 内で行うようになった等)、本 ADR を改訂
-- hook mode で 65 `DATA_ERROR` / 74 `IO_ERROR` を envelope の `code` ではなく terminal exit code として区別したい実需が出た場合、5 種拡張を検討
+- hook mode で 65 `DATA_ERROR`/74 `IO_ERROR` を envelope の `code` ではなく terminal exit code として区別したい実需が出た場合、5 種拡張を検討
 - prefetch が hook protocol の 1/2 を必要とするようになった場合 (現状非該当)、mixed scheme を統一する方向で本 ADR を改訂
 - `data` payload schema の変更 (例: `decision` field の値拡張) が出た場合、本 ADR の Envelope shapes セクションを update
 
 ### References
 
-- `src/io/envelope.rs` — `SuccessEnvelope` / `ErrorEnvelope` / `ErrorCode` / `ErrorPayload` 実装
+- `src/io/envelope.rs` — `SuccessEnvelope`/`ErrorEnvelope`/`ErrorCode`/`ErrorPayload` 実装
 - `src/hook_exit.rs` — `HookExitCode` 実装と sysexits.h 由来 doc コメント
 - `src/io/stdin.rs` — `parse_stdin`
 - `src/hook.rs` — `run_hook`
 - `src/main.rs` — `run_prefetch`
-- `src/io/output.rs` — `emit_human_violations` / `emit_json_if_enabled` / `emit_error_envelope_if_enabled` 関数群
-- `README.md` の Exit Codes / JSON Output Mode セクション
+- `src/io/output.rs` — `emit_human_violations`/`emit_json_if_enabled`/`emit_error_envelope_if_enabled` 関数群
+- `README.md` の Exit Codes/JSON Output Mode セクション
 - dotclaude ADR-0065 "scout JSON output schema and sysexits exit code policy" (inspiration; lives in a private dotclaude store, not navigable from this repo)
 - dotclaude ADR-0066 "CLI exit code policy grouped by error topology" (inspiration; private dotclaude store) — guardrails is a hook tool consuming stdin JSON and emitting violations on stderr; its exit code map follows the hook-tool grouping defined there.
 - Standards: sysexits.h (`man 3 sysexits`)
 
 ## Amendment 2026-06-30: exit 64/70 は block しない、oversized stdin は exit 2 に倒す (#375)
 
-本 ADR 初版は hook mode exit code table の「Claude Code hook 挙動」列で 64 (`InputError`) と 70 (`Internal`) を block と記録していた。これは PreToolUse 契約の誤読である。公式 hooks ドキュメント (https://code.claude.com/docs/en/hooks.md) によれば、PreToolUse で tool 呼び出しを止めるのは exit 2 のみ。0 は allow、それ以外の非ゼロ (1 / 64 / 70) は non-blocking error として stderr を transcript に出しつつ tool を続行させる。
+本 ADR 初版は hook mode exit code table の「Claude Code hook 挙動」列で 64 (`InputError`) と 70 (`Internal`) を block と記録していた。これは PreToolUse 契約の誤読である。公式 hooks ドキュメント (https://code.claude.com/docs/en/hooks.md) によれば、PreToolUse で tool 呼び出しを止めるのは exit 2 のみ。0 は allow、それ以外の非ゼロ (1/64/70) は non-blocking error として stderr を transcript に出しつつ tool を続行させる。
 
 帰結として、初版の意図 (oversized payload を 64 で fail-closed にして bypass を塞ぐ、ADR-0004 リソース境界軸) は実際には fail-open になっていた。10 MB 超の stdin は exit 64 を返しても tool が通り、guardrails の検査を素通りできた。
 
@@ -239,11 +245,11 @@ envelope schema と exit code は次のテストで pin されている。
 
 exit 2 はこれまで blocking violation (`SuccessEnvelope`, `decision=block`) 専用だった。`Oversized` を 2 に倒すことで、exit 2 は「閾値超過の violation」または「fail-closed な input error (`ErrorEnvelope`, `DATA_ERROR`)」のいずれかを運ぶ。`ErrorEnvelope` は引き続き stdout に乗り、exit code のみ 64 から 2 へ変わる。`error.code` ↔ exit code の 1:1 対応は崩れる (DATA_ERROR が 64 と 2 の両方に現れうる) が、これは fail-mode を exit code の真実源とする設計判断を優先した結果である。
 
-`Internal` (70, panic / invariant 違反) も同じ契約で block しない。ADR-0004 invariant 軸が意図する fail-closed と乖離するが、これは stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue #379 で追跡する。`pin` は `tests/cli/dispatch.rs` `oversized_input_blocks_with_exit_two` / `tests/cli/json_envelope.rs` `json_mode_oversized_input_emits_error_envelope` / `src/io/stdin.rs` `oversized_is_fail_closed_blocking_exit` / `invalid_json_and_io_are_fail_open_input_error_exit`。
+`Internal` (70, panic/invariant 違反) も同じ契約で block しない。ADR-0004 invariant 軸が意図する fail-closed と乖離するが、これは stdin parse 軸とは別の失敗軸であり、本 #375 の scope 外として別 issue #379 で追跡する。`pin` は `tests/cli/dispatch.rs` `oversized_input_blocks_with_exit_two`/`tests/cli/json_envelope.rs` `json_mode_oversized_input_emits_error_envelope`/`src/io/stdin.rs` `oversized_is_fail_closed_blocking_exit`/`invalid_json_and_io_are_fail_open_input_error_exit`。
 
 ## Amendment 2026-06-30: hook mode の panic を exit 2 に倒す (#379)
 
-#375 Amendment が残した invariant 違反軸の fail-open を是正する。hook mode の panic は検査が途中で落ちたことを意味し、その content の security pass が完了していない。exit 70 (non-block) のままだと未検査の編集が素通りするため、hook mode の panic を exit 2 (block) に倒す。これで上表 row 70 の「panic / invariant violation」は hook mode では成立せず、exit 70 は subcommand (prefetch / ast-child) の内部 panic 専用になる。
+#375 Amendment が残した invariant 違反軸の fail-open を是正する。hook mode の panic は検査が途中で落ちたことを意味し、その content の security pass が完了していない。exit 70 (non-block) のままだと未検査の編集が素通りするため、hook mode の panic を exit 2 (block) に倒す。これで上表 row 70 の「panic/invariant violation」は hook mode では成立せず、exit 70 は subcommand (prefetch/ast-child) の内部 panic 専用になる。
 
 panic の exit code は subcommand 別に分岐する (`src/main.rs` `panic_exit_code`)。
 
@@ -253,4 +259,14 @@ panic の exit code は subcommand 別に分岐する (`src/main.rs` `panic_exit
 | `prefetch`       | 70 (`Internal`) | hook ではなく cache warming。block に意味がなく内部エラーを 70 で表す              |
 | `__ast-child`    | 70 (`Internal`) | 親 `spawn_ast_child` が child の非 0/1 exit を block に倒すため child 側は 70 で可 |
 
-`pin` は `src/main.rs` `hook_mode_panic_fails_closed_with_blocking_exit` / `subcommand_panic_keeps_internal_exit`。詳細根拠は ADR-0004 Amendment 2026-06-30 #379。
+`pin` は `src/main.rs` `hook_mode_panic_fails_closed_with_blocking_exit`/`subcommand_panic_keeps_internal_exit`。詳細根拠は ADR-0004 Amendment 2026-06-30 #379。
+
+## Amendment 2026-08-16: envelope と `hookSpecificOutput` の排他を廃止 (#448)
+
+#439 は advisory を stdout の `hookSpecificOutput` JSON として AI agent へ届ける経路を追加した際、`--json` の envelope とその hook JSON を stdout 上で排他に設計した。`json_mode` が真のとき `hook_context_line` (`src/io/output.rs`) は `None` を返し、envelope だけが stdout に乗っていた。
+
+この設計は #439 自身が解決した問題を再発させていた。hook の command に `--json` を足した利用者は envelope だけを受け取り、`hookSpecificOutput` が乗らないため、advisory が AI agent に届かなかった。
+
+修正 (#448) は両者を 1 つの JSON オブジェクトへ同居させる。`SuccessEnvelope` を `#[serde(flatten)]` した `HookEnvelope` (`src/io/output.rs`) が `hookSpecificOutput` を optional field として持つ。`hook_specific_output` を `json_mode` 判定を持たない純粋関数として切り出し、envelope 経路と非 `--json` 経路の両方が同じ payload を組む。blocking と pass の実行では payload が `None` になり、キーごと省略される。stdout に乗る JSON document は 1 行 1 document のまま変わらない。
+
+上の Envelope shapes と Confirmation の各表は、本 amendment 後の形をすでに反映している。`pin` は `src/io/output.rs` `hook_payload_があるとき_envelope_と同じオブジェクトに載る`/`hook_payload_の有無で_envelope_のキー順が変わらない`/`tests/cli/json_envelope.rs` `json_を付けた_advisory_の実行では_envelope_と_hook_json_が同居する`/`json_を付けた_blocking_の実行では_hookspecificoutput_が載らない`/`json_を付けた_pass_の実行では_hookspecificoutput_が載らない`/`json_無しの_advisory_の実行では_stdout_が_hook_json_だけのままになる`/`tests/cli/prefetch.rs` `prefetch_json_emits_success_envelope_when_cached`/`tests/cli/config.rs` `json_envelope_の_notes_に_compile_失敗の_note_がちょうど_1_件入る` (degraded note が `notes` と `additionalContext` の両方に届くことを固定する)。
