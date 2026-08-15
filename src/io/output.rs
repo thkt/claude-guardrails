@@ -89,6 +89,11 @@ fn print_line(line: &str) {
 /// The envelope plus the hook payload in one document. Claude Code reads
 /// `hookSpecificOutput` and ignores the envelope keys, so a tool parsing the
 /// envelope keeps reading `data` / `degraded` / `notes` unchanged.
+///
+/// The flatten also puts both namespaces in one object. A new top-level
+/// envelope key that Claude Code's hook output also defines would be read as a
+/// hook directive instead of envelope content, so check the current `PreToolUse`
+/// output schema in the Claude Code hooks reference before adding one.
 #[derive(Serialize)]
 struct HookEnvelope<T: Serialize> {
     #[serde(flatten)]
