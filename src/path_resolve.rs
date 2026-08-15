@@ -30,7 +30,7 @@ pub(crate) fn resolve_under_root(file_path: &Path, root: &Path) -> Option<Resolv
     };
 
     let lexical = fold_parent_dirs(&absolute);
-    let resolved = follow_symlinks(&lexical, &root);
+    let resolved = follow_symlinks(&lexical);
     let relative = resolved.strip_prefix(&root).ok()?.to_path_buf();
 
     Some(Resolved {
@@ -62,10 +62,9 @@ fn fold_parent_dirs(absolute: &Path) -> PathBuf {
 /// The components below the nearest existing ancestor are rejoined unresolved:
 /// they are about to be created, so none of them can be a symlink today.
 ///
-/// The walk stops at `root` rather than climbing past it. A path outside the
-/// repository is rejected by `strip_prefix` regardless, and canonicalizing it
-/// would stat directories the repository does not own.
-fn follow_symlinks(lexical: &Path, root: &Path) -> PathBuf {
+/// The walk is not confined to `root`: a spelling outside it can still resolve
+/// inside it. What lands outside is rejected by `strip_prefix` afterwards.
+fn follow_symlinks(lexical: &Path) -> PathBuf {
     if let Ok(canonical) = fs::canonicalize(lexical) {
         return canonical;
     }
@@ -73,9 +72,6 @@ fn follow_symlinks(lexical: &Path, root: &Path) -> PathBuf {
     let mut below: Vec<OsString> = Vec::new();
     let mut current = lexical;
     while let (Some(parent), Some(name)) = (current.parent(), current.file_name()) {
-        if !parent.starts_with(root) {
-            break;
-        }
         below.push(name.to_os_string());
         if let Ok(canonical_parent) = fs::canonicalize(parent) {
             let mut resolved = canonical_parent;

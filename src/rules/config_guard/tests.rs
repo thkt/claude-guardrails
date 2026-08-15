@@ -48,3 +48,18 @@ fn 末尾が一致するだけの別名ファイルでは発火しない() {
 fn git_root_が無いときは発火しない() {
     assert!(check(".guardrails.json", None).is_empty());
 }
+
+// T-528: symlink 経由で綴った設定ファイルのパスでも発火する
+#[test]
+fn symlink_経由で綴った設定ファイルのパスでも発火する() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let spelled = root.join("link").join("..").join(GUARDRAILS_CONFIG_FILE);
+    std::os::unix::fs::symlink(&root, root.join("link")).unwrap();
+
+    // `link` は root 自身を指すので、綴りを畳むと root 直下の設定ファイルになる。
+    let v = check(spelled.to_str().unwrap(), Some(&root));
+
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(v[0].severity, Severity::Critical);
+}

@@ -66,6 +66,8 @@ entry 単位の失敗は `Config::compile_override_entry` (`src/config.rs`) が 
 - Bad: hook が判定してから write syscall が走るまでの間に symlink を差し替える競合 (TOCTOU) は塞げない。PreToolUse hook は書き込み前に 1 回しか呼ばれず、symlink の作成自体も Bash 経由なら hook を通らない。この設計が塞ぐのは、1 回の綴りに対する静的な誤マッチに限る
 - Bad: repository 内に symlink を置いている利用者は、override の当たり方が変わる。`packages/web/src` が別ディレクトリを指す monorepo では、`packages/web/**` の override が解決後のパスに当たらなくなる。note で気付ける形にしてあるが、config を書き直す必要は残る
 - Good: `configGuard` は override の適用対象から外れる (#433)。`RulesConfig::apply_path_overrides` が override 適用後に値を戻すため、`files: ["**"]` で `configGuard: false` を書いた entry があっても設定ファイルへの編集は止まる。`rules` に直接書く無効化は人の判断として残る
+- Good: `configGuard` の照合も `resolve_under_root` を通る (#455)。生の等価比較では、git root が `env::current_dir()` 由来で解決済みなのに `file_path` は綴りのままなので、symlink 経由の綴りが照合を外していた
+- Note: `resolve_under_root` の祖先探索は root で打ち切らない。root の外を通る綴りでも解決先が root 内に着くことがあり、途中で止めると解決できないまま照合が外れる。root の外に着いたものは `strip_prefix` が落とす
 - Bad: 設定ファイルへの編集を止められるのは Write/Edit/MultiEdit の経路だけ。guardrails はこの 3 つの tool input しか受け取らないため、Bash 経由の `sed -i` やリダイレクトは rule に到達しない
 - Note: `src/invariant.rs` の `canonical_relative_key`/`canonical_path` は同じ問題を別実装で解いたままになっている。統合は backlog。invariant 側の fallback は raw path での `strip_prefix` で、`..` を畳み込まないため override へそのまま持ち込むと traversal 対策が緩む。doc が明記する「raw path 版より厳しくならない」契約も変わるため、契約変更の pin を足したうえで別 PR にする
 

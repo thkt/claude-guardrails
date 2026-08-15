@@ -101,3 +101,20 @@ fn 相対パスは_root_へ_join_してから解決される() {
     assert_eq!(resolved.relative, Path::new("src/app.ts"));
     assert!(!resolved.moved);
 }
+
+// T-529: root の外の綴りでも、解決先が root 内なら root 相対パスを返す
+#[test]
+fn root_の外の綴りでも解決先が_root_内なら_root_相対パスを返す() {
+    let tmp = tmp_root();
+    let root = real_root(&tmp);
+    fs::create_dir_all(root.join("src")).unwrap();
+    let outside = tmp.path().parent().unwrap().join("gr-outside-link");
+    let _ = fs::remove_file(&outside);
+    symlink(&root, &outside).unwrap();
+
+    // 綴りは root の外を通るが、symlink を辿ると root 直下に着く。
+    let resolved = resolve_under_root(&outside.join("src/app.ts"), &root).unwrap();
+
+    assert_eq!(resolved.relative, Path::new("src/app.ts"));
+    fs::remove_file(&outside).unwrap();
+}

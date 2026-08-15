@@ -5,18 +5,24 @@
 
 use super::{rule_id, Severity, Violation};
 use crate::config::{GUARDRAILS_CONFIG_FILE, LEGACY_CONFIG_FILE, TOOLS_CONFIG_FILE};
+use crate::path_resolve::resolve_under_root;
 use std::path::Path;
 
-/// A nested `.guardrails.json` is not guarded: `with_overrides_from_root`
-/// reads the copies at the git root alone.
+/// A raw comparison would miss a `file_path` spelled through a symlink: the
+/// git root arrives resolved, the spelling does not. A nested
+/// `.guardrails.json` stays unguarded either way, since
+/// `with_overrides_from_root` reads the copies at the git root alone.
 fn is_guardrails_config(file_path: &str, git_root: &Path) -> bool {
+    let Some(resolved) = resolve_under_root(Path::new(file_path), git_root) else {
+        return false;
+    };
     [
         GUARDRAILS_CONFIG_FILE,
         TOOLS_CONFIG_FILE,
         LEGACY_CONFIG_FILE,
     ]
     .iter()
-    .any(|name| Path::new(file_path) == git_root.join(name))
+    .any(|name| resolved.relative == Path::new(name))
 }
 
 /// `Critical`, not `High`: a repository that raises `blockThreshold` to
