@@ -8,11 +8,11 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-guardrails は PreToolUse hook として、AI agent の `Write` / `Edit` / `MultiEdit` を編集前に検査する。`Write` の `tool_input.content` は新しい全文を保持しているが、`Edit` / `MultiEdit` の `tool_input` は snippet (`old_string` / `new_string` のペア) のみで、ファイル全体は含まれない。
+guardrails は PreToolUse hook として、AI agent の `Write`/`Edit`/`MultiEdit` を編集前に検査する。`Write` の `tool_input.content` は新しい全文を保持しているが、`Edit`/`MultiEdit` の `tool_input` は snippet (`old_string`/`new_string` のペア) のみで、ファイル全体は含まれない。
 
-snippet 単独に対して security check を走らせると、context が不足して false negative が出る (例: `useEffect` 使用判定は import 状況と組み合わせて初めて意味を持つ、SSRF 防御は URL の組み立て全体を見ないと検出できない)。Issue #59 で「JSX snippet alone fails」が報告された後、`Edit` / `MultiEdit` でも disk からファイルを読み、`old_string` を `new_string` に置換して **post-edit 全文** を再構成する設計に切り替えた。
+snippet 単独に対して security check を走らせると、context が不足して false negative が出る (例: `useEffect` 使用判定は import 状況と組み合わせて初めて意味を持つ、SSRF 防御は URL の組み立て全体を見ないと検出できない)。Issue #59 で「JSX snippet alone fails」が報告された後、`Edit`/`MultiEdit` でも disk からファイルを読み、`old_string` を `new_string` に置換して **post-edit 全文** を再構成する設計に切り替えた。
 
-この再構成は常に成功するわけではない。ファイルが既に削除されていた / 10MB を超えていた / バイナリだった / `old_string` が disk 上の内容と drift していた / MultiEdit 途中段でパターン不一致になった、等の経路がある。失敗時の挙動 (silent fallback で snippet を渡すか、エラーにするか、警告するか) が曖昧だと、AI agent は「なぜ security check が違う結果を返したか」を解釈できない。
+この再構成は常に成功するわけではない。ファイルが既に削除されていた/10MB を超えていた/バイナリだった/`old_string` が disk 上の内容と drift していた/MultiEdit 途中段でパターン不一致になった、等の経路がある。失敗時の挙動 (silent fallback で snippet を渡すか、エラーにするか、警告するか) が曖昧だと、AI agent は「なぜ security check が違う結果を返したか」を解釈できない。
 
 `ContentResolution` 3 値と `DegradedReason` 8 variant の意味論を ADR として固定し、各経路が contract のどの slot に落ちるかを明示する必要がある。
 
@@ -20,7 +20,7 @@ snippet 単独に対して security check を走らせると、context が不足
 
 - AI agent の Edit/MultiEdit に対して post-edit 全文で security 判定する (snippet 単独より context-aware)
 - 全文取得失敗時、silent fallback ではなく degradation を AI agent に通知する
-- 全文不要なケース (`Write` の content そのまま使う / `.md` ファイル / `old_string` 未指定) を degradation と区別する
+- 全文不要なケース (`Write` の content そのまま使う/`.md` ファイル/`old_string` 未指定) を degradation と区別する
 - 失敗カテゴリを 8 種類に enumerate し、note 文言で AI agent が次の行動を選べるようにする
 - 検査自体は止めない (snippet で fallback 後に rule 評価続行)
 
@@ -33,7 +33,7 @@ snippet 単独に対して security check を走らせると、context が不足
 
 ## Decision Outcome
 
-採用: `ContentResolution` 3 値 (`Full` / `Degraded(DegradedReason)` / `NotApplicable`) と `DegradedReason` 8 variant の組合せ。`src/content.rs` で定義。
+採用: `ContentResolution` 3 値 (`Full`/`Degraded(DegradedReason)`/`NotApplicable`) と `DegradedReason` 8 variant の組合せ。`src/content.rs` で定義。
 
 ### ContentResolution 3 値の意味論
 
@@ -49,7 +49,7 @@ snippet 単独に対して security check を走らせると、context が不足
 
 - `Write` tool: `tool_input.content` が既に新しい全文 (再構成不要)
 - `.md` 等 JS/TS 外: `RE_JS_FILE` 不一致で security check 対象外
-- `Edit` の `old_string` 未指定 / `MultiEdit` の edit エントリで `old_string` または `new_string` 欠落: 再構成ロジックが動作しない
+- `Edit` の `old_string` 未指定/`MultiEdit` の edit エントリで `old_string` または `new_string` 欠落: 再構成ロジックが動作しない
 
 `Degraded` は「全文取得を試みたが失敗した」状態。AI agent には「次に何が起きると content の取り直しが必要か」を note で伝える。
 
@@ -70,9 +70,9 @@ snippet 単独に対して security check を走らせると、context が不足
 
 8 variant に分けたのは、AI agent が note を読んで対応行動を選べるようにするため:
 
-- `FileNotFound` / `OldStringNotFound` / `MultiEditMidFailure` → AI 自身の前提 (ファイル状態) と disk が drift しているので Read で確認
+- `FileNotFound`/`OldStringNotFound`/`MultiEditMidFailure` → AI 自身の前提 (ファイル状態) と disk が drift しているので Read で確認
 - `OversizedFile` → 編集対象ファイルが分割不能なほど大きい可能性 (refactor の signal)
-- `NonUtf8Content` / `PermissionDenied` / `IoError` → 環境側の問題
+- `NonUtf8Content`/`PermissionDenied`/`IoError` → 環境側の問題
 - `PathOutsideProject` → security 上の警告 (symlink 攻撃の可能性)
 
 ### Degradation contract
@@ -102,7 +102,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 - **No dedup**: 同じ理由が複数経路から発生しても両方残す。AI agent は「signal がいくつあるか」も解釈に使う
 - **Dual emit**: stderr (human readable) と `SuccessEnvelope.notes` (machine readable) の両方に同じ文字列が出る
-- **Early-return も propagate**: unsupported tool / empty content で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
+- **Early-return も propagate**: unsupported tool/empty content で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
 
 ### Degraded derivation semantics
 
@@ -193,23 +193,23 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 ### Reassessment Triggers
 
-- 既存 variant では分類できない degradation が発見された場合 (例: 非同期 watch / remote fs / encrypted file)、新 variant + note 文言追加
-- `OldStringNotFound` / `MultiEditMidFailure` が異常頻度で発生する事象が観測された場合、AI agent 側に「事前に Read してから Edit」を促す note 文言改善
+- 既存 variant では分類できない degradation が発見された場合 (例: 非同期 watch/remote fs/encrypted file)、新 variant + note 文言追加
+- `OldStringNotFound`/`MultiEditMidFailure` が異常頻度で発生する事象が観測された場合、AI agent 側に「事前に Read してから Edit」を促す note 文言改善
 - `PathOutsideProject` が実際の symlink 攻撃で再現された場合、`Degraded` ではなく `exit 64` (fail-closed) への昇格を検討
 - snippet 単独 false positive の苦情が来た場合、本 ADR の "検出継続性" 方針を見直し
 
 ### References
 
 - `src/content.rs` (`ContentResolution`, `DegradedReason`, `DegradedReason::note`, `get_file_and_content`, `resolve_edit_content`, `resolve_multi_edit_content`, `read_file_capped`, `apply_edit`, `io_error_to_reason`)
-- `tests/cli/edit.rs` (RC-001 / TC-004 / issue #59 シナリオ)
+- `tests/cli/edit.rs` (RC-001/TC-004/issue #59 シナリオ)
 - ADR-0004 (Fail-mode policy) — `Degraded` は環境失敗軸に該当
-- `README.md` の "Known Limitations" / "JSON Output Mode" (degraded notes 例示)
+- `README.md` の "Known Limitations"/"JSON Output Mode" (degraded notes 例示)
 
 ## Amendment 2026-06-24: invariant gate の `.json` full content は共有 resolution を read-gate 強制 open で再利用
 
 2026-06-24 census で新規 ADR 昇格を見送った判断 (I6) を記録する。#359 の invariant gate が本 ADR の content resolution contract をどう再利用するかの cross-module seam を確定する。
 
-invariant gate は post-edit の full content を必要とする (pin した scalar と突き合わせるため)。新しい resolution logic を起こさず、`content.rs` の `reconstruct_structured_full` が本 ADR の `resolve_edit_content` / `resolve_multi_edit_content` をそのまま再利用する。通常 `is_js` が担う read gate を強制 open にして呼ぶことで、`is_js=false` の `.json` Edit も snippet でなく full に再構築される。
+invariant gate は post-edit の full content を必要とする (pin した scalar と突き合わせるため)。新しい resolution logic を起こさず、`content.rs` の `reconstruct_structured_full` が本 ADR の `resolve_edit_content`/`resolve_multi_edit_content` をそのまま再利用する。通常 `is_js` が担う read gate を強制 open にして呼ぶことで、`is_js=false` の `.json` Edit も snippet でなく full に再構築される。
 
 | 性質                       | 挙動                                                                                                                                     |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -218,11 +218,36 @@ invariant gate は post-edit の full content を必要とする (pin した sca
 | 既存 content-scan への影響 | target の snippet `content` は触らない。full は別値 `structured_full` として返り、既存 content-scan rule (JS 向け regex 群) には渡さない |
 | 非対象 file のコスト       | 非 `.json` かつ非 JS の Edit (`.css` / `.md` 等) はどちらの predicate も false で再構築せず、NFR-001 のとおりコスト 0                    |
 
-新 logic を起こさず既存 resolution に相乗りさせたのは、本 ADR の `ContentResolution` / `DegradedReason` 契約をそのまま継承するため。reconstruction 失敗時は本 ADR の `Degraded(reason)` 経路に乗り、`NotApplicable` に潰さない。invariant pass は full content を受け取れず skip し、`degraded_note` が human に手動再検証を促す。NFR-001 の「非対象 file はコスト 0」は `run_invariant_pass` 側で `structured_full` が None なら disk read 前に短絡することで担保する。
+新 logic を起こさず既存 resolution に相乗りさせたのは、本 ADR の `ContentResolution`/`DegradedReason` 契約をそのまま継承するため。reconstruction 失敗時は本 ADR の `Degraded(reason)` 経路に乗り、`NotApplicable` に潰さない。invariant pass は full content を受け取れず skip し、`degraded_note` が human に手動再検証を促す。NFR-001 の「非対象 file はコスト 0」は `run_invariant_pass` 側で `structured_full` が None なら disk read 前に短絡することで担保する。
 
 ### Related (I6)
 
-- `src/content.rs` (`reconstruct_structured_full`, `resolve_edit_content` / `resolve_multi_edit_content` の read-gate 強制 open)
+- `src/content.rs` (`reconstruct_structured_full`, `resolve_edit_content`/`resolve_multi_edit_content` の read-gate 強制 open)
 - `src/invariant.rs` (`is_structured_config`, `run_invariant_pass` の NFR-001 短絡)
 - ADR-0016 Amendment (invariant gate の `.json` scope)
 - ADR-0023 (stateless path-consistent invariant gate)
+
+## Amendment 2026-08-15: 空 content は degradation ではない、`get_file_and_content` の早期 return を取得失敗のみに絞る
+
+issue #454 で報告された false negative を記録する。`get_file_and_content` の早期 return は `file_path.is_empty() || content.is_empty()` だった。空の `new_string`/`content` は削除編集として正当な値だが、この条件では取得失敗と同じ扱いで `None` を返し、`ResolvedTarget` 自体が組まれず `collect_violations` の評価対象から外れていた。`.guardrails.json` の 1 行を空 `new_string` の `Edit` で削る操作は、`config_guard` (path のみで判定し `content` を読まない rule) が発火すべき対象でありながら、この早期 return で `collect_violations` に到達すらしなかった。
+
+採用: 早期 return の条件を `content.is_empty() && structured_full.as_full_str().is_none()` に絞る (`src/content.rs`)。空 content 単独では skip しない。
+
+### 空 content と取得失敗の区別
+
+「空 content」と「取得失敗」は別の状態として扱う。
+
+| 状態                                                          | 判定                                                                | `get_file_and_content` の挙動                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 空 content (削除編集)                                         | snippet (`content` / `new_string`) が空                             | skip しない。`structured_full` が `Full` を持てば `ResolvedTarget` を返す |
+| 取得失敗 (`file_path` 欠落)                                   | `file_path` が空                                                    | 常に `None` (変更前と同じ)                                                |
+| 取得失敗 (snippet も `structured_full` も content を持たない) | `content.is_empty()` かつ `structured_full.as_full_str()` が `None` | `None`                                                                    |
+
+空 content 単独を degradation 扱いにしないのは、本 ADR の `NotApplicable` と `Degraded` の境界と同じ理由による。`new_string` が空の `Edit` は「全文取得を試みたが失敗した」のではなく、ファイルの一部を消す意図どおりの編集で、`ContentResolution::Degraded` のどの `DegradedReason` にも当たらない。この変更は `ContentResolution` に新しい variant を足さず、`get_file_and_content` が `ResolvedTarget` を組むかどうかの gate だけを変える。`.json` 以外で `structured_full` が `NotApplicable` のままの場合、空 content かつ全文も無い状態は変更前と同じく `None` になる (`.ts` ファイルの空 `new_string` 削除など)。
+
+### Related (U-001/U-002)
+
+- `src/content.rs` (`get_file_and_content` の早期 return 条件)
+- `src/content/tests.rs` T-530 (`.json` の空 `new_string` 削除で `structured_full` から全文が返る), T-531 (`file_path` 空は従来どおり取得失敗), T-532 (`structured_full` が組めない種類のファイルで空 content は従来どおり skip)
+- `src/hook/tests.rs` T-533 (`.guardrails.json` の空 `new_string` 削除で `config_guard` が発火), T-534 (pin 済み `.json` の空 `new_string` 削除で invariant gate に届く)
+- issue #454
