@@ -576,3 +576,72 @@ fn file_with_resolvable_parent_outside_root_is_skipped() {
 
     assert_eq!(invariant_count(&violations), 0);
 }
+
+// --- .invariants.json self-edit weakening (U-001, #451) --------------------
+//
+// `declaration_edit_weakens` compares the pre-edit `.invariants.json` table
+// read from disk (mirroring `load_invariant_table`) against the table built
+// from the post-edit full content, with no git/diff/time baseline (issue
+// #451 U-001; ADR-0023 forbids only a history-derived baseline, not this
+// same-cycle disk read). A declared pin (file, dot-path) that goes missing or
+// changes value in the post-edit table is weakening; a new pin added on top
+// of unchanged existing pins is not.
+
+// T-578: adding a second pin to the same file entry, leaving the existing pin
+// unchanged, is not weakening.
+#[test]
+fn pin_を_1_件足す編集は弱体化と判定されない() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+    let post_edit = r#"{ "src/config/flags.json": { "checkout.v2": false, "ui.maxItems": 50 } }"#;
+
+    assert!(!declaration_edit_weakens(tmp.path(), post_edit));
+}
+
+// T-579: dropping one of two declared pins from the same file entry is
+// weakening, even though the remaining pin is unchanged.
+#[test]
+fn pin_を_1_件消す編集が弱体化と判定される() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": { "checkout.v2": false, "ui.maxItems": 50 } }"#,
+    )
+    .unwrap();
+    let post_edit = r#"{ "src/config/flags.json": { "checkout.v2": false } }"#;
+
+    assert!(declaration_edit_weakens(tmp.path(), post_edit));
+}
+
+// T-580: changing a declared pin's value, without removing it, is weakening.
+#[test]
+fn pin_の値を変える編集が弱体化と判定される() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+    let post_edit = r#"{ "src/config/flags.json": { "checkout.v2": true } }"#;
+
+    assert!(declaration_edit_weakens(tmp.path(), post_edit));
+}
+
+// T-581: collapsing the whole declaration to an empty object drops every
+// declared pin at once, which is weakening.
+#[test]
+fn invariants_json_を空オブジェクトにする編集が弱体化と判定される() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{ "src/config/flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+    let post_edit = "{}";
+
+    assert!(declaration_edit_weakens(tmp.path(), post_edit));
+}

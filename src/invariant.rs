@@ -221,6 +221,36 @@ pub(crate) fn check_invariants(
     violations
 }
 
+/// True when editing `.invariants.json` itself drops a declared pin or changes
+/// its declared value, relative to the pre-edit table on disk. Compares only
+/// states inside this same edit cycle (pre-edit disk read vs. post-edit full
+/// content) with no git/diff/history baseline: ADR-0023 forbids a
+/// history-derived baseline, not this same-cycle disk read. A pin added on top
+/// of unchanged existing pins is not weakening (#451 U-001).
+pub(crate) fn declaration_edit_weakens(git_root: &Path, post_edit_content: &str) -> bool {
+    let InvariantLoad::Table(before) = load_invariant_table(git_root) else {
+        return false;
+    };
+    let Ok(Value::Object(after)) = serde_json::from_str::<Value>(post_edit_content) else {
+        return false;
+    };
+
+    for (file_key, declared) in &before {
+        let Value::Object(pins) = declared else {
+            continue;
+        };
+        let after_pins = after.get(file_key).and_then(Value::as_object);
+        for (dot_path, expected) in pins {
+            match after_pins.and_then(|m| m.get(dot_path)) {
+                None => return true,
+                Some(actual) if actual != expected => return true,
+                Some(_) => {}
+            }
+        }
+    }
+    false
+}
+
 /// Resolves a declared `dot_path` against the parsed document. A flat literal
 /// key (`{"a.b": ...}`) is preferred over a nested descent (`{"a": {"b": ...}}`)
 /// so a key that legitimately contains dots can be pinned directly; only when no
