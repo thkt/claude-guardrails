@@ -642,6 +642,31 @@ fn pin_を足す_write_が_exit_0で通る() {
     );
 }
 
+// T-597: 宣言ファイル自身が repository 外への symlink でも pin を消す Write が exit 2 で止まる
+#[test]
+fn 宣言ファイルが_repository_外への_symlink_でも_pin_を消す_write_が_exit_2で止まる() {
+    let tmp = tmp_repo();
+    let outside = tempfile::TempDir::new().unwrap();
+    let target = outside.path().join("pins.json");
+    fs::write(&target, r#"{"config.json": {"featureFlag": true}}"#).unwrap();
+    symlink(&target, tmp.path().join(".invariants.json")).unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join(".invariants.json"),
+            "content": "{}"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a declaration file reached through a symlink out of the repository must still block; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // T-587: pin が無い repository では発火しない
 #[test]
 fn pinが無いrepositoryでは発火しない() {

@@ -57,6 +57,47 @@ fn symlink_経由で綴った_invariants_json_でも判定される() {
     assert_eq!(v[0].rule, rule_id::INVARIANT_GUARD);
 }
 
+// T-595: the declaration file itself is a symlink whose target sits outside the
+// git root, so the edited path resolves out of the repository. The disk read
+// still follows it, so the pins are still enforced and dropping one is still
+// weakening.
+#[test]
+fn 根の_invariants_json_が_repository_外への_symlink_でも判定される() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let root = base.join("repo");
+    let outside = base.join("outside");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    let target = outside.join("pins.json");
+    fs::write(&target, r#"{"config.json": {"featureFlag": true}}"#).unwrap();
+    std::os::unix::fs::symlink(&target, root.join(INVARIANTS_FILE)).unwrap();
+
+    let v = check(
+        root.join(INVARIANTS_FILE).to_str().unwrap(),
+        "{}",
+        Some(&root),
+    );
+
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(v[0].severity, Severity::Critical);
+    assert_eq!(v[0].rule, rule_id::INVARIANT_GUARD);
+}
+
+// T-596: `missing/..` climbs back to the root, but the directory it climbs out
+// of does not exist yet at PreToolUse, so nothing on disk resolves it. Folding
+// `..` lexically is what keeps this spelling from slipping past the guard.
+#[test]
+fn 存在しないディレクトリを経由して綴った_invariants_json_でも判定される() {
+    let tmp = root_with_invariants(r#"{"config.json": {"featureFlag": true}}"#);
+    let spelled = tmp.path().join("missing").join("..").join(INVARIANTS_FILE);
+
+    let v = check(spelled.to_str().unwrap(), "{}", Some(tmp.path()));
+
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(v[0].rule, rule_id::INVARIANT_GUARD);
+}
+
 // T-591: a declaration file whose post-edit content never arrives is judged by
 // nothing, so the skip is reported instead of passing silently.
 #[test]

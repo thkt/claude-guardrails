@@ -76,10 +76,10 @@ issue #451 で、`.invariants.json` から pin を消す編集を誰も止めな
 
 この rule は本 ADR が禁じる baseline を持たない。比較する 2 つの状態は同じ edit cycle の中に閉じている。
 
-| 比較対象         | 出どころ                                     | history 参照 |
-| ---------------- | -------------------------------------------- | ------------ |
+| 比較対象          | 出どころ                                    | history 参照 |
+| ----------------- | ------------------------------------------- | ------------ |
 | 編集前の pin 集合 | `load_invariant_table` による disk 読み取り | 無し         |
-| 編集後の pin 集合 | hook 入力から再構成した post-edit 全文       | 無し         |
+| 編集後の pin 集合 | hook 入力から再構成した post-edit 全文      | 無し         |
 
 git、diff、時刻はどれも読まない。禁止しているのは history から導いた baseline であり、同じ hook 実行の中で disk を 1 回読むことは対象外。`check_invariants` 自体は変更しておらず、post-edit scalar と宣言値の直接比較のままになる。
 
@@ -93,9 +93,9 @@ pin を持てない形 (配列、`null`、parse 不能) は、宣言の消失と
 
 ### Related
 
-- `src/invariant.rs` (`declaration_edit_weakens`, `has_any_pin`)
+- `src/invariant.rs` (`declaration_edit_weakens`, `has_any_pin`, `is_declaration_path`, `declaration_body`)
 - `src/rules/invariant_guard.rs` (path 一致、Critical の violation、再構成できないときの note)
-- `src/invariant/tests.rs` T-578〜T-581, T-588〜T-590
-- `src/rules/invariant_guard/tests.rs` T-582〜T-584, T-591, T-592
-- `tests/cli/config.rs` T-585〜T-587
+- `src/invariant/tests.rs` T-578〜T-581, T-588〜T-590, T-593, T-594
+- `src/rules/invariant_guard/tests.rs` T-582〜T-584, T-591, T-592, T-595, T-596
+- `tests/cli/config.rs` T-585〜T-587, T-597
 - issue #451

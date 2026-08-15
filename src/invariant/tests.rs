@@ -577,15 +577,8 @@ fn file_with_resolvable_parent_outside_root_is_skipped() {
     assert_eq!(invariant_count(&violations), 0);
 }
 
-// --- .invariants.json self-edit weakening (U-001, #451) --------------------
-//
-// `declaration_edit_weakens` compares the pre-edit `.invariants.json` table
-// read from disk (mirroring `load_invariant_table`) against the table built
-// from the post-edit full content, with no git/diff/time baseline (issue
-// #451 U-001; ADR-0023 forbids only a history-derived baseline, not this
-// same-cycle disk read). A declared pin (file, dot-path) that goes missing or
-// changes value in the post-edit table is weakening; a new pin added on top
-// of unchanged existing pins is not.
+// --- .invariants.json self-edit weakening ----------------------------------
+// See `declaration_edit_weakens` for what counts as weakening.
 
 // T-578: adding a second pin to the same file entry, leaving the existing pin
 // unchanged, is not weakening.
@@ -688,4 +681,29 @@ fn pin_が_1_件も無いときは配列にしても弱体化と判定されな�
     .unwrap();
 
     assert!(!declaration_edit_weakens(tmp.path(), "[]"));
+}
+
+// T-593: an editor that keeps the file's leading BOM rewrites the same pins,
+// so the edit changes nothing and must not be judged as weakening.
+#[test]
+fn bom_付きの宣言を書き戻す編集は弱体化と判定されない() {
+    let tmp = TempDir::new().unwrap();
+    let declaration = "\u{feff}{ \"src/config/flags.json\": { \"checkout.v2\": false } }";
+    fs::write(tmp.path().join(".invariants.json"), declaration).unwrap();
+
+    assert!(!declaration_edit_weakens(tmp.path(), declaration));
+}
+
+// T-594: stripping the BOM must not stop at "always passes". A BOM-prefixed
+// edit that drops the declared pin is still weakening.
+#[test]
+fn bom_付きのまま_pin_を消す編集が弱体化と判定される() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        "\u{feff}{ \"src/config/flags.json\": { \"checkout.v2\": false } }",
+    )
+    .unwrap();
+
+    assert!(declaration_edit_weakens(tmp.path(), "\u{feff}{}"));
 }

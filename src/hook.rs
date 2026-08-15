@@ -439,14 +439,12 @@ where
     // instead of silent; an unpinned file stays quiet.
     if config.rules.invariant {
         if let ContentResolution::Degraded(_) = &target.structured_full {
+            let pin_note = degraded_note(&target.file_path, config.git_root.as_deref());
             let guard_note = rules::invariant_guard::degraded_note(
                 &target.file_path,
                 config.git_root.as_deref(),
             );
-            for note in degraded_note(&target.file_path, config.git_root.as_deref())
-                .into_iter()
-                .chain(guard_note)
-            {
+            for note in pin_note.into_iter().chain(guard_note) {
                 eprintln!("guardrails: invariant: {note}");
                 notes.push(note);
             }

@@ -2,21 +2,23 @@
 //! pin (drops a key or changes its value), independent of the `invariant`
 //! content-comparison gate in `src/invariant.rs`. Deleting the pin file itself
 //! is out of scope: guardrails only sees Write/Edit/MultiEdit tool input, not
-//! `rm` (#451).
+//! `rm`.
 
 use super::{rule_id, Severity, Violation};
-use crate::invariant::{declaration_edit_weakens, INVARIANTS_FILE};
+use crate::invariant::{declaration_edit_weakens, is_declaration_path, INVARIANTS_FILE};
 use crate::path_resolve::resolve_under_root;
 use std::path::Path;
 
-/// A raw comparison would miss a `file_path` spelled through a symlink, the
-/// same reason `config_guard::is_guardrails_config` resolves before
-/// comparing.
+/// True when the edit targets the declaration file `load_invariant_table`
+/// reads. Two spellings reach that file and neither check alone covers both:
+/// `resolve_under_root` folds a lexical `..` back to a not-yet-existing
+/// directory that `is_declaration_path` cannot resolve on disk, while
+/// `is_declaration_path` alone catches a root-level `.invariants.json` that is
+/// itself a symlink out of the repository.
 fn is_invariants_declaration(file_path: &str, git_root: &Path) -> bool {
-    let Some(resolved) = resolve_under_root(Path::new(file_path), git_root) else {
-        return false;
-    };
-    resolved.relative == Path::new(INVARIANTS_FILE)
+    let under_root = resolve_under_root(Path::new(file_path), git_root)
+        .is_some_and(|resolved| resolved.relative == Path::new(INVARIANTS_FILE));
+    under_root || is_declaration_path(file_path, git_root)
 }
 
 /// Note for an edit to `.invariants.json` whose post-edit content could not be

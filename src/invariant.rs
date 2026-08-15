@@ -58,6 +58,13 @@ enum InvariantLoad {
     Table(Map<String, Value>),
 }
 
+/// Normalizes declaration content before parsing. The disk read and the
+/// post-edit content both go through this; normalizing only the disk side would
+/// read every post-edit rewrite of a BOM-prefixed file as unparseable.
+fn declaration_body(raw: &str) -> &str {
+    raw.strip_prefix('\u{feff}').unwrap_or(raw).trim()
+}
+
 /// Reads and classifies `.invariants.json` from the git root. A leading UTF-8
 /// BOM and surrounding whitespace are stripped before parsing so a BOM-prefixed
 /// or whitespace-padded file is not mistaken for a tamper. An empty or
@@ -70,7 +77,7 @@ fn load_invariant_table(git_root: &Path) -> InvariantLoad {
     let Ok(raw) = fs::read_to_string(&invariants_path) else {
         return InvariantLoad::Skip;
     };
-    let trimmed = raw.strip_prefix('\u{feff}').unwrap_or(&raw).trim();
+    let trimmed = declaration_body(&raw);
     if trimmed.is_empty() {
         return InvariantLoad::Skip;
     }
@@ -93,9 +100,10 @@ fn load_invariant_table(git_root: &Path) -> InvariantLoad {
 /// fails open rather than guess a key. Tool input always supplies absolute paths,
 /// so this is an edge guard, not the production path.
 fn canonical_relative_key(file_path: &str, git_root: &Path) -> Option<String> {
-    if let (Ok(canonical_root), Some(resolved)) =
-        (fs::canonicalize(git_root), canonical_path(file_path))
-    {
+    if let (Ok(canonical_root), Some(resolved)) = (
+        fs::canonicalize(git_root),
+        canonical_path(Path::new(file_path)),
+    ) {
         if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
             return Some(relative.to_string_lossy().into_owned());
         }
@@ -108,12 +116,29 @@ fn canonical_relative_key(file_path: &str, git_root: &Path) -> Option<String> {
 /// new file at PreToolUse): the parent directory is canonicalized and the file
 /// name rejoined, collapsing symlinked ancestors into the same space as the
 /// canonicalized git root.
-fn canonical_path(file_path: &str) -> Option<PathBuf> {
-    let path = Path::new(file_path);
+fn canonical_path(path: &Path) -> Option<PathBuf> {
     let parent = path.parent()?;
     let name = path.file_name()?;
     let canonical_parent = fs::canonicalize(parent).ok()?;
     Some(canonical_parent.join(name))
+}
+
+/// True when `file_path` names the declaration file `load_invariant_table`
+/// reads. `canonical_path` resolves the parent and leaves the final component
+/// alone, so a root-level `.invariants.json` that is itself a symlink out of
+/// the repository stays unfollowed on both sides and still matches.
+pub(crate) fn is_declaration_path(file_path: &str, git_root: &Path) -> bool {
+    // `join` keeps an absolute `file_path` as is and anchors a relative one to
+    // the root, matching where the declaration file is looked up.
+    match (
+        canonical_path(&git_root.join(file_path)),
+        canonical_path(&git_root.join(INVARIANTS_FILE)),
+    ) {
+        (Some(edited), Some(declared)) => edited == declared,
+        // An unresolvable parent on either side leaves nothing to compare, so
+        // the guard stays silent rather than match on two failures.
+        _ => false,
+    }
 }
 
 /// Orchestrates the invariant self-gate over a single post-edit file, returning
@@ -242,7 +267,9 @@ pub(crate) fn declaration_edit_weakens(git_root: &Path, post_edit_content: &str)
     // Content that is not a JSON object declares no pin at all, so it drops
     // every one of them. Unparseable content lands here too: the next run
     // classifies it as `Corrupt` and stops enforcing the pins.
-    let Ok(Value::Object(after)) = serde_json::from_str::<Value>(post_edit_content) else {
+    let Ok(Value::Object(after)) =
+        serde_json::from_str::<Value>(declaration_body(post_edit_content))
+    else {
         return has_any_pin(&before);
     };
 
