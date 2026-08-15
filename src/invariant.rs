@@ -221,19 +221,21 @@ pub(crate) fn check_invariants(
     violations
 }
 
-/// True when editing `.invariants.json` itself drops a declared pin or changes
-/// its declared value, relative to the pre-edit table on disk. Compares only
-/// states inside this same edit cycle (pre-edit disk read vs. post-edit full
-/// content) with no git/diff/history baseline: ADR-0023 forbids a
-/// history-derived baseline, not this same-cycle disk read. A pin added on top
-/// of unchanged existing pins is not weakening (#451 U-001).
 fn has_any_pin(table: &Map<String, Value>) -> bool {
     table
         .values()
         .any(|declared| declared.as_object().is_some_and(|pins| !pins.is_empty()))
 }
 
+/// True when editing `.invariants.json` itself drops a declared pin or changes
+/// its declared value, relative to the pre-edit table on disk. Compares only
+/// states inside this same edit cycle (pre-edit disk read vs. post-edit full
+/// content) with no git/diff/history baseline: ADR-0023 forbids a
+/// history-derived baseline, not this same-cycle disk read. A pin added on top
+/// of unchanged existing pins is not weakening.
 pub(crate) fn declaration_edit_weakens(git_root: &Path, post_edit_content: &str) -> bool {
+    // `Corrupt` shares this arm with `Skip`: no pin can be read, so none can be
+    // weakened. `run_invariant_pass` reports the corrupt file on its own.
     let InvariantLoad::Table(before) = load_invariant_table(git_root) else {
         return false;
     };

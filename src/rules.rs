@@ -10,7 +10,7 @@ mod flaky_test;
 mod generated_file;
 mod hardcoded_secrets;
 mod http_resource;
-pub(crate) mod invariants_guard;
+pub(crate) mod invariant_guard;
 mod jwt_client;
 mod naming;
 pub(crate) mod no_use_effect;

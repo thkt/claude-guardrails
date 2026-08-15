@@ -241,7 +241,7 @@ fn collect_violations(
     // reconstructed post-edit `.json` content.
     if config.rules.invariant {
         if let Some(content) = structured_full {
-            violations.extend(rules::invariants_guard::check(
+            violations.extend(rules::invariant_guard::check(
                 file_path,
                 content,
                 config.git_root.as_deref(),
@@ -439,7 +439,14 @@ where
     // instead of silent; an unpinned file stays quiet.
     if config.rules.invariant {
         if let ContentResolution::Degraded(_) = &target.structured_full {
-            if let Some(note) = degraded_note(&target.file_path, config.git_root.as_deref()) {
+            let guard_note = rules::invariant_guard::degraded_note(
+                &target.file_path,
+                config.git_root.as_deref(),
+            );
+            for note in degraded_note(&target.file_path, config.git_root.as_deref())
+                .into_iter()
+                .chain(guard_note)
+            {
                 eprintln!("guardrails: invariant: {note}");
                 notes.push(note);
             }

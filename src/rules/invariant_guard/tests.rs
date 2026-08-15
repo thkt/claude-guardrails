@@ -56,3 +56,28 @@ fn symlink_経由で綴った_invariants_json_でも判定される() {
     assert_eq!(v[0].severity, Severity::Critical);
     assert_eq!(v[0].rule, rule_id::INVARIANT_GUARD);
 }
+
+// T-591: a declaration file whose post-edit content never arrives is judged by
+// nothing, so the skip is reported instead of passing silently.
+#[test]
+fn 再構成できない宣言ファイルの編集は_note_で報告される() {
+    let tmp = root_with_invariants(r#"{"config.json": {"featureFlag": true}}"#);
+    let path = tmp.path().join(INVARIANTS_FILE);
+
+    let note = degraded_note(path.to_str().unwrap(), Some(tmp.path()));
+
+    assert!(
+        note.as_deref().is_some_and(|n| n.contains(INVARIANTS_FILE)),
+        "{note:?}"
+    );
+}
+
+// T-592: any other file is out of this guard's scope, so a degraded read of it
+// must not add a note about pins.
+#[test]
+fn 宣言ファイル以外の再構成失敗では_note_が出ない() {
+    let tmp = root_with_invariants(r#"{"config.json": {"featureFlag": true}}"#);
+    let path = tmp.path().join("config.json");
+
+    assert!(degraded_note(path.to_str().unwrap(), Some(tmp.path())).is_none());
+}

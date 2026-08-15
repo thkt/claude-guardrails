@@ -184,8 +184,7 @@ guardrails は AI コード生成で重要な以下のルールを `--deny` で�
 | `serviceWorker` | Medium | ルートスコープ（`{ scope: '/' }`）での Service Worker 登録。特定パスへのスコープ絞り込みを提案 | ルートスコープはオリジンの全 navigation を傍受するので、一度の誤登録でサイト全体を乗っ取られる | サイト全体に worker を意図的に配信するプロジェクト |
 | `jwtClient` | Medium | クライアント側 JWT デコード（`jwtDecode`、`jwt_decode`、`atob(token.split('.'))`）。サーバー側 `jwtVerify` を推奨 | JWT payload は base64url で読めるが、署名検証なしには改竄も通る。クライアントで信用すると認可回避になる | サーバー専用 JWT デコード経路（Node 専用ファイル等） |
 | `astSecurity` | Mixed | ASTベース: コマンド/正規表現/require インジェクション、スタック露出、パストラバーサル、プロトタイプ汚染、bidi 文字、env-var フォールバック、不安全な乱数、HTML インジェクション、client env leak、SSR secret bleed、postMessage origin（下記参照） | AST ベースの集約。各 sub-rule にそれぞれの脅威がある（下記 sub-rule 表を参照） | Node.js以外のプロジェクト |
-| `invariant` | High | `.invariants.json` で固定したスカラー値から `.json` の値がずれる編集をブロック（feature flag、i18n 文言、design token） | 固定値はアプリ全体が依存する契約で、無言で変える編集は誰も承認していない挙動変更を出荷する | 不変値を固定しないプロジェクト |
-| `invariant` | Critical | `.invariants.json` 自体への編集が宣言済み pin を落とす、または宣言値を変えるものであれば、上記のドリフト検知とは独立にブロック | 宣言ファイルを書き換えられる agent は、pin が守ろうとしているファイルに触れずに pin 自体を弱められる。上記のドリフト検知はこれを検出できない | 不変値を固定しないプロジェクト。削除もこの rule では止まらない: guardrails は Write/Edit/MultiEdit の tool input のみを見るため、`rm .invariants.json` はどの hook にも届かない |
+| `invariant` | Mixed | 固定値ゲート: `.invariants.json` で固定したスカラー値から `.json` の値がずれる編集と、`.invariants.json` 自体の pin を弱める編集をブロック（下記参照） | 1 つの toggle に 2 つの rule_id がある。それぞれに脅威がある（下記 sub-rule 表を参照） | 不変値を固定しないプロジェクト。削除はどちらの rule でも届かない: guardrails は Write/Edit/MultiEdit の tool input のみを見るため、`rm .invariants.json` はどの hook にも届かない |
 | `configGuard` | Critical | guardrails が git root で読む設定ファイル（`.guardrails.json`、`.claude/tools.json`、`.claude-guardrails.json`）への編集をブロック | 設定を書き換えられる agent は次の編集を止める rule を自分で切れる。`overrides` の追記は diff 上 test パスの除外に見える | 設定の用意を agent に任せ、人が用意できないリポジトリ |
 <!-- END GENERATED: rules-table -->
 
@@ -223,6 +222,17 @@ guardrails は AI コード生成で重要な以下のルールを `--deny` で�
 | `ssr-secret-bleed` | High | `getServerSideProps` や `'use server'` Server Action が返す secret 名 (`apiKey`、`token`…) や `process.env.*` を flag。これらは Next.js がクライアントペイロードへシリアライズする | SSR の返り値は HTML payload にシリアライズされ、認証していない訪問者を含む全員に secret が届く |
 | `postmessage-origin-missing` | High | `window.addEventListener('message', handler)` のインラインハンドラが `event.origin` を読まない場合。origin チェックなしでは任意の sender からのクロスオリジン postMessage を受け入れてしまう。外部ハンドラ参照やパラメータ側 destructure は 1-file static analysis の範囲外 | 埋め込まれた iframe や popup から送られたメッセージをハンドラが信用し、ページが攻撃者の選んだコマンドを実行してしまう |
 <!-- END GENERATED: ast-security-rules-table -->
+
+### 不変値ルール（`invariant`）
+
+`invariant` toggle には 2 つの rule_id があります。片方は固定した値そのものを守り、もう片方はそれを宣言したファイルを守ります。
+
+<!-- BEGIN GENERATED: invariant-rules-table -->
+| サブルール (rule_id) | 重大度 | 説明 | なぜ重要か |
+| --- | --- | --- | --- |
+| `invariant` | High | `.invariants.json` で固定したスカラー値から `.json` の値がずれる編集をブロック（feature flag、i18n 文言、design token） | 固定値はアプリ全体が依存する契約で、無言で変える編集は誰も承認していない挙動変更を出荷する |
+| `invariant-guard` | Critical | `.invariants.json` 自体への編集が宣言済み pin を落とす、または宣言値を変えるものであれば、上記のドリフト検知とは独立にブロック | 宣言ファイルを書き換えられる agent は、pin が守ろうとしているファイルに触れずに pin 自体を弱められる。上記のドリフト検知はこれを検出できない |
+<!-- END GENERATED: invariant-rules-table -->
 
 ## サブコマンド
 

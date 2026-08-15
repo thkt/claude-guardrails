@@ -19,6 +19,19 @@ fn is_invariants_declaration(file_path: &str, git_root: &Path) -> bool {
     resolved.relative == Path::new(INVARIANTS_FILE)
 }
 
+/// Note for an edit to `.invariants.json` whose post-edit content could not be
+/// reconstructed. No content means no weakening can be judged, so the check
+/// below never runs; without this note the skip would be silent.
+pub(crate) fn degraded_note(file_path: &str, git_root: Option<&Path>) -> Option<String> {
+    let git_root = git_root?;
+    if !is_invariants_declaration(file_path, git_root) {
+        return None;
+    }
+    Some(String::from(
+        "`.invariants.json` post-edit content was not reconstructed; a weakened pin was not checked this edit.",
+    ))
+}
+
 /// `Critical`, matching `config_guard`: a repository that raises
 /// `blockThreshold` must not demote this to advisory, since the whole point is
 /// stopping the self-editing bypass an AI agent could otherwise take against

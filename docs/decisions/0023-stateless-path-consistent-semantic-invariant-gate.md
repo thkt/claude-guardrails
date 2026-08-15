@@ -70,7 +70,7 @@ Source audit: `docs/audit/2026-06-24-014746-adr-gaps.md` (candidate G1 = finding
 
 issue #451 で、`.invariants.json` から pin を消す編集を誰も止めないことが判明した。`check_invariants` は pin された対象ファイルの scalar しか見ないため、宣言そのものを消す編集は素通りする。AI agent は自分を縛る pin を外して、次の編集で自由に値を変えられる。
 
-採用: `src/rules/invariants_guard.rs` を `check_invariants` から独立した rule として足し、`src/invariant.rs` の `declaration_edit_weakens` が pin の消失と値の変更を判定する。
+採用: `src/rules/invariant_guard.rs` を `check_invariants` から独立した rule として足し、`src/invariant.rs` の `declaration_edit_weakens` が pin の消失と値の変更を判定する。
 
 ### baseline 禁止との関係
 
@@ -87,11 +87,15 @@ git、diff、時刻はどれも読まない。禁止しているのは history �
 
 pin を持てない形 (配列、`null`、parse 不能) は、宣言の消失と同じ扱いで弱体化と判定する。次の実行が `Corrupt` として読み、pin の照合が止まるため。編集前に pin が 1 件も無ければ、どの形でも弱体化にはならない。
 
+### post-edit 全文が届かない編集
+
+`.invariants.json` 自体の編集で post-edit 全文を再構成できないとき (oversize、非 UTF-8、IO エラー)、弱体化を判定する材料が無い。この rule は violation を出さず、代わりに note を 1 件出す。判定を飛ばしたことが人に見える形にするため。`check_invariants` が pin 済みファイルに対して出す note と同じ器に載る。
+
 ### Related
 
 - `src/invariant.rs` (`declaration_edit_weakens`, `has_any_pin`)
-- `src/rules/invariants_guard.rs` (path 一致と Critical の violation)
+- `src/rules/invariant_guard.rs` (path 一致、Critical の violation、再構成できないときの note)
 - `src/invariant/tests.rs` T-578〜T-581, T-588〜T-590
-- `src/rules/invariants_guard/tests.rs` T-582〜T-584
+- `src/rules/invariant_guard/tests.rs` T-582〜T-584, T-591, T-592
 - `tests/cli/config.rs` T-585〜T-587
 - issue #451
