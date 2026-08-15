@@ -407,6 +407,46 @@ fn every_toggle_fires_its_rules_under_single_toggle_isolation() {
     );
 }
 
+// U-002 (#449): 上の every_toggle_fires_... の逆向き。single-toggle isolation は
+// 「そのtoggleをonにした構成で、数える rule_id が発火するか」を見る。ここでは
+// 「そのtoggleをoffにした構成で、数える rule_id が発火しないか」を見て、
+// toggle_rule_id_count の引き算 (TOGGLE_RULE_ID_COUNT_EXCEPTIONS_*) が実際の
+// 発火と食い違ったら落ちる。TOGGLE_RULE_IDS 自体のmembership (一覧) はどちらの
+// テストでも変えない。
+
+// T-553: 数に含まれる rule_id は、その toggle を off にすると fire サンプルから出ない
+#[test]
+fn 数に含まれる_rule_id_は_その_toggle_を_off_にすると_fire_サンプルから出ない() {
+    let mut config = Config::default();
+    config.rules.crypto_weak = false;
+    let sample = corpus::SAMPLES
+        .iter()
+        .find(|s| s.rule == rule_id::CRYPTO_WEAK && s.expectation == Expectation::Fire)
+        .expect("crypto-weak の fire サンプルが corpus に存在しない");
+    let detected = detected_rules(sample.path, sample.content, &config);
+    assert!(
+        !detected.contains(rule_id::CRYPTO_WEAK),
+        "cryptoWeak を off にしても crypto-weak が発火した: {detected:?}"
+    );
+}
+
+// T-554: 例外に挙げた rule_id は、その toggle を off にしても出続ける
+#[test]
+fn 例外に挙げた_rule_id_は_その_toggle_を_off_にしても出続ける() {
+    let mut config = Config::default();
+    config.rules.ast_security = false;
+    let sample = corpus::SAMPLES
+        .iter()
+        .find(|s| s.rule == rule_id::EXCESSIVE_NESTING && s.expectation == Expectation::Fire)
+        .expect("excessive-nesting の fire サンプルが corpus に存在しない");
+    let detected = detected_rules(sample.path, sample.content, &config);
+    assert!(
+        detected.contains(rule_id::EXCESSIVE_NESTING),
+        "astSecurity を off にしたら excessive-nesting が発火しなくなった \
+         (unconditional exception が崩れた?): {detected:?}"
+    );
+}
+
 // T-267: should-fire sample は検出で tp、未検出で fn に計上される。
 #[test]
 fn fire_samples_tally_tp_when_detected_and_fn_when_missed() {
