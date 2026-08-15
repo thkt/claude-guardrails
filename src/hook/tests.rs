@@ -165,6 +165,101 @@ fn json_edit_degraded_content_fails_open_with_note() {
     );
 }
 
+// T-533: `config_guard` judges by `file_path` alone and never reads `content`,
+// so reaching `collect_violations` at all decides whether it fires.
+#[test]
+fn guardrails_json_から行を削る空_new_string_の_edit_が_critical_の_violation_になる() {
+    use crate::content::{get_file_and_content, ToolInput, ToolInputData, ToolName};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join(".guardrails.json");
+    fs::write(&path, "{\n  \"rules\": { \"eval\": true }\n}\n").unwrap();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("\"rules\": { \"eval\": true }".to_owned()),
+            new_string: Some(String::new()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root))
+        .expect("empty new_string deletion on .guardrails.json must still resolve a target");
+
+    let config = Config {
+        git_root: Some(root.clone()),
+        ..Config::default()
+    };
+
+    let (violations, _notes) = collect_violations(
+        &target.file_path,
+        &target.content,
+        &config,
+        Some(&root),
+        target.is_js,
+        target.structured_full.as_full_str(),
+    );
+
+    let hit = violations
+        .iter()
+        .find(|v| v.rule == rule_id::CONFIG_GUARD)
+        .unwrap_or_else(|| panic!("config_guard must fire; got: {violations:?}"));
+    assert_eq!(hit.severity, Severity::Critical);
+}
+
+// T-534: `run_invariant_pass` reads `structured_full`, not the Edit snippet,
+// so an emptied snippet still carries the deleted pin into the gate.
+#[test]
+fn pin_済みの_json_から値を削る空_new_string_の_edit_が_invariant_gate_に届く() {
+    use crate::content::{get_file_and_content, ToolInput, ToolInputData, ToolName};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{\n  \"checkout\": { \"v2\": false }\n}\n").unwrap();
+    fs::write(
+        root.join(".invariants.json"),
+        r#"{ "flags.json": { "checkout.v2": false } }"#,
+    )
+    .unwrap();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("\"v2\": false".to_owned()),
+            new_string: Some(String::new()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root)).expect(
+        "empty new_string deletion of a pinned value on a reconstructable .json file must still resolve",
+    );
+
+    let config = Config {
+        git_root: Some(root.clone()),
+        ..Config::default()
+    };
+
+    let (violations, _notes) = collect_violations(
+        &target.file_path,
+        &target.content,
+        &config,
+        Some(&root),
+        target.is_js,
+        target.structured_full.as_full_str(),
+    );
+
+    assert!(
+        violations.iter().any(|v| v.rule == rule_id::INVARIANT),
+        "deleting a pinned value via empty new_string must reach the invariant gate; got: {violations:?}"
+    );
+}
+
 #[test]
 fn collect_violations_clean_code() {
     let config = Config::default();

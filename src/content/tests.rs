@@ -735,3 +735,55 @@ fn degraded_reason_note_contains_actionable_text() {
     let note = DegradedReason::MultiEditMidFailure(2).note();
     assert!(note.contains("edit 2"));
 }
+
+// T-530: an empty snippet does not mean no content. `reconstruct_structured_full`
+// replays the deletion against the on-disk `.json`.
+#[test]
+fn new_string_が空の_edit_でも_jsonの_post_edit_全文が返る() {
+    let dir = tempfile::TempDir::new().unwrap();
+    // Canonicalize so the macOS `/var` -> `/private/var` symlink does not trip
+    // the `starts_with(project_root)` path-traversal guard.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let path = root.join("flags.json");
+    fs::write(&path, "{ \"a\": 1, \"b\": 2 }").unwrap();
+
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some(", \"b\": 2".to_owned()),
+            new_string: Some(String::new()),
+            ..ToolInputData::default()
+        },
+    };
+
+    let target = get_file_and_content(&input, Some(&root))
+        .expect("empty new_string deletion on a reconstructable .json file must still resolve");
+    assert_eq!(target.structured_full.as_full_str(), Some("{ \"a\": 1 }"));
+}
+
+// T-531: an empty `file_path` names no target, so the presence of content
+// cannot rescue it.
+#[test]
+fn file_path_が空の入力は従来どおり取得失敗として扱われる() {
+    let input = make_write_input(Some(""), Some("const x = 1;"));
+    assert!(get_file_and_content(&input, None).is_none());
+}
+
+// T-532: `reconstruct_structured_full` rebuilds `.json` alone, so a `.ts`
+// deletion has no full text to fall back on.
+#[test]
+fn 全文を再構成できない種類のファイルで_content_が空のときは従来どおり_skip_する() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = temp_ts_file(&tmp, "file.ts", "const a = 1;\n");
+    let input = ToolInput {
+        tool_name: ToolName::Edit,
+        tool_input: ToolInputData {
+            file_path: Some(path.to_string_lossy().into_owned()),
+            old_string: Some("const a = 1;\n".to_owned()),
+            new_string: Some(String::new()),
+            ..ToolInputData::default()
+        },
+    };
+    assert!(get_file_and_content(&input, None).is_none());
+}

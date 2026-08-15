@@ -102,7 +102,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 - **No dedup**: 同じ理由が複数経路から発生しても両方残す。AI agent は「signal がいくつあるか」も解釈に使う
 - **Dual emit**: stderr (human readable) と `SuccessEnvelope.notes` (machine readable) の両方に同じ文字列が出る
-- **Early-return も propagate**: unsupported tool / empty content で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
+- **Early-return も propagate**: unsupported tool / content 不在で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
 
 ### Degraded derivation semantics
 
@@ -226,3 +226,30 @@ invariant gate は post-edit の full content を必要とする (pin した sca
 - `src/invariant.rs` (`is_structured_config`, `run_invariant_pass` の NFR-001 短絡)
 - ADR-0016 Amendment (invariant gate の `.json` scope)
 - ADR-0023 (stateless path-consistent invariant gate)
+
+## Amendment 2026-08-15: 空 content は degradation ではない、`get_file_and_content` の早期 return を取得失敗のみに絞る
+
+issue #454 で報告された false negative を記録する。`get_file_and_content` の早期 return は `file_path.is_empty() || content.is_empty()` だった。空の `new_string`/`content` は削除編集として正当な値だが、この条件では取得失敗と同じ扱いで `None` を返し、`ResolvedTarget` 自体が組まれず `collect_violations` の評価対象から外れていた。`.guardrails.json` の 1 行を空 `new_string` の `Edit` で削る操作は、`config_guard` (path のみで判定し `content` を読まない rule) が発火すべき対象でありながら、この早期 return で `collect_violations` に到達すらしなかった。
+
+採用: 早期 return の条件を `content.is_empty() && structured_full.as_full_str().is_none()` に絞る (`src/content.rs`)。空 content 単独では skip しない。
+
+### 空 content と取得失敗の区別
+
+「空 content」と「取得失敗」は別の状態として扱う。
+
+| 状態                                                          | 判定                                                                | `get_file_and_content` の挙動                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 空 content (削除編集)                                         | snippet (`content` / `new_string`) が空                             | skip しない。`structured_full` が `Full` を持てば `ResolvedTarget` を返す |
+| no-op (`MultiEdit` の `edits: []`)                            | snippet が空、`structured_full` は無変更の全文                      | skip しない。path 単位の rule はこの形でも発火する                        |
+| 取得失敗 (`file_path` 欠落)                                   | `file_path` が空                                                    | 常に `None` (変更前と同じ)                                                |
+| 取得失敗 (snippet も `structured_full` も content を持たない) | `content.is_empty()` かつ `structured_full.as_full_str()` が `None` | `None`                                                                    |
+
+空 content 単独を degradation 扱いにしないのは、本 ADR の `NotApplicable` と `Degraded` の境界と同じ理由による。`new_string` が空の `Edit` は「全文取得を試みたが失敗した」のではなく、ファイルの一部を消す意図どおりの編集で、`ContentResolution::Degraded` のどの `DegradedReason` にも当たらない。この変更は `ContentResolution` に新しい variant を足さず、`get_file_and_content` が `ResolvedTarget` を組むかどうかの gate だけを変える。`.json` 以外で `structured_full` が `NotApplicable` のままの場合、空 content かつ全文も無い状態は変更前と同じく `None` になる (`.ts` ファイルの空 `new_string` 削除など)。
+
+### Related
+
+- `src/content.rs` (`get_file_and_content` の早期 return 条件)
+- `src/content/tests.rs` T-530 (`.json` の空 `new_string` 削除で `structured_full` から全文が返る), T-531 (`file_path` 空は従来どおり取得失敗), T-532 (`structured_full` が組めない種類のファイルで空 content は従来どおり skip)
+- `src/hook/tests.rs` T-533 (`.guardrails.json` の空 `new_string` 削除で `config_guard` が発火), T-534 (pin 済み `.json` の空 `new_string` 削除で invariant gate に届く)
+- `tests/cli/edit.rs` T-535 (`.guardrails.json` の空 `new_string` 削除が exit 2 で止まる), T-536 (単一 edit の MultiEdit も同じ経路で止まる), T-537 (`edits: []` の MultiEdit も止まる)
+- issue #454
