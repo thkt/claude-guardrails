@@ -102,7 +102,7 @@ security check は止めない。snippet 単独でも false positive が出る�
 
 - **No dedup**: 同じ理由が複数経路から発生しても両方残す。AI agent は「signal がいくつあるか」も解釈に使う
 - **Dual emit**: stderr (human readable) と `SuccessEnvelope.notes` (machine readable) の両方に同じ文字列が出る
-- **Early-return も propagate**: unsupported tool / empty content で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
+- **Early-return も propagate**: unsupported tool / content 不在で content 解析自体をスキップする経路でも、Order 1 (project root) は既に push 済みのため `notes` を envelope に流す。`degraded` flag が environmental degradation を反映するためで、`get_file_and_content` が `None` を返した側で notes を捨ててはならない
 
 ### Degraded derivation semantics
 
@@ -250,4 +250,5 @@ issue #454 で報告された false negative を記録する。`get_file_and_con
 - `src/content.rs` (`get_file_and_content` の早期 return 条件)
 - `src/content/tests.rs` T-530 (`.json` の空 `new_string` 削除で `structured_full` から全文が返る), T-531 (`file_path` 空は従来どおり取得失敗), T-532 (`structured_full` が組めない種類のファイルで空 content は従来どおり skip)
 - `src/hook/tests.rs` T-533 (`.guardrails.json` の空 `new_string` 削除で `config_guard` が発火), T-534 (pin 済み `.json` の空 `new_string` 削除で invariant gate に届く)
+- `tests/cli/edit.rs` T-535 (`.guardrails.json` の空 `new_string` 削除が exit 2 で止まる), T-536 (単一 edit の MultiEdit も同じ経路で止まる)
 - issue #454
