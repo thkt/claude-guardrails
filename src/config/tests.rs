@@ -1101,8 +1101,7 @@ fn claude_guardrails_json_由来の_note_がそのファイル名を名乗る() 
 // T-575: 手書き fixture の note が production の書式と一致する
 //
 // `src/hook/tests.rs` の T-511 は production の note を手で書き写した文字列を
-// 使う。production が組み立てた実物と突き合わせて、書式が離れたら落ちるように
-// する。
+// 使う。実物と突き合わせないと、書式が離れても気付けない。
 #[test]
 fn 手書き_fixture_の_note_が_production_の書式と一致する() {
     let pattern = "src/[invalid";

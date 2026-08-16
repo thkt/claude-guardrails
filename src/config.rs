@@ -318,9 +318,8 @@ impl Config {
     }
 
     /// Failed patterns leave through the returned notes rather than onto
-    /// `Config`, which carries settings and not diagnostics. `source_file` is
-    /// one of the three load-source constants, passed through unchanged so
-    /// `invalid_pattern_note` can name where a dropped pattern was read from.
+    /// `Config`, which carries settings and not diagnostics. `source_file`
+    /// must be one of the three load-source constants.
     fn merge_with_notes(
         mut self,
         project: ProjectConfig,
@@ -403,10 +402,9 @@ impl Config {
     /// Load-time only. This note does not depend on `file_path`, so emitting
     /// it per file would repeat one config defect on every hook invocation.
     ///
-    /// Ends with the config file the entry was read from, so a person fixing
-    /// the pattern knows which file to open. `.claude/tools.json` nests
-    /// project config under its `guardrails` key rather than at the JSON
-    /// root, so that note also names the key `overrides` sits under.
+    /// Names the config file so a person fixing the pattern knows which one to
+    /// open. `.claude/tools.json` nests project config under its `guardrails`
+    /// key rather than at the JSON root, so that note also names the key.
     fn invalid_pattern_note(pattern: &str, source_file: &str) -> String {
         let location = if source_file == TOOLS_CONFIG_FILE {
             format!("{source_file}: guardrails")
