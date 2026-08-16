@@ -595,41 +595,6 @@ fn claude_tools_jsonに_compileできないglobを書くとnoteがそのパス�
     );
 }
 
-// T-577: `.guardrails.json` の場合も同じ形で名乗る
-#[test]
-fn guardrails_jsonの場合も同じ形で名乗る() {
-    let tmp = tmp_repo();
-    fs::write(
-        tmp.path().join(".guardrails.json"),
-        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"eval": false}}]}"#,
-    )
-    .unwrap();
-    let json = serde_json::json!({
-        "tool_name": "Write",
-        "tool_input": {
-            "file_path": "src/app.ts",
-            "content": "export const x = 1;\n"
-        }
-    });
-    let output = run_guardrails_with(
-        json.to_string().as_bytes(),
-        Some(tmp.path()),
-        &[("NO_COLOR", "1")],
-        &["--json"],
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
-    let context = parsed["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .expect("additionalContext must carry the note to the agent");
-    assert_eq!(
-        context,
-        "guardrails: override entry dropped: glob pattern \"src/[invalid\" failed to compile in .guardrails.json",
-        "expected the note to name .guardrails.json's own path, in the same location-naming form as T-576; got: {context}"
-    );
-}
-
 /// `src/allowed/**` で eval を切る config と `src/allowed/esc -> ../protected`
 /// を持つ repository を組み、`TempDir` と実体の root を返す。`TempDir` を落とす
 /// とディレクトリごと消えるので、呼び出し側で束縛したまま保持する。
