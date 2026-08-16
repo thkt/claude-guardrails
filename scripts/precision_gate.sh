@@ -3,6 +3,9 @@
 # precision harness snapshot worsens on head vs base:
 #   - per-rule FP rate (rules.<id>.fp / .tn), compared via integer
 #     cross-multiplication so corpus growth does not skew the ratio;
+#   - per-rule corpus sample count (rules.<id>.tp+fn+fp+tn), which must not
+#     shrink, so a PR that drops a rule's corpus fixtures fails instead of
+#     silently losing coverage;
 #   - the override-application axis (overrides.leak / .overreach), which
 #     must not increase (see src/hook/precision.rs OverrideMetrics doc).
 # `jq` must error (not read null) on any schema drift, and this script must
@@ -30,11 +33,18 @@ def rule_report:
     else
       ($h.fp // error("head rule \($rule): fp field missing")) as $hfp
       | ($h.tn // error("head rule \($rule): tn field missing")) as $htn
+      | ($h.tp // error("head rule \($rule): tp field missing")) as $htp
+      | ($h.fn // error("head rule \($rule): fn field missing")) as $hfn
       | ($br.fp // error("base rule \($rule): fp field missing")) as $bfp
       | ($br.tn // error("base rule \($rule): tn field missing")) as $btn
-      | if ($hfp * ($bfp + $btn)) > ($bfp * ($hfp + $htn)) then
+      | ($br.tp // error("base rule \($rule): tp field missing")) as $btp
+      | ($br.fn // error("base rule \($rule): fn field missing")) as $bfn
+      | (if ($hfp * ($bfp + $btn)) > ($bfp * ($hfp + $htn)) then
           "FAIL \($rule): FP rate worsened, base \($bfp)/\($bfp + $btn) -> head \($hfp)/\($hfp + $htn)"
-        else empty end
+        else empty end),
+      (if ($htp + $hfn + $hfp + $htn) < ($btp + $bfn + $bfp + $btn) then
+          "FAIL \($rule): corpus sample count shrank, base \($btp + $bfn + $bfp + $btn) -> head \($htp + $hfn + $hfp + $htn)"
+        else empty end)
     end;
 
 # base predating the override axis (U-002) is a bootstrap, not a failure:
@@ -74,14 +84,15 @@ run_gate() {
     echo "::error::precision gate failed (see FAIL lines above)"
     return 1
   fi
-  echo "OK: no per-rule FP rate or override-axis regression"
+  echo "OK: no per-rule FP rate, corpus sample count, or override-axis regression"
   return 0
 }
 
-# self_check exercises both branches the corpus/schema-error path do not
-# reliably reach on a given PR (a FAIL line, and the override-axis bootstrap
-# skip) against fixed fixtures, so a jq/schema drift that silently disables
-# the gate is caught even when the real base/head diff is clean.
+# self_check exercises the branches the corpus/schema-error path does not
+# reliably reach on a given PR (a FAIL line, the override-axis bootstrap
+# skip, and a corpus-shrink FAIL line) against fixed fixtures, so a
+# jq/schema drift that silently disables the gate is caught even when the
+# real base/head diff is clean.
 self_check() {
   local status=0
 
@@ -97,10 +108,16 @@ self_check() {
     status=1
   fi
 
+  echo "precision_gate self-check: shrinking corpus sample count must FAIL the gate"
+  if run_gate "$FIXTURE_DIR/corpus_shrink/base.json" "$FIXTURE_DIR/corpus_shrink/head.json" >/dev/null; then
+    echo "::error::self-check: corpus_shrink/ fixtures did not fail the gate (corpus sample count FAIL branch not exercised — gate logic drifted?)"
+    status=1
+  fi
+
   if [ "$status" -ne 0 ]; then
     return 1
   fi
-  echo "OK: precision_gate self-check passed (FAIL and bootstrap-skip branches both exercised)"
+  echo "OK: precision_gate self-check passed (FAIL, bootstrap-skip, and corpus-shrink branches all exercised)"
 }
 
 if [ "${1:-}" = "--self-check" ]; then

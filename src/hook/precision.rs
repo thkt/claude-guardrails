@@ -931,7 +931,8 @@ fn baseline_でも黙るサンプルは過剰適用に数えない() {
     );
 }
 
-// T-499: gate の fixture が MetricsReport の schema からずれると落ちる
+// T-499: gate の fixture が MetricsReport の schema からずれると落ちる。
+// self_check() (scripts/precision_gate.sh) が叩く fixture 全種をここに揃える。
 #[test]
 fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
     // fixture は数値シナリオを表すので手書きのまま置く。schema が動いたときだけ
@@ -940,6 +941,8 @@ fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
         "scripts/fixtures/precision_gate/bootstrap/head.json",
         "scripts/fixtures/precision_gate/fail/base.json",
         "scripts/fixtures/precision_gate/fail/head.json",
+        "scripts/fixtures/precision_gate/corpus_shrink/base.json",
+        "scripts/fixtures/precision_gate/corpus_shrink/head.json",
     ] {
         let raw = read_fixture(relative);
         serde_json::from_str::<MetricsReport>(&raw)
@@ -1119,5 +1122,94 @@ fn override_軸を持たない_json_を_base_側に渡すと_gate_は_bootstrap_
     assert!(
         run_gate(&base_path, &head_path),
         "base predating the override axis must bootstrap-skip, not fail"
+    );
+}
+
+/// `tiny_report` は 2 サンプル固定なので、総数を変える test はこちらを使う。
+///
+/// 全サンプルを Fire にして fp=tn=0 に揃えるのは、precision_gate.sh の FP
+/// レート判定 (`bfp * (bfp+btn)` 系) を常に不発にし、corpus サンプル総数の
+/// 判定だけを単独で踏ませるため。
+fn report_with_eval_sample_count(count: u32) -> MetricsReport {
+    let config = harness_config();
+    let samples: Vec<CorpusSample> = (0..count)
+        .map(|_| CorpusSample {
+            rule: "eval",
+            path: "/src/app.ts",
+            content: "eval(userInput);\n",
+            expectation: Expectation::Fire,
+        })
+        .collect();
+    let tallies = tally_corpus(&samples, &config);
+    build_report(
+        tallies,
+        &BTreeMap::new(),
+        BTreeMap::new(),
+        OverrideMetrics::default(),
+    )
+}
+
+// T-559: sample 総数を 1 件減らした JSON を head 側に渡すと gate は失敗で返る
+#[test]
+fn sample_総数を_1_件減らした_json_を_head_側に渡すと_gate_は失敗で返る() {
+    let base_report = report_with_eval_sample_count(3);
+    let head_report = report_with_eval_sample_count(2);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base_path = dir.path().join("base.json");
+    let head_path = dir.path().join("head.json");
+    write_via_metrics_out_env(&base_report, &base_path);
+    write_via_metrics_out_env(&head_report, &head_path);
+
+    assert!(
+        !run_gate(&base_path, &head_path),
+        "head の eval corpus サンプル総数が base より 1 件少ないと gate は失敗しなければならない"
+    );
+}
+
+// T-560: 同じ JSON を両側に渡すと gate は成功で返る
+#[test]
+fn 同じ_json_を両側に渡すと_gate_は成功で返る() {
+    let report = report_with_eval_sample_count(3);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("metrics.json");
+    write_via_metrics_out_env(&report, &path);
+
+    assert!(
+        run_gate(&path, &path),
+        "base と head の corpus サンプル総数が同じなら gate は成功しなければならない"
+    );
+}
+
+// T-561: base に無い rule を持つ head を渡しても gate は成功で返る
+#[test]
+fn base_に無い_rule_を持つ_head_を渡しても_gate_は成功で返る() {
+    let report = report_with_eval_sample_count(3);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base_path = dir.path().join("base.json");
+    let head_path = dir.path().join("head.json");
+    write_via_metrics_out_env(&report, &base_path);
+    write_via_metrics_out_env(&report, &head_path);
+
+    // 実物の JSON から一部を削るので、schema が実物からずれない。
+    let mut base_value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&base_path).expect("read base"))
+            .expect("parse base json");
+    base_value["rules"]
+        .as_object_mut()
+        .expect("rules serializes as a JSON object")
+        .remove("eval")
+        .expect("eval must be present before removal (fixture bug otherwise)");
+    fs::write(
+        &base_path,
+        serde_json::to_string_pretty(&base_value).expect("serialize stripped base"),
+    )
+    .expect("write stripped base");
+
+    assert!(
+        run_gate(&base_path, &head_path),
+        "head にしかない rule (base に absent) は SKIP されるべきで gate を失敗させてはいけない"
     );
 }
