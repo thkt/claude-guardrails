@@ -1097,3 +1097,31 @@ fn claude_guardrails_json_由来の_note_がそのファイル名を名乗る() 
          end; got: {note}"
     );
 }
+
+// T-575: 手書き fixture の note が production の書式と一致する
+//
+// `src/hook/tests.rs` の T-511 は production の note を手で書き写した文字列を
+// 使う。production が組み立てた実物と突き合わせて、書式が離れたら落ちるように
+// する。
+#[test]
+fn 手書き_fixture_の_note_が_production_の書式と一致する() {
+    let pattern = "src/[invalid";
+    let (_tmp, _config, notes) = repo_with_config_and_notes(&format!(
+        r#"{{"overrides": [{{"files": ["{pattern}"], "rules": {{"security": false}}}}]}}"#
+    ));
+
+    let production_note = notes
+        .iter()
+        .find(|n| n.contains("failed to compile"))
+        .unwrap_or_else(|| panic!("expected a compile-failure note; got: {notes:?}"));
+
+    let hand_written_note = format!(
+        "override entry dropped: glob pattern \"{pattern}\" failed to compile in {GUARDRAILS_CONFIG_FILE}"
+    );
+
+    assert_eq!(
+        production_note, &hand_written_note,
+        "T-511's hand-written fixture note must match production's format; \
+         production: {production_note}, fixture: {hand_written_note}"
+    );
+}
