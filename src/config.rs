@@ -504,7 +504,9 @@ impl Config {
     }
 
     /// How many `rule_id`s each disabled toggle stops firing, appended outside
-    /// the bracketed lists so the existing note format stays greppable.
+    /// the bracketed lists so the existing note format stays greppable. Each
+    /// count reflects the toggle's individual effect in isolation, not the
+    /// sum of multiple toggles' effects together.
     ///
     /// Per toggle, never summed: `security` is emitted by the registry rule
     /// and by `ast_security`'s postMessage path alike, so adding two toggles'

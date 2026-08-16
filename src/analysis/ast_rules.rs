@@ -1,4 +1,4 @@
-//! The six AST-driven structural rules and the subprocess that runs them
+//! The seven AST-driven structural rules and the subprocess that runs them
 //! (#314). Deeply nested input overflows oxc's recursive-descent parser and
 //! aborts the whole process (SIGABRT, exit 134), which is non-blocking for a
 //! `PreToolUse` hook — every check is silently bypassed (fail-open). A byte scan
@@ -20,7 +20,7 @@ use std::io::{self, Read};
 use std::panic;
 use std::process;
 
-/// The six toggles that gate an AST rule. Carried to the child so it applies the
+/// The seven toggles that gate an AST rule. Carried to the child so it applies the
 /// caller's config without serializing the whole `Config`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AstRuleFlags {
@@ -34,7 +34,7 @@ pub struct AstRuleFlags {
 }
 
 impl AstRuleFlags {
-    /// Reads the six toggles straight off `RulesConfig`, for callers that hold
+    /// Reads the seven toggles straight off `RulesConfig`, for callers that hold
     /// only the rules sub-config (not the full `Config`). `from_config` delegates
     /// here so the field ordering lives in one place.
     pub fn from_rules(rules: &RulesConfig) -> Self {

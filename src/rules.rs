@@ -219,13 +219,12 @@ toggle_isolation! {
 /// `None` when the toggle gates no fixed set: `"oxlint"` runs an external
 /// linter instead of first-party `rule_id`s.
 ///
-/// The count is `live_rule_ids(rules) - live_rule_ids(rules with the toggle
-/// off)`, so it reflects `rules` as given rather than always assuming a
-/// default baseline: a `rule_id` already silenced by another toggle in
-/// `rules` (e.g. `astSecurity` already off) does not count twice, and one
-/// that stays live through a different toggle (`excessive-nesting` via any
-/// other AST toggle, `rule_id::SECURITY` via `astSecurity`) is not counted as
-/// stopped.
+/// The count is derived from the provided `rules` config:
+/// `live_rule_ids(rules) - live_rule_ids(rules with the toggle off)`. A
+/// `rule_id` already silenced by another toggle in `rules` (e.g.
+/// `astSecurity` already off) does not count twice, and one that stays live
+/// through a different toggle (`excessive-nesting` via any other AST toggle,
+/// `rule_id::SECURITY` via `astSecurity`) is not counted as stopped.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
