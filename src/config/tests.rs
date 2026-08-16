@@ -1024,3 +1024,76 @@ fn 後続_entry_が戻した_toggle_は_note_に出ず_同じ_entry_の別_toggl
          got: {notes:?}"
     );
 }
+
+// T-572: `.guardrails.json` 由来の note が `.guardrails.json` の位置を名乗る
+#[test]
+fn guardrails_json_由来の_note_が_guardrails_json_の位置を名乗る() {
+    let (_tmp, _config, notes) = repo_with_config_and_notes(
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}"#,
+    );
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("failed to compile"))
+        .unwrap_or_else(|| panic!("expected a compile-failure note; got: {notes:?}"));
+    assert!(
+        note.ends_with(GUARDRAILS_CONFIG_FILE),
+        "expected the note to name the config file it was read from at its \
+         end; got: {note}"
+    );
+}
+
+// T-573: `.claude/tools.json` 由来の note が `guardrails` キーの下であることを名乗る
+#[test]
+fn claude_tools_json_由来の_note_が_guardrails_キーの下であることを名乗る() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(TOOLS_CONFIG_FILE),
+        r#"{"guardrails": {"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}}"#,
+    )
+    .unwrap();
+
+    let (_config, notes) = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("failed to compile"))
+        .unwrap_or_else(|| panic!("expected a compile-failure note; got: {notes:?}"));
+    assert!(
+        note.contains(TOOLS_CONFIG_FILE),
+        "expected the note to name {TOOLS_CONFIG_FILE}; got: {note}"
+    );
+    assert!(
+        note.ends_with("guardrails"),
+        "expected the note to end by naming the JSON position (the \
+         \"guardrails\" key `overrides` sits under in {TOOLS_CONFIG_FILE}); \
+         got: {note}"
+    );
+}
+
+// T-574: `.claude-guardrails.json` 由来の note がそのファイル名を名乗る
+#[test]
+fn claude_guardrails_json_由来の_note_がそのファイル名を名乗る() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(LEGACY_CONFIG_FILE),
+        r#"{"overrides": [{"files": ["src/[invalid"], "rules": {"testAssertion": false}}]}"#,
+    )
+    .unwrap();
+
+    let (_config, notes) = Config::default()
+        .with_overrides_from_root(tmp.path())
+        .unwrap();
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("failed to compile"))
+        .unwrap_or_else(|| panic!("expected a compile-failure note; got: {notes:?}"));
+    assert!(
+        note.ends_with(LEGACY_CONFIG_FILE),
+        "expected the note to name the config file it was read from at its \
+         end; got: {note}"
+    );
+}
