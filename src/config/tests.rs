@@ -823,7 +823,7 @@ fn security_を切る_override_の_note_が_1_と出る() {
 // `security` stops 2 rule_id(s): "security" and "dangerous-inner-html"), not
 // the state as it stood before the later `astSecurity` entry ran.
 #[test]
-fn security_と_astSecurity_を別_entry_で切ると_security_の_note_が_2_を出す() {
+fn security_と_ast_security_を別_entry_で切ると_security_の_note_が_2_を出す() {
     let (tmp, config) = repo_with_config(
         r#"{"overrides": [
             {"files": ["**"], "rules": {"security": false}},
@@ -842,6 +842,31 @@ fn security_と_astSecurity_を別_entry_で切ると_security_の_note_が_2_�
         "expected security's note to count the rule_id that astSecurity's \
          postMessage path also stops, since astSecurity is off in the final \
          configuration too; got: {note}"
+    );
+}
+
+// T-614: astSecurity を top-level で切った構成でも security の note が 2 を出す
+//
+// issue #460 の Steps to reproduce そのものの構成。T-607 は astSecurity を 2 件目の
+// override に置く形を見るので、top-level で切る経路は別に押さえる。
+#[test]
+fn ast_security_を_top_level_で切ると_security_の_note_が_2_を出す() {
+    let (tmp, config) = repo_with_config(
+        r#"{"rules": {"astSecurity": false},
+            "overrides": [{"files": ["**"], "rules": {"security": false}}]}"#,
+    );
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("security stops"))
+        .unwrap_or_else(|| panic!("expected an override note naming security; got: {notes:?}"));
+    assert!(
+        note.contains("security stops 2 rule_id(s)"),
+        "expected security's note to count the rule_id that astSecurity's \
+         postMessage path also stops, since astSecurity is off at the top \
+         level; got: {note}"
     );
 }
 
