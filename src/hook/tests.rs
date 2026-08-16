@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{OverrideEntry, ProjectRulesConfig, RulesConfig};
+use crate::config::{OverrideEntry, ProjectRulesConfig, RulesConfig, GUARDRAILS_CONFIG_FILE};
 use crate::rules::{rule_id, toggle_rule_id_count, Severity};
 use globset::Glob;
 
@@ -812,7 +812,7 @@ fn hook_経路では_compile_失敗の_note_がちょうど_1_件出る() {
     let file_path = "/src/app.ts";
     let pattern = "src/[invalid";
     let load_notes = vec![format!(
-        "override entry dropped: glob pattern \"{pattern}\" failed to compile"
+        "override entry dropped: glob pattern \"{pattern}\" failed to compile in {GUARDRAILS_CONFIG_FILE}"
     )];
 
     let mut notes = Vec::new();
@@ -827,5 +827,47 @@ fn hook_経路では_compile_失敗の_note_がちょうど_1_件出る() {
         compile_failure_notes.len(),
         1,
         "expected exactly one compile-failure note through the hook path; got: {notes:?}"
+    );
+}
+
+// T-575: 手書き fixture の note が production の書式と一致する
+//
+// T-511 の `load_notes` は production を手で書き写した文字列。ここでは同じ
+// pattern を本物の `.guardrails.json` に書き `Config::with_project_overrides`
+// を実走させ、production が実際に組み立てる note と T-511 の手書き文字列を
+// 突き合わせる。`with_project_overrides` は git root を cwd から探すので、
+// この test 内でだけ cwd を張り替えて戻す。
+#[test]
+fn 手書き_fixture_の_note_が_production_の書式と一致する() {
+    let pattern = "src/[invalid";
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    fs::create_dir(tmp.path().join(".git")).unwrap();
+    fs::write(
+        tmp.path().join(GUARDRAILS_CONFIG_FILE),
+        format!(r#"{{"overrides": [{{"files": ["{pattern}"], "rules": {{"security": false}}}}]}}"#),
+    )
+    .unwrap();
+
+    let original_cwd = env::current_dir().unwrap();
+    env::set_current_dir(tmp.path()).unwrap();
+    let result = Config::default().with_project_overrides();
+    env::set_current_dir(&original_cwd).unwrap();
+
+    let (_config, production_notes) = result.unwrap();
+    let production_note = production_notes
+        .iter()
+        .find(|n| n.contains("failed to compile"))
+        .unwrap_or_else(|| panic!("expected a compile-failure note; got: {production_notes:?}"));
+
+    // T-511 (行 814-816) と同じ組み立て方の手書き文字列。
+    let hand_written_note = format!(
+        "override entry dropped: glob pattern \"{pattern}\" failed to compile in {GUARDRAILS_CONFIG_FILE}"
+    );
+
+    assert_eq!(
+        production_note, &hand_written_note,
+        "T-511's hand-written fixture note must match production's format; \
+         production: {production_note}, fixture: {hand_written_note}"
     );
 }
