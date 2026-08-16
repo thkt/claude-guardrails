@@ -1,1 +1,2 @@
 setTimeout('foo()', 100);
+target.postMessage(payload, '*');
