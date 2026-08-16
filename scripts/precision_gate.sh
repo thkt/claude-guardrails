@@ -84,7 +84,7 @@ run_gate() {
     echo "::error::precision gate failed (see FAIL lines above)"
     return 1
   fi
-  echo "OK: no per-rule FP rate or override-axis regression"
+  echo "OK: no per-rule FP rate, corpus sample count, or override-axis regression"
   return 0
 }
 

@@ -931,7 +931,8 @@ fn baseline_でも黙るサンプルは過剰適用に数えない() {
     );
 }
 
-// T-499: gate の fixture が MetricsReport の schema からずれると落ちる
+// T-499: gate の fixture が MetricsReport の schema からずれると落ちる。
+// self_check() (scripts/precision_gate.sh) が叩く fixture 全種をここに揃える。
 #[test]
 fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
     // fixture は数値シナリオを表すので手書きのまま置く。schema が動いたときだけ
@@ -940,6 +941,8 @@ fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
         "scripts/fixtures/precision_gate/bootstrap/head.json",
         "scripts/fixtures/precision_gate/fail/base.json",
         "scripts/fixtures/precision_gate/fail/head.json",
+        "scripts/fixtures/precision_gate/corpus_shrink/base.json",
+        "scripts/fixtures/precision_gate/corpus_shrink/head.json",
     ] {
         let raw = read_fixture(relative);
         serde_json::from_str::<MetricsReport>(&raw)
@@ -957,21 +960,6 @@ fn gate_の_fixture_は_metricsreport_の_schema_と一致する() {
         + r#", "overrides": {"leak": 0, "overreach": 0} }"#;
     serde_json::from_str::<MetricsReport>(&with_axis)
         .unwrap_or_else(|e| panic!("bootstrap base must match the schema minus the axis: {e}"));
-}
-
-// T-558: self_check() (scripts/precision_gate.sh) が corpus_shrink/ の
-// fixture も叩くのに、T-499 の deserialize 対象リストはそれを含んでいなかった。
-// bootstrap/fail と同じ形で corpus_shrink/base.json・head.json を足す。
-#[test]
-fn 追加した_self_check_fixture_が_metricsreport_の_schema_と一致する() {
-    for relative in [
-        "scripts/fixtures/precision_gate/corpus_shrink/base.json",
-        "scripts/fixtures/precision_gate/corpus_shrink/head.json",
-    ] {
-        let raw = read_fixture(relative);
-        serde_json::from_str::<MetricsReport>(&raw)
-            .unwrap_or_else(|e| panic!("{relative} must match the MetricsReport schema: {e}"));
-    }
 }
 
 fn read_fixture(relative: &str) -> String {
