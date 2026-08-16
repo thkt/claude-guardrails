@@ -521,7 +521,7 @@ fn json_envelope_の_notes_に_compile_失敗の_note_がちょうど_1_件入�
         .expect("additionalContext must carry the note to the agent");
     assert_eq!(
         context,
-        "guardrails: override entry dropped: glob pattern \"src/[invalid\" failed to compile",
+        "guardrails: override entry dropped: glob pattern \"src/[invalid\" failed to compile in .guardrails.json",
         "the agent reads the same note as prose; got: {context}"
     );
 }
@@ -557,6 +557,41 @@ fn json_無しの_hook_mode_でも同じ_note_が_stderr_に_1_行だけ出る()
     assert_eq!(
         occurrences, 1,
         "expected the compile-failure note on stderr exactly once; got: {stderr:?}"
+    );
+}
+
+// T-576: `.claude/tools.json` に compile できない glob を書くと note がそのパスを名乗る
+#[test]
+fn claude_tools_jsonに_compileできないglobを書くとnoteがそのパスを名乗る() {
+    let tmp = tmp_repo_with_claude();
+    fs::write(
+        tmp.path().join(".claude/tools.json"),
+        r#"{"guardrails": {"overrides": [{"files": ["src/[invalid"], "rules": {"eval": false}}]}}"#,
+    )
+    .unwrap();
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/app.ts",
+            "content": "export const x = 1;\n"
+        }
+    });
+    let output = run_guardrails_with(
+        json.to_string().as_bytes(),
+        Some(tmp.path()),
+        &[("NO_COLOR", "1")],
+        &["--json"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON envelope");
+    let context = parsed["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext must carry the note to the agent");
+    assert_eq!(
+        context,
+        "guardrails: override entry dropped: glob pattern \"src/[invalid\" failed to compile in .claude/tools.json: guardrails",
+        "expected the note to name .claude/tools.json's own path, not .guardrails.json; got: {context}"
     );
 }
 

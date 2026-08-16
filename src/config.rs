@@ -282,7 +282,7 @@ impl Config {
                     path: agent_neutral_path,
                     source: e,
                 })?;
-            return Ok(self.merge_with_notes(project));
+            return Ok(self.merge_with_notes(project, GUARDRAILS_CONFIG_FILE));
         }
 
         let tools_path = git_root.join(TOOLS_CONFIG_FILE);
@@ -293,7 +293,7 @@ impl Config {
                     source: e,
                 })?;
             if let Some(project) = tools.guardrails {
-                return Ok(self.merge_with_notes(project));
+                return Ok(self.merge_with_notes(project, TOOLS_CONFIG_FILE));
             }
             return Ok((self, Vec::new()));
         }
@@ -305,7 +305,7 @@ impl Config {
                     path: legacy_path,
                     source: e,
                 })?;
-            return Ok(self.merge_with_notes(project));
+            return Ok(self.merge_with_notes(project, LEGACY_CONFIG_FILE));
         }
 
         Ok((self, Vec::new()))
@@ -314,12 +314,17 @@ impl Config {
     /// Note-discarding form for tests that assert on the merged fields alone.
     #[cfg(test)]
     fn merge(self, project: ProjectConfig) -> Self {
-        self.merge_with_notes(project).0
+        self.merge_with_notes(project, GUARDRAILS_CONFIG_FILE).0
     }
 
     /// Failed patterns leave through the returned notes rather than onto
-    /// `Config`, which carries settings and not diagnostics.
-    fn merge_with_notes(mut self, project: ProjectConfig) -> (Self, Vec<String>) {
+    /// `Config`, which carries settings and not diagnostics. `source_file`
+    /// must be one of the three load-source constants.
+    fn merge_with_notes(
+        mut self,
+        project: ProjectConfig,
+        source_file: &str,
+    ) -> (Self, Vec<String>) {
         let mut notes = Vec::new();
         self.source = ConfigSource::Explicit;
         if let Some(enabled) = project.enabled {
@@ -357,7 +362,7 @@ impl Config {
                     Err(failed_patterns) => notes.extend(
                         failed_patterns
                             .iter()
-                            .map(|pattern| Self::invalid_pattern_note(pattern)),
+                            .map(|pattern| Self::invalid_pattern_note(pattern, source_file)),
                     ),
                 }
             }
@@ -396,8 +401,19 @@ impl Config {
 
     /// Load-time only. This note does not depend on `file_path`, so emitting
     /// it per file would repeat one config defect on every hook invocation.
-    fn invalid_pattern_note(pattern: &str) -> String {
-        format!("override entry dropped: glob pattern \"{pattern}\" failed to compile")
+    ///
+    /// Names the config file so a person fixing the pattern knows which one to
+    /// open. `.claude/tools.json` nests project config under its `guardrails`
+    /// key rather than at the JSON root, so that note also names the key.
+    fn invalid_pattern_note(pattern: &str, source_file: &str) -> String {
+        let location = if source_file == TOOLS_CONFIG_FILE {
+            format!("{source_file}: guardrails")
+        } else {
+            source_file.to_owned()
+        };
+        format!(
+            "override entry dropped: glob pattern \"{pattern}\" failed to compile in {location}"
+        )
     }
 
     pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {

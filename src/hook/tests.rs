@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{OverrideEntry, ProjectRulesConfig, RulesConfig};
+use crate::config::{OverrideEntry, ProjectRulesConfig, RulesConfig, GUARDRAILS_CONFIG_FILE};
 use crate::rules::{rule_id, toggle_rule_id_count, Severity};
 use globset::Glob;
 
@@ -812,7 +812,7 @@ fn hook_経路では_compile_失敗の_note_がちょうど_1_件出る() {
     let file_path = "/src/app.ts";
     let pattern = "src/[invalid";
     let load_notes = vec![format!(
-        "override entry dropped: glob pattern \"{pattern}\" failed to compile"
+        "override entry dropped: glob pattern \"{pattern}\" failed to compile in {GUARDRAILS_CONFIG_FILE}"
     )];
 
     let mut notes = Vec::new();
