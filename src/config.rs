@@ -1,5 +1,5 @@
 use crate::path_resolve::{self, Resolved};
-use crate::rules::{toggle_rule_id_count, Severity};
+use crate::rules::{combination_only_rule_id_count, toggle_rule_id_count, Severity};
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
@@ -514,14 +514,27 @@ impl Config {
     /// `with_toggles_restored`): `toggle_rule_id_count` computes each name's
     /// count as the drop from turning that one toggle off starting from
     /// `rules`, so a `disabled` toggle already off in `rules` would count 0.
+    ///
+    /// The per-toggle counts above are each an *isolated* probe (only that
+    /// one name off, the rest of `disabled` still on in `rules`), so their
+    /// sum can undercount what `disabled` actually stops together: turning
+    /// two AST toggles off *together* can drop `AstRuleFlags::any()` to
+    /// false and remove `excessive-nesting` too, a `rule_id` neither
+    /// isolated probe saw move (`combination_only_rule_id_count`). When that
+    /// happens an independent trailing clause names the difference, without
+    /// changing the existing per-toggle phrases above.
     fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
-        let parts: Vec<String> = disabled
+        let mut parts: Vec<String> = disabled
             .iter()
             .map(|&name| match toggle_rule_id_count(name, rules) {
                 Some(count) => format!("{name} stops {count} rule_id(s)"),
                 None => format!("{name}: external linter"),
             })
             .collect();
+        let combination = combination_only_rule_id_count(disabled, rules);
+        if combination > 0 {
+            parts.push(format!("combination stops {combination} more rule_id(s)"));
+        }
         if parts.is_empty() {
             String::new()
         } else {

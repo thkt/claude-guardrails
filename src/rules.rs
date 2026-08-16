@@ -237,6 +237,35 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Op
         })
 }
 
+/// How many `rule_id`s stop firing only when every name in `names` is off
+/// *together*, beyond what each name's own [`toggle_rule_id_count`] already
+/// credits it with. Zero in the common case where no `rule_id` depends on the
+/// combination.
+///
+/// `excessive-nesting` is the one `rule_id` this currently applies to: it
+/// stays live as long as any `AstRuleFlags` toggle is on
+/// ([`live_rule_ids`]), so turning off two AST toggles that share it neither
+/// isolated count sees move, while turning both off together can drop
+/// `AstRuleFlags::any()` to false and remove it too.
+///
+/// `rules` must have every name in `names` already on (the same precondition
+/// `toggle_rule_id_count` takes), so "before" here and there is the same file
+/// configuration; see `RulesConfig::with_toggles_restored`.
+pub(crate) fn combination_only_rule_id_count(names: &[&str], rules: &RulesConfig) -> usize {
+    let before = live_rule_ids(rules);
+    let mut all_off = rules.clone();
+    for &name in names {
+        all_off = rules_with_toggle_off(&all_off, name);
+    }
+    let after = live_rule_ids(&all_off);
+    let actual = before.difference(&after).count();
+    let isolated_sum: usize = names
+        .iter()
+        .filter_map(|&name| toggle_rule_id_count(name, rules))
+        .sum();
+    actual.saturating_sub(isolated_sum)
+}
+
 pub static RE_JS_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_JS_FILE", r"\.m?[jt]sx?$"));
 

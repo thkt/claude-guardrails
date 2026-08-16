@@ -878,3 +878,90 @@ fn override_が_1_件だけの構成では_note_の並び順が変わらない()
         "expected the rule_id-count breakdown in the same order; got: {note}"
     );
 }
+
+// T-609: AST toggle が eval だけ on の構成で eval を切ると、組み合わせで止まる分が note に出る
+//
+// `excessive-nesting` (rules.rs `live_rule_ids`) stays live as long as any of
+// the seven `AstRuleFlags` toggles is on. The base config here turns off five
+// of the seven, leaving `noUseEffect` and `eval` as the only two AST toggles
+// still on; one `overrides` entry disables both at once. Read from
+// `restored` (this entry's before-state, both toggles on), each toggle's
+// *isolated* count — `toggle_rule_id_count` turning off only that one name,
+// the other name in `disabled` still on — stays at 1 (`no-use-effect`,
+// `eval`): with the other toggle still on, `AstRuleFlags::any()` stays true
+// either way, so neither isolated probe sees `excessive-nesting` move.
+// Turning both off *together* (this entry's actual effect) is what drops
+// `any()` to false and removes `excessive-nesting` too — a third rule_id
+// neither isolated count credits, `isolated sum (2) != live_rule_ids(before)
+// - live_rule_ids(after) (3)`. `stopped_rule_id_summary` must add that
+// difference as an independent clause without changing the two existing
+// `stops 1 rule_id(s)` phrases.
+#[test]
+fn ast_toggle_が_eval_だけ_on_の構成で_eval_を切ると_組み合わせで止まる分が_note_に出る() {
+    let (tmp, config) = repo_with_config(
+        r#"{
+            "rules": {"astSecurity": false, "openRedirect": false, "sqliConcat": false, "corsWildcard": false, "testAssertion": false},
+            "overrides": [{"files": ["**"], "rules": {"noUseEffect": false, "eval": false}}]
+        }"#,
+    );
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("override disabled rule(s)"))
+        .unwrap_or_else(|| panic!("expected an override note; got: {notes:?}"));
+    assert!(
+        note.contains("[noUseEffect, eval]"),
+        "expected both toggles named in RulesConfig declaration order; got: {note}"
+    );
+    assert!(
+        note.contains("noUseEffect stops 1 rule_id(s)") && note.contains("eval stops 1 rule_id(s)"),
+        "the existing per-toggle phrases must stay `stops N rule_id(s)`, \
+         unchanged by the new combination clause; got: {note}"
+    );
+    assert!(
+        note.contains("combination stops 1 more rule_id(s)"),
+        "expected an independent clause for the rule_id (`excessive-nesting`) \
+         that stops only when both toggles are off together — not \
+         attributable to either toggle's isolated count; got: {note}"
+    );
+}
+
+// T-610: 組み合わせで止まる分が無い構成では句が増えない
+//
+// Same shape as T-609 (one entry disabling two AST toggles, `testAssertion`
+// and `eval`), but the base config leaves every other AST toggle at its
+// default `true`. With five other `AstRuleFlags` toggles still on,
+// `AstRuleFlags::any()` stays true whether `testAssertion` and `eval` are off
+// alone or together, so `excessive-nesting` never moves and `isolated sum ==
+// live_rule_ids(before) - live_rule_ids(after)`. No independent combination
+// clause belongs in this note.
+#[test]
+fn 組み合わせで止まる分が無い構成では句が増えない() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["**"], "rules": {"testAssertion": false, "eval": false}}]}"#,
+    );
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("override disabled rule(s)"))
+        .unwrap_or_else(|| panic!("expected an override note; got: {notes:?}"));
+    assert!(
+        note.contains("[testAssertion, eval]"),
+        "expected both toggles named in RulesConfig declaration order; got: {note}"
+    );
+    assert!(
+        note.contains("(testAssertion stops 1 rule_id(s); eval stops 1 rule_id(s))"),
+        "expected the unchanged two-toggle breakdown with no trailing \
+         clause; got: {note}"
+    );
+    assert!(
+        !note.contains("combination"),
+        "no rule_id is stopped only by the combination here (five other AST \
+         toggles keep excessive-nesting live either way), so no independent \
+         combination clause should appear; got: {note}"
+    );
+}
