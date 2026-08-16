@@ -89,7 +89,7 @@ fn lint_with_ast(
     // overflow oxc's recursive-descent parser and abort (exit 134 = fail-open).
     // This deterministic byte scan blocks them before the parse with zero false
     // positives. Unconditional (not gated on ast_security) because the parse
-    // runs on any of the six rules; gating it would let {ast_security:false,
+    // runs on any of the seven rules; gating it would let {ast_security:false,
     // eval:true} reach the parse unguarded and abort.
     if let Some(v) = nesting::check_excessive_nesting(content, file_path) {
         // No note: unlike a parse failure (which silently drops structural

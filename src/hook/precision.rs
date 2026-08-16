@@ -27,7 +27,7 @@ use globset::GlobBuilder;
 use super::collect_violations;
 use crate::config::{Config, OverrideEntry};
 use crate::rules::rule_id::{self, RULE_ID_CATALOG};
-use crate::rules::{toggle_isolation_cases, RE_JS_FILE};
+use crate::rules::{live_rule_ids, toggle_isolation_cases, RE_JS_FILE};
 
 /// Whether a sample must trigger its rule (`Fire`) or stay silent (`Clean`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,13 +298,19 @@ const CORPUS_EXEMPT: &[&str] = &[
     rule_id::INVARIANT_GUARD,
 ];
 
+/// Whether `rule` can fire through the corpus `(path, content)` harness.
+/// Two call sites share it so the exemption has one definition.
+fn is_corpus_coverable(rule: &&str) -> bool {
+    !CORPUS_EXEMPT.contains(rule)
+}
+
 // T-266: 全 first-party rule_id に should-fire / should-not-fire 両 sample が存在する (corpus 網羅 gate)。
 #[test]
 fn corpus_covers_every_rule_with_fire_and_clean_samples() {
     let covered: Vec<&str> = RULE_ID_CATALOG
         .iter()
         .copied()
-        .filter(|rule| !CORPUS_EXEMPT.contains(rule))
+        .filter(is_corpus_coverable)
         .collect();
     let missing = missing_corpus_coverage(&covered, corpus::SAMPLES);
     assert!(
@@ -455,6 +461,94 @@ fn 複数の_emitter_を持つ_rule_id_は_片方の_toggle_を_off_にしても
         detected.contains(rule_id::SECURITY),
         "security を off にしたら postMessage 経由の security が発火しなくなった \
          (multi-emitter exception が崩れた?): {detected:?}"
+    );
+}
+
+// U-007: `live_rule_ids` が返す集合が、実際に発火する rule_id と一致する。
+//
+// 上の T-553/T-554/T-598 は個々の toggle 差分 (before/after の 2 状態) を見る。
+// 期待値は手書きせず、`live_rule_ids` の計算式と corpus 実行のどちらも同じ
+// config から導く。
+
+/// `config` で corpus の fire サンプル全件を `detected_rules` に通し、発火した
+/// rule_id の和集合を返す。expectation が `Clean` のサンプルは対象外
+/// (fire しないことが期待値のサンプルを対象に含めると、fire しなくて当然の
+/// rule_id が unexpected fire として actual 側に混ざり得るため)。
+fn fired_rule_ids_across_fire_samples(config: &Config) -> BTreeSet<String> {
+    let mut fired = BTreeSet::new();
+    for sample in corpus::SAMPLES
+        .iter()
+        .filter(|s| s.expectation == Expectation::Fire)
+    {
+        fired.extend(detected_rules(sample.path, sample.content, config));
+    }
+    fired
+}
+
+/// `live_rule_ids(&config.rules)` から `CORPUS_EXEMPT` を除いた集合。
+///
+/// toggle が on の config では `live_rule_ids` が `CORPUS_EXEMPT` を必ず含む。
+/// 除かずに突き合わせると toggle の状態によらず常に不一致になり、検出したい
+/// drift (toggle 配線のずれ) が埋もれる。
+fn corpus_coverable_live_rule_ids(config: &Config) -> BTreeSet<String> {
+    live_rule_ids(&config.rules)
+        .into_iter()
+        .filter(is_corpus_coverable)
+        .map(str::to_owned)
+        .collect()
+}
+
+// T-611: default 構成で live 集合に無い rule_id は corpus の fire サンプルから出ない
+#[test]
+fn default_構成で_live_集合に無い_rule_id_は_corpus_の_fire_サンプルから出ない() {
+    let config = harness_config();
+    let live = live_rule_ids(&config.rules);
+    let actual = fired_rule_ids_across_fire_samples(&config);
+
+    let extra: Vec<&String> = actual
+        .iter()
+        .filter(|rule| !live.contains(rule.as_str()))
+        .collect();
+    assert!(
+        extra.is_empty(),
+        "live_rule_ids に無い rule_id が corpus の fire サンプルから発火した: {extra:?}"
+    );
+}
+
+// T-612: AST flag をすべて off にした構成でも live 集合と実発火が一致する
+#[test]
+fn ast_flag_をすべて_off_にした構成でも_live_集合と実発火が一致する() {
+    let mut config = harness_config();
+    config.rules.ast_security = false;
+    config.rules.no_use_effect = false;
+    config.rules.open_redirect = false;
+    config.rules.eval = false;
+    config.rules.sqli_concat = false;
+    config.rules.cors_wildcard = false;
+    config.rules.test_assertion = false;
+
+    let live = corpus_coverable_live_rule_ids(&config);
+    let actual = fired_rule_ids_across_fire_samples(&config);
+
+    assert_eq!(
+        actual, live,
+        "AST flag 全 off の構成で live_rule_ids と実発火の rule_id 集合が一致しない"
+    );
+}
+
+// T-613: security を off にし astSecurity を on にした構成でも live 集合と実発火が一致する
+#[test]
+fn security_を_off_にし_astsecurity_を_on_にした構成でも_live_集合と実発火が一致する() {
+    let mut config = harness_config();
+    config.rules.security = false;
+    config.rules.ast_security = true;
+
+    let live = corpus_coverable_live_rule_ids(&config);
+    let actual = fired_rule_ids_across_fire_samples(&config);
+
+    assert_eq!(
+        actual, live,
+        "security off / astSecurity on の構成で live_rule_ids と実発火の rule_id 集合が一致しない"
     );
 }
 

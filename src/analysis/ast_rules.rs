@@ -1,4 +1,4 @@
-//! The six AST-driven structural rules and the subprocess that runs them
+//! The seven AST-driven structural rules and the subprocess that runs them
 //! (#314). Deeply nested input overflows oxc's recursive-descent parser and
 //! aborts the whole process (SIGABRT, exit 134), which is non-blocking for a
 //! `PreToolUse` hook — every check is silently bypassed (fail-open). A byte scan
@@ -12,7 +12,7 @@
 //! subcommand); deep-overflow inputs live only in CLI integration tests.
 
 use crate::analysis::{ast, ast_security};
-use crate::config::Config;
+use crate::config::{Config, RulesConfig};
 use crate::import_map;
 use crate::rules::{self, Violation};
 use serde::{Deserialize, Serialize};
@@ -20,9 +20,9 @@ use std::io::{self, Read};
 use std::panic;
 use std::process;
 
-/// The six toggles that gate an AST rule. Carried to the child so it applies the
+/// The seven toggles that gate an AST rule. Carried to the child so it applies the
 /// caller's config without serializing the whole `Config`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstRuleFlags {
     pub ast_security: bool,
     pub no_use_effect: bool,
@@ -34,16 +34,22 @@ pub struct AstRuleFlags {
 }
 
 impl AstRuleFlags {
-    pub fn from_config(config: &Config) -> Self {
+    /// For callers holding only the rules sub-config, not the full `Config`.
+    /// `from_config` delegates here so the field list lives in one place.
+    pub fn from_rules(rules: &RulesConfig) -> Self {
         Self {
-            ast_security: config.rules.ast_security,
-            no_use_effect: config.rules.no_use_effect,
-            open_redirect: config.rules.open_redirect,
-            eval: config.rules.eval,
-            sqli_concat: config.rules.sqli_concat,
-            cors_wildcard: config.rules.cors_wildcard,
-            test_assertion: config.rules.test_assertion,
+            ast_security: rules.ast_security,
+            no_use_effect: rules.no_use_effect,
+            open_redirect: rules.open_redirect,
+            eval: rules.eval,
+            sqli_concat: rules.sqli_concat,
+            cors_wildcard: rules.cors_wildcard,
+            test_assertion: rules.test_assertion,
         }
+    }
+
+    pub fn from_config(config: &Config) -> Self {
+        Self::from_rules(&config.rules)
     }
 
     pub fn any(&self) -> bool {
@@ -229,5 +235,18 @@ mod tests {
         assert!(!flags.eval);
         assert!(flags.ast_security);
         assert!(flags.any());
+    }
+
+    // T-599
+    #[test]
+    fn from_rules_は同じ_config_から_from_config_と同じ_flag_集合を返す() {
+        let mut config = Config::default();
+        config.rules.eval = false;
+        config.rules.cors_wildcard = false;
+
+        let from_rules = AstRuleFlags::from_rules(&config.rules);
+        let from_config = AstRuleFlags::from_config(&config);
+
+        assert_eq!(from_rules, from_config);
     }
 }

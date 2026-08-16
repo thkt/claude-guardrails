@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{OverrideEntry, ProjectRulesConfig};
+use crate::config::{OverrideEntry, ProjectRulesConfig, RulesConfig};
 use crate::rules::{rule_id, toggle_rule_id_count, Severity};
 use globset::Glob;
 
@@ -671,8 +671,8 @@ fn astsecurity_を切る_override_の_note_に_rule_id_数が入る() {
     let mut notes = Vec::new();
     let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
 
-    let expected_count =
-        toggle_rule_id_count("astSecurity").expect("astSecurity gates a fixed rule_id set");
+    let expected_count = toggle_rule_id_count("astSecurity", &RulesConfig::default())
+        .expect("astSecurity gates a fixed rule_id set");
     let override_note = notes
         .iter()
         .find(|n| n.contains("astSecurity"))
@@ -731,7 +731,7 @@ fn oxlint_を切る_override_の_note_には数の代わりに外部_linter_で�
     let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
 
     assert_eq!(
-        toggle_rule_id_count("oxlint"),
+        toggle_rule_id_count("oxlint", &RulesConfig::default()),
         None,
         "precondition: oxlint delegates to an external linter run, not a fixed rule_id set"
     );
@@ -768,8 +768,8 @@ fn rule_id_と_1_対_1_の_toggle_では数が_1_と出る() {
     let mut notes = Vec::new();
     let _resolved = resolve_effective_rules_with_notes(config, file_path, &mut notes);
 
-    let expected_count =
-        toggle_rule_id_count("sensitiveFile").expect("sensitiveFile gates a fixed rule_id set");
+    let expected_count = toggle_rule_id_count("sensitiveFile", &RulesConfig::default())
+        .expect("sensitiveFile gates a fixed rule_id set");
     assert_eq!(
         expected_count, 1,
         "precondition: sensitiveFile is 1:1 with its rule_id (sensitive-file)"
@@ -785,6 +785,22 @@ fn rule_id_と_1_対_1_の_toggle_では数が_1_と出る() {
         "expected the stopped rule_id count (1) outside the bracketed rule(s)/pattern(s) \
          lists; got: {override_note}"
     );
+}
+
+// --- toggle_rule_id_count(name, rules) ---
+
+// T-604: astSecurity が off の構成で security の数が 2 になる
+//
+// `rule_id::SECURITY` は `rules.security` と `rules.ast_security` のどちらかが
+// on なら live (src/rules.rs の live_rule_ids)。base の astSecurity が既に off
+// なら、そこから security も off にすると "security" と "dangerous-inner-html"
+// の 2 件とも live_rule_ids から消える。default (astSecurity on) を base にした
+// 計算 (現行値 1) と食い違うことを固定する。
+#[test]
+fn astsecurity_が_off_の構成で_security_の数が_2になる() {
+    let mut rules = RulesConfig::default();
+    rules.ast_security = false;
+    assert_eq!(toggle_rule_id_count("security", &rules), Some(2));
 }
 
 // T-511: hook 経路では compile 失敗の note がちょうど 1 件出る

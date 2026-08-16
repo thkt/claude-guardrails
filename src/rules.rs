@@ -26,13 +26,13 @@ pub(crate) mod test_assertion;
 mod test_location;
 mod transaction;
 
+use crate::analysis::ast_rules::AstRuleFlags;
 use crate::analysis::scanner::build_source_masks;
-use crate::config::Config;
-#[cfg(test)]
-use crate::config::RulesConfig;
+use crate::config::{Config, RulesConfig};
 use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -113,6 +113,35 @@ macro_rules! toggle_isolation {
             $( ($name, &[ $( $rule ),* ]) ),*
         ];
 
+        /// The `rule_id`s that can fire for `rules`.
+        ///
+        /// Two `rule_id`s have a gate that list membership alone cannot
+        /// express, so each is decided by its own condition below.
+        pub(crate) fn live_rule_ids(rules: &RulesConfig) -> HashSet<&'static str> {
+            let mut live: HashSet<&'static str> = HashSet::new();
+            $(if rules.$field { live.extend([ $( $rule ),* ]); })*
+
+            // `excessive-nesting` runs unconditionally from `hook::lint_with_ast`
+            // whenever any of the seven AST rules is on (`AstRuleFlags::any`),
+            // not only when `astSecurity` is.
+            if AstRuleFlags::from_rules(rules).any() {
+                live.insert(rule_id::EXCESSIVE_NESTING);
+            } else {
+                live.remove(rule_id::EXCESSIVE_NESTING);
+            }
+
+            // `rule_id::SECURITY` is also emitted by
+            // `analysis::ast_security::postmessage::check_post_message_wildcard`,
+            // independently of the `security` toggle.
+            if rules.security || rules.ast_security {
+                live.insert(rule_id::SECURITY);
+            } else {
+                live.remove(rule_id::SECURITY);
+            }
+
+            live
+        }
+
         /// Single-toggle isolation configs for the precision harness:
         /// `.rules` all off except `$field`.
         #[cfg(test)]
@@ -174,40 +203,48 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
-/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it.
-/// `excessive-nesting` runs unconditionally from `src/hook.rs`, so turning
-/// `astSecurity` off leaves it firing.
-const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL: &[&str] = &[rule_id::EXCESSIVE_NESTING];
-
-/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
-/// another, independently-gated module emits the same `rule_id` too.
-/// `rule_id::SECURITY` is emitted both by `rules::security` (the `"security"`
-/// toggle) and by `analysis::ast_security::postmessage::check_post_message_wildcard`,
-/// so turning `"security"` off does not stop it firing.
-const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER: &[&str] = &[rule_id::SECURITY];
-
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
-/// name (e.g. `"astSecurity"`) is set to `false`. `None` when the toggle gates
-/// no fixed set: `"oxlint"` runs an external linter instead of first-party
-/// `rule_id`s.
+/// name (e.g. `"astSecurity"`) is set to `false` starting from `rules`.
+/// `None` when the toggle gates no fixed set: `"oxlint"` runs an external
+/// linter instead of first-party `rule_id`s.
 ///
-/// Both exception lists assume the other emitter is still on, so the count is
-/// the one for a config where every other toggle keeps its default. Turning
-/// `astSecurity` off first makes this undercount `"security"` by one, since the
-/// wildcard check that kept `rule_id::SECURITY` alive is gone by then.
-pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
+/// A `rule_id` that another toggle in `rules` already silenced, or that stays
+/// live through one, is not counted here.
+pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
         .find(|(name, _)| *name == toggle_name)
-        .map(|(_, rules)| {
-            rules
-                .iter()
-                .filter(|rule| {
-                    !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL.contains(rule)
-                        && !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER.contains(rule)
-                })
-                .count()
+        .map(|_| {
+            let before = live_rule_ids(rules);
+            let after = live_rule_ids(&rules.with_toggle(toggle_name, false));
+            before.difference(&after).count()
         })
+}
+
+/// How many `rule_id`s stop firing only when every name in `names` is off
+/// *together*, beyond what each name's own [`toggle_rule_id_count`] credits.
+///
+/// `excessive-nesting` is the one `rule_id` this applies to today: it stays
+/// live while any `AstRuleFlags` toggle is on, so two AST toggles can each
+/// move no isolated count yet drop it when turned off together.
+///
+/// `rules` must have every name in `names` still on, the same precondition
+/// `toggle_rule_id_count` takes (see `RulesConfig::with_toggles_restored`).
+/// `isolated_sum` is taken rather than recomputed because the caller already
+/// sums it to render the individual phrases.
+pub(crate) fn combination_only_rule_id_count(
+    names: &[&str],
+    rules: &RulesConfig,
+    isolated_sum: usize,
+) -> usize {
+    let before = live_rule_ids(rules);
+    let mut all_off = rules.clone();
+    for &name in names {
+        all_off = all_off.with_toggle(name, false);
+    }
+    let after = live_rule_ids(&all_off);
+    let actual = before.difference(&after).count();
+    actual.saturating_sub(isolated_sum)
 }
 
 pub static RE_JS_FILE: LazyLock<Regex> =

@@ -1,5 +1,5 @@
 use crate::path_resolve::{self, Resolved};
-use crate::rules::{toggle_rule_id_count, Severity};
+use crate::rules::{combination_only_rule_id_count, toggle_rule_id_count, Severity};
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
 use std::env;
@@ -50,6 +50,27 @@ macro_rules! define_rule_config {
                 let mut disabled = Vec::new();
                 $(if before.$field && !self.$field { disabled.push($serde_name); })*
                 disabled
+            }
+
+            /// The one per-field name match `with_toggles_restored` and
+            /// `rules::toggle_rule_id_count` build on, so the toggle-name to
+            /// field mapping lives in a single place.
+            pub(crate) fn with_toggle(&self, name: &str, value: bool) -> Self {
+                let mut next = self.clone();
+                $(if name == $serde_name { next.$field = value; })*
+                next
+            }
+
+            /// Recovers the "toggle still on, rest of the file's final
+            /// configuration already applied" state `toggle_rule_id_count`
+            /// expects, so an override note's count reflects the file's final
+            /// effective rules rather than the order overrides ran in.
+            pub(crate) fn with_toggles_restored(&self, names: &[&str]) -> Self {
+                let mut next = self.clone();
+                for &name in names {
+                    next = next.with_toggle(name, true);
+                }
+                next
             }
         }
 
@@ -406,9 +427,10 @@ impl Config {
     /// it finds no root.
     ///
     /// The notes are for the hook boundary to surface: one per matching
-    /// entry that disables at least one rule (rule names + matched
-    /// patterns), and one when resolution moved the path. A glob that failed
-    /// to compile is not among them (see `invalid_pattern_note`).
+    /// entry leaving at least one rule off in the returned config (rule
+    /// names and matched patterns), and one when resolution moved the path. A
+    /// glob that failed to compile is not among them (see
+    /// `invalid_pattern_note`).
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
@@ -454,6 +476,12 @@ impl Config {
         }
         let match_target = resolved.relative;
 
+        // `stopped_rule_id_summary` reads the note-worthy count off `rules`, so
+        // it must see the file's final effective configuration, not the state
+        // as it stood mid-loop: a toggle another, later entry also disables
+        // (e.g. `astSecurity`) changes what an earlier entry's disabled toggle
+        // (`security`) is credited with stopping.
+        let mut disabled_by_entry: Vec<(Vec<&'static str>, Vec<&str>)> = Vec::new();
         for entry in &self.overrides {
             let matched_patterns: Vec<&str> = entry
                 .files
@@ -468,31 +496,66 @@ impl Config {
             rules.apply_path_overrides(entry.rules.clone());
             let disabled = rules.disabled_since(&before);
             if !disabled.is_empty() {
-                notes.push(format!(
-                    "override disabled rule(s) [{}] for pattern(s) [{}]{}",
-                    disabled.join(", "),
-                    matched_patterns.join(", "),
-                    Self::stopped_rule_id_summary(&disabled),
-                ));
+                disabled_by_entry.push((disabled, matched_patterns));
             }
+        }
+        for (disabled, matched_patterns) in disabled_by_entry {
+            let restored = rules.with_toggles_restored(&disabled);
+            // A later matching entry can set a toggle this one disabled back
+            // to `true`. Keeping only the names still off in the file's final
+            // `rules` stops the note from reporting a rule as stopped while it
+            // keeps firing. The names dropped here are already `true` in
+            // `rules`, so `restored` above is unaffected by the narrowing.
+            let disabled = rules.disabled_since(&restored);
+            if disabled.is_empty() {
+                continue;
+            }
+            notes.push(format!(
+                "override disabled rule(s) [{}] for pattern(s) [{}]{}",
+                disabled.join(", "),
+                matched_patterns.join(", "),
+                Self::stopped_rule_id_summary(&disabled, &restored),
+            ));
         }
         (rules, notes)
     }
 
     /// How many `rule_id`s each disabled toggle stops firing, appended outside
-    /// the bracketed lists so the existing note format stays greppable.
+    /// the bracketed lists so the existing note format stays greppable. Each
+    /// count reflects the toggle's individual effect in isolation, not the
+    /// sum of multiple toggles' effects together.
     ///
-    /// Per toggle, never summed: `security` is emitted by the registry rule
-    /// and by `ast_security`'s postMessage path alike, so adding two toggles'
-    /// counts would claim more stopped checks than exist.
-    fn stopped_rule_id_summary(disabled: &[&str]) -> String {
-        let parts: Vec<String> = disabled
+    /// Per toggle, never summed: a `rule_id` with more than one emitter (see
+    /// `rules::live_rule_ids`, e.g. `security`) would otherwise be claimed
+    /// stopped by more than one toggle's count.
+    ///
+    /// `rules` must have every name in `disabled` still toggled on (see
+    /// `with_toggles_restored`): `toggle_rule_id_count` computes each name's
+    /// count as the drop from turning that one toggle off starting from
+    /// `rules`, so a `disabled` toggle already off in `rules` would count 0.
+    ///
+    /// The per-toggle counts above are each an *isolated* probe (only that
+    /// one name off, the rest of `disabled` still on in `rules`), so their
+    /// sum can undercount what `disabled` actually stops together (see
+    /// `combination_only_rule_id_count`).
+    fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
+        let counts: Vec<Option<usize>> = disabled
             .iter()
-            .map(|&name| match toggle_rule_id_count(name) {
+            .map(|&name| toggle_rule_id_count(name, rules))
+            .collect();
+        let mut parts: Vec<String> = disabled
+            .iter()
+            .zip(&counts)
+            .map(|(&name, count)| match count {
                 Some(count) => format!("{name} stops {count} rule_id(s)"),
                 None => format!("{name}: external linter"),
             })
             .collect();
+        let isolated_sum: usize = counts.iter().filter_map(|&c| c).sum();
+        let combination = combination_only_rule_id_count(disabled, rules, isolated_sum);
+        if combination > 0 {
+            parts.push(format!("combination stops {combination} more rule_id(s)"));
+        }
         if parts.is_empty() {
             String::new()
         } else {
