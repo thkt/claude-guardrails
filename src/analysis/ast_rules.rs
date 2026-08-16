@@ -34,9 +34,8 @@ pub struct AstRuleFlags {
 }
 
 impl AstRuleFlags {
-    /// Reads the seven toggles straight off `RulesConfig`, for callers that hold
-    /// only the rules sub-config (not the full `Config`). `from_config` delegates
-    /// here so the field ordering lives in one place.
+    /// For callers holding only the rules sub-config, not the full `Config`.
+    /// `from_config` delegates here so the field list lives in one place.
     pub fn from_rules(rules: &RulesConfig) -> Self {
         Self {
             ast_security: rules.ast_security,

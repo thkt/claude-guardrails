@@ -52,23 +52,19 @@ macro_rules! define_rule_config {
                 disabled
             }
 
-            /// `self` with the toggle named `name` set to `value`, every
-            /// other field left as `self` has it. The one per-field name
-            /// match `with_toggles_restored` and `rules::toggle_rule_id_count`
-            /// build on, so the toggle-name -> field mapping lives in a
-            /// single place.
+            /// The one per-field name match `with_toggles_restored` and
+            /// `rules::toggle_rule_id_count` build on, so the toggle-name to
+            /// field mapping lives in a single place.
             pub(crate) fn with_toggle(&self, name: &str, value: bool) -> Self {
                 let mut next = self.clone();
                 $(if name == $serde_name { next.$field = value; })*
                 next
             }
 
-            /// `self` with every toggle named in `names` set back to `true`,
-            /// every other field left as `self` has it. Recovers the
-            /// "toggle still on, rest of the file's final configuration
-            /// already applied" state `toggle_rule_id_count` expects, so an
-            /// override note's count reflects the file's final effective
-            /// rules rather than the order overrides happened to run in.
+            /// Recovers the "toggle still on, rest of the file's final
+            /// configuration already applied" state `toggle_rule_id_count`
+            /// expects, so an override note's count reflects the file's final
+            /// effective rules rather than the order overrides ran in.
             pub(crate) fn with_toggles_restored(&self, names: &[&str]) -> Self {
                 let mut next = self.clone();
                 for &name in names {
@@ -484,9 +480,7 @@ impl Config {
         // it must see the file's final effective configuration, not the state
         // as it stood mid-loop: a toggle another, later entry also disables
         // (e.g. `astSecurity`) changes what an earlier entry's disabled toggle
-        // (`security`) is credited with stopping. The loop only collects what
-        // changed per entry; the count is computed once below, after every
-        // entry has applied.
+        // (`security`) is credited with stopping.
         let mut disabled_by_entry: Vec<(Vec<&'static str>, Vec<&str>)> = Vec::new();
         for entry in &self.overrides {
             let matched_patterns: Vec<&str> = entry
@@ -543,9 +537,7 @@ impl Config {
     /// The per-toggle counts above are each an *isolated* probe (only that
     /// one name off, the rest of `disabled` still on in `rules`), so their
     /// sum can undercount what `disabled` actually stops together (see
-    /// `combination_only_rule_id_count`). When that happens an independent
-    /// trailing clause names the difference, without changing the existing
-    /// per-toggle phrases above.
+    /// `combination_only_rule_id_count`).
     fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
         let counts: Vec<Option<usize>> = disabled
             .iter()

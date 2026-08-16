@@ -113,11 +113,10 @@ macro_rules! toggle_isolation {
             $( ($name, &[ $( $rule ),* ]) ),*
         ];
 
-        /// The `rule_id`s that can fire for `rules`: the union of every `on`
-        /// toggle's list in [`TOGGLE_RULE_IDS`], collected by the same
-        /// per-field walk as `config::RulesConfig::disabled_since`, then
-        /// corrected for the two toggles whose list membership alone does not
-        /// decide liveness (see the two `if`/`else` blocks below).
+        /// The `rule_id`s that can fire for `rules`.
+        ///
+        /// Two `rule_id`s have a gate that list membership alone cannot
+        /// express, so each is decided by its own condition below.
         pub(crate) fn live_rule_ids(rules: &RulesConfig) -> HashSet<&'static str> {
             let mut live: HashSet<&'static str> = HashSet::new();
             $(if rules.$field { live.extend([ $( $rule ),* ]); })*
@@ -209,12 +208,8 @@ toggle_isolation! {
 /// `None` when the toggle gates no fixed set: `"oxlint"` runs an external
 /// linter instead of first-party `rule_id`s.
 ///
-/// The count is derived from the provided `rules` config:
-/// `live_rule_ids(rules) - live_rule_ids(rules with the toggle off)`. A
-/// `rule_id` already silenced by another toggle in `rules` (e.g.
-/// `astSecurity` already off) does not count twice, and one that stays live
-/// through a different toggle (`excessive-nesting` via any other AST toggle,
-/// `rule_id::SECURITY` via `astSecurity`) is not counted as stopped.
+/// A `rule_id` that another toggle in `rules` already silenced, or that stays
+/// live through one, is not counted here.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
@@ -227,22 +222,16 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Op
 }
 
 /// How many `rule_id`s stop firing only when every name in `names` is off
-/// *together*, beyond what each name's own [`toggle_rule_id_count`] already
-/// credits it with. Zero in the common case where no `rule_id` depends on the
-/// combination.
+/// *together*, beyond what each name's own [`toggle_rule_id_count`] credits.
 ///
-/// `excessive-nesting` is the one `rule_id` this currently applies to: it
-/// stays live as long as any `AstRuleFlags` toggle is on
-/// ([`live_rule_ids`]), so turning off two AST toggles that share it neither
-/// isolated count sees move, while turning both off together can drop
-/// `AstRuleFlags::any()` to false and remove it too.
+/// `excessive-nesting` is the one `rule_id` this applies to today: it stays
+/// live while any `AstRuleFlags` toggle is on, so two AST toggles can each
+/// move no isolated count yet drop it when turned off together.
 ///
-/// `rules` must have every name in `names` already on (the same precondition
-/// `toggle_rule_id_count` takes), so "before" here and there is the same file
-/// configuration; see `RulesConfig::with_toggles_restored`. `isolated_sum` is
-/// the sum of each name's own `toggle_rule_id_count(name, rules)`; the caller
-/// already computes that per-name to render the individual phrases, so it is
-/// taken here rather than recomputed.
+/// `rules` must have every name in `names` still on, the same precondition
+/// `toggle_rule_id_count` takes (see `RulesConfig::with_toggles_restored`).
+/// `isolated_sum` is taken rather than recomputed because the caller already
+/// sums it to render the individual phrases.
 pub(crate) fn combination_only_rule_id_count(
     names: &[&str],
     rules: &RulesConfig,

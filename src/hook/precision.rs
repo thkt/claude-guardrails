@@ -298,10 +298,8 @@ const CORPUS_EXEMPT: &[&str] = &[
     rule_id::INVARIANT_GUARD,
 ];
 
-/// Whether `rule` can fire through the corpus `(path, content)` harness, i.e.
-/// not one of the `CORPUS_EXEMPT` three. Shared by the catalog-side filter
-/// below and `corpus_coverable_live_rule_ids` so the exemption check has one
-/// definition.
+/// Whether `rule` can fire through the corpus `(path, content)` harness.
+/// Two call sites share it so the exemption has one definition.
 fn is_corpus_coverable(rule: &&str) -> bool {
     !CORPUS_EXEMPT.contains(rule)
 }
@@ -488,12 +486,10 @@ fn fired_rule_ids_across_fire_samples(config: &Config) -> BTreeSet<String> {
 }
 
 /// `live_rule_ids(&config.rules)` から `CORPUS_EXEMPT` を除いた集合。
-/// `CORPUS_EXEMPT` の 3 rule_id (`invariant`, `config-guard`,
-/// `invariant-guard`) は corpus の `(path, content)` harness では原理的に
-/// 発火させられない (このファイル冒頭の `CORPUS_EXEMPT` doc comment参照)。
-/// toggle が on の config では `live_rule_ids` が常にこの 3 件を含むため、
-/// フィルタせず突き合わせると toggle の状態に関係なく常に不一致になり、
-/// 突き合わせが検出したい drift (toggle 配線のずれ) を隠す。
+///
+/// toggle が on の config では `live_rule_ids` が `CORPUS_EXEMPT` を必ず含む。
+/// 除かずに突き合わせると toggle の状態によらず常に不一致になり、検出したい
+/// drift (toggle 配線のずれ) が埋もれる。
 fn corpus_coverable_live_rule_ids(config: &Config) -> BTreeSet<String> {
     live_rule_ids(&config.rules)
         .into_iter()

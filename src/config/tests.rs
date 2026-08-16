@@ -875,8 +875,7 @@ fn ast_security_を_top_level_で切ると_security_の_note_が_2_を出す() {
 // One entry disabling two unrelated toggles at once. The JSON deliberately
 // lists `flakyTest` before `testAssertion` to pin that the note's order
 // follows `RulesConfig`'s declaration order (`disabled_since`'s field walk),
-// not the JSON key order, and that deferring the note text past the loop
-// leaves that order untouched for the single-entry case.
+// not the JSON key order.
 #[test]
 fn override_が_1_件だけの構成では_note_の並び順が変わらない() {
     let (tmp, config) = repo_with_config(
