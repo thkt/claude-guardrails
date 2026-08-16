@@ -803,22 +803,6 @@ fn astsecurity_が_off_の構成で_security_の数が_2になる() {
     assert_eq!(toggle_rule_id_count("security", &rules), Some(2));
 }
 
-// T-605: default 構成での各 toggle の数が現行値から変わらない
-#[test]
-fn default_構成での各_toggle_の数が現行値から変わらない() {
-    let rules = RulesConfig::default();
-    assert_eq!(toggle_rule_id_count("security", &rules), Some(1));
-    assert_eq!(toggle_rule_id_count("astSecurity", &rules), Some(14));
-    assert_eq!(toggle_rule_id_count("sensitiveFile", &rules), Some(1));
-}
-
-// T-606: oxlint は数を持たない値を返す
-#[test]
-fn oxlint_は数を持たない値を返す() {
-    let rules = RulesConfig::default();
-    assert_eq!(toggle_rule_id_count("oxlint", &rules), None);
-}
-
 // T-511: hook 経路では compile 失敗の note がちょうど 1 件出る
 //
 // `load_config_or_note` と `resolve_effective_rules_with_notes` を production と

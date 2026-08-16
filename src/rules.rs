@@ -204,15 +204,6 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
-/// `rules` with just the toggle named `toggle_name` turned off, every other
-/// field left as `rules` already had it. A thin wrapper over
-/// `RulesConfig::with_toggle` so `toggle_rule_id_count` and
-/// `combination_only_rule_id_count` read as "turn this name off", not
-/// "set this name to false".
-fn rules_with_toggle_off(rules: &RulesConfig, toggle_name: &str) -> RulesConfig {
-    rules.with_toggle(toggle_name, false)
-}
-
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
 /// name (e.g. `"astSecurity"`) is set to `false` starting from `rules`.
 /// `None` when the toggle gates no fixed set: `"oxlint"` runs an external
@@ -230,7 +221,7 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Op
         .find(|(name, _)| *name == toggle_name)
         .map(|_| {
             let before = live_rule_ids(rules);
-            let after = live_rule_ids(&rules_with_toggle_off(rules, toggle_name));
+            let after = live_rule_ids(&rules.with_toggle(toggle_name, false));
             before.difference(&after).count()
         })
 }
@@ -260,7 +251,7 @@ pub(crate) fn combination_only_rule_id_count(
     let before = live_rule_ids(rules);
     let mut all_off = rules.clone();
     for &name in names {
-        all_off = rules_with_toggle_off(&all_off, name);
+        all_off = all_off.with_toggle(name, false);
     }
     let after = live_rule_ids(&all_off);
     let actual = before.difference(&after).count();

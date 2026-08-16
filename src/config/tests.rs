@@ -990,3 +990,38 @@ fn 組み合わせで止まる分が無い構成では句が増えない() {
          combination clause should appear; got: {note}"
     );
 }
+
+// T-615: 後続 entry が戻した toggle は note に出ず、同じ entry の別 toggle の note は残る
+//
+// The first entry disables `security`; the second matches the same file and
+// sets `security` back to `true` while disabling `astSecurity`. The file's
+// final rules keep `security` on, so naming it as disabled would tell the
+// agent a rule stopped firing while it still fires. The second entry's own
+// `astSecurity` disable stays in force, so its note must remain.
+#[test]
+fn 後続_entry_が戻した_toggle_は_note_に出ず_同じ_entry_の別_toggle_の_note_は残る() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [
+            {"files": ["**"], "rules": {"security": false}},
+            {"files": ["**"], "rules": {"security": true, "astSecurity": false}}
+        ]}"#,
+    );
+
+    let (rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    // Premise of the scenario: the later entry won on `security`, lost nothing
+    // on `astSecurity`.
+    assert!(rules.security, "later entry must win on security");
+    assert!(!rules.ast_security, "astSecurity must stay off");
+
+    assert!(
+        !notes.iter().any(|n| n.contains("[security")),
+        "security is on in the final rules, so no note may list it as \
+         disabled; got: {notes:?}"
+    );
+    assert!(
+        notes.iter().any(|n| n.contains("[astSecurity]")),
+        "astSecurity stays off, so its entry's note must still be emitted; \
+         got: {notes:?}"
+    );
+}

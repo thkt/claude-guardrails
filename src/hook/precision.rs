@@ -298,13 +298,21 @@ const CORPUS_EXEMPT: &[&str] = &[
     rule_id::INVARIANT_GUARD,
 ];
 
+/// Whether `rule` can fire through the corpus `(path, content)` harness, i.e.
+/// not one of the `CORPUS_EXEMPT` three. Shared by the catalog-side filter
+/// below and `corpus_coverable_live_rule_ids` so the exemption check has one
+/// definition.
+fn is_corpus_coverable(rule: &&str) -> bool {
+    !CORPUS_EXEMPT.contains(rule)
+}
+
 // T-266: 全 first-party rule_id に should-fire / should-not-fire 両 sample が存在する (corpus 網羅 gate)。
 #[test]
 fn corpus_covers_every_rule_with_fire_and_clean_samples() {
     let covered: Vec<&str> = RULE_ID_CATALOG
         .iter()
         .copied()
-        .filter(|rule| !CORPUS_EXEMPT.contains(rule))
+        .filter(is_corpus_coverable)
         .collect();
     let missing = missing_corpus_coverage(&covered, corpus::SAMPLES);
     assert!(
@@ -461,11 +469,8 @@ fn 複数の_emitter_を持つ_rule_id_は_片方の_toggle_を_off_にしても
 // U-007: `live_rule_ids` が返す集合が、実際に発火する rule_id と一致する。
 //
 // 上の T-553/T-554/T-598 は個々の toggle 差分 (before/after の 2 状態) を見る。
-// 以下の 3 本は特定 config 1 個について、`live_rule_ids(&config.rules)` の
-// 出力そのものと、corpus の fire サンプル全件を本番 `collect_violations` に
-// 通して実際に出た rule_id の和集合を突き合わせる。期待値は手書きせず、
-// どちらも同じ config から (前者は `live_rule_ids` の計算式、後者は corpus
-// 実行) 導く。
+// 期待値は手書きせず、`live_rule_ids` の計算式と corpus 実行のどちらも同じ
+// config から導く。
 
 /// `config` で corpus の fire サンプル全件を `detected_rules` に通し、発火した
 /// rule_id の和集合を返す。expectation が `Clean` のサンプルは対象外
@@ -492,7 +497,7 @@ fn fired_rule_ids_across_fire_samples(config: &Config) -> BTreeSet<String> {
 fn corpus_coverable_live_rule_ids(config: &Config) -> BTreeSet<String> {
     live_rule_ids(&config.rules)
         .into_iter()
-        .filter(|rule| !CORPUS_EXEMPT.contains(rule))
+        .filter(is_corpus_coverable)
         .map(str::to_owned)
         .collect()
 }

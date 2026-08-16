@@ -54,9 +54,9 @@ macro_rules! define_rule_config {
 
             /// `self` with the toggle named `name` set to `value`, every
             /// other field left as `self` has it. The one per-field name
-            /// match both `with_toggles_restored` and
-            /// `rules::rules_with_toggle_off` build on, so the toggle-name ->
-            /// field mapping lives in a single place.
+            /// match `with_toggles_restored` and `rules::toggle_rule_id_count`
+            /// build on, so the toggle-name -> field mapping lives in a
+            /// single place.
             pub(crate) fn with_toggle(&self, name: &str, value: bool) -> Self {
                 let mut next = self.clone();
                 $(if name == $serde_name { next.$field = value; })*
@@ -431,9 +431,10 @@ impl Config {
     /// it finds no root.
     ///
     /// The notes are for the hook boundary to surface: one per matching
-    /// entry that disables at least one rule (rule names + matched
-    /// patterns), and one when resolution moved the path. A glob that failed
-    /// to compile is not among them (see `invalid_pattern_note`).
+    /// entry leaving at least one rule off in the returned config (rule
+    /// names and matched patterns), and one when resolution moved the path. A
+    /// glob that failed to compile is not among them (see
+    /// `invalid_pattern_note`).
     pub fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
@@ -506,6 +507,15 @@ impl Config {
         }
         for (disabled, matched_patterns) in disabled_by_entry {
             let restored = rules.with_toggles_restored(&disabled);
+            // A later matching entry can set a toggle this one disabled back
+            // to `true`. Keeping only the names still off in the file's final
+            // `rules` stops the note from reporting a rule as stopped while it
+            // keeps firing. The names dropped here are already `true` in
+            // `rules`, so `restored` above is unaffected by the narrowing.
+            let disabled = rules.disabled_since(&restored);
+            if disabled.is_empty() {
+                continue;
+            }
             notes.push(format!(
                 "override disabled rule(s) [{}] for pattern(s) [{}]{}",
                 disabled.join(", "),
@@ -521,9 +531,9 @@ impl Config {
     /// count reflects the toggle's individual effect in isolation, not the
     /// sum of multiple toggles' effects together.
     ///
-    /// Per toggle, never summed: `security` is emitted by the registry rule
-    /// and by `ast_security`'s postMessage path alike, so adding two toggles'
-    /// counts would claim more stopped checks than exist.
+    /// Per toggle, never summed: a `rule_id` with more than one emitter (see
+    /// `rules::live_rule_ids`, e.g. `security`) would otherwise be claimed
+    /// stopped by more than one toggle's count.
     ///
     /// `rules` must have every name in `disabled` still toggled on (see
     /// `with_toggles_restored`): `toggle_rule_id_count` computes each name's
@@ -532,12 +542,10 @@ impl Config {
     ///
     /// The per-toggle counts above are each an *isolated* probe (only that
     /// one name off, the rest of `disabled` still on in `rules`), so their
-    /// sum can undercount what `disabled` actually stops together: turning
-    /// two AST toggles off *together* can drop `AstRuleFlags::any()` to
-    /// false and remove `excessive-nesting` too, a `rule_id` neither
-    /// isolated probe saw move (`combination_only_rule_id_count`). When that
-    /// happens an independent trailing clause names the difference, without
-    /// changing the existing per-toggle phrases above.
+    /// sum can undercount what `disabled` actually stops together (see
+    /// `combination_only_rule_id_count`). When that happens an independent
+    /// trailing clause names the difference, without changing the existing
+    /// per-toggle phrases above.
     fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
         let counts: Vec<Option<usize>> = disabled
             .iter()

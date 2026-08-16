@@ -22,7 +22,7 @@ use std::process;
 
 /// The seven toggles that gate an AST rule. Carried to the child so it applies the
 /// caller's config without serializing the whole `Config`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstRuleFlags {
     pub ast_security: bool,
     pub no_use_effect: bool,
@@ -248,12 +248,6 @@ mod tests {
         let from_rules = AstRuleFlags::from_rules(&config.rules);
         let from_config = AstRuleFlags::from_config(&config);
 
-        assert_eq!(from_rules.ast_security, from_config.ast_security);
-        assert_eq!(from_rules.no_use_effect, from_config.no_use_effect);
-        assert_eq!(from_rules.open_redirect, from_config.open_redirect);
-        assert_eq!(from_rules.eval, from_config.eval);
-        assert_eq!(from_rules.sqli_concat, from_config.sqli_concat);
-        assert_eq!(from_rules.cors_wildcard, from_config.cors_wildcard);
-        assert_eq!(from_rules.test_assertion, from_config.test_assertion);
+        assert_eq!(from_rules, from_config);
     }
 }
