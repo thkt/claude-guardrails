@@ -472,7 +472,7 @@ impl Config {
                     "override disabled rule(s) [{}] for pattern(s) [{}]{}",
                     disabled.join(", "),
                     matched_patterns.join(", "),
-                    Self::stopped_rule_id_summary(&disabled),
+                    Self::stopped_rule_id_summary(&disabled, &before),
                 ));
             }
         }
@@ -485,10 +485,10 @@ impl Config {
     /// Per toggle, never summed: `security` is emitted by the registry rule
     /// and by `ast_security`'s postMessage path alike, so adding two toggles'
     /// counts would claim more stopped checks than exist.
-    fn stopped_rule_id_summary(disabled: &[&str]) -> String {
+    fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
         let parts: Vec<String> = disabled
             .iter()
-            .map(|&name| match toggle_rule_id_count(name) {
+            .map(|&name| match toggle_rule_id_count(name, rules) {
                 Some(count) => format!("{name} stops {count} rule_id(s)"),
                 None => format!("{name}: external linter"),
             })

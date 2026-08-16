@@ -294,7 +294,10 @@ fn rule_id_catalog_registered_and_unregistered_are_disjoint() {
 // T-527: oxlint は数を持たない値を返す
 #[test]
 fn oxlint_は数を持たない値を返す() {
-    assert_eq!(toggle_rule_id_count("oxlint"), None);
+    assert_eq!(
+        toggle_rule_id_count("oxlint", &RulesConfig::default()),
+        None
+    );
 }
 
 // "security" rule_id は "security" toggle の一覧に載るが、
@@ -304,19 +307,28 @@ fn oxlint_は数を持たない値を返す() {
 // T-550: security は1を返す
 #[test]
 fn security_は1を返す() {
-    assert_eq!(toggle_rule_id_count("security"), Some(1));
+    assert_eq!(
+        toggle_rule_id_count("security", &RulesConfig::default()),
+        Some(1)
+    );
 }
 
 // T-551: astSecurity は14を返す
 #[test]
 fn ast_security_は14を返す() {
-    assert_eq!(toggle_rule_id_count("astSecurity"), Some(14));
+    assert_eq!(
+        toggle_rule_id_count("astSecurity", &RulesConfig::default()),
+        Some(14)
+    );
 }
 
 // T-552: rule_id と1対1の toggle は1を返す
 #[test]
 fn rule_id_と1対1の_toggle_は1を返す() {
-    assert_eq!(toggle_rule_id_count("sensitiveFile"), Some(1));
+    assert_eq!(
+        toggle_rule_id_count("sensitiveFile", &RulesConfig::default()),
+        Some(1)
+    );
 }
 
 #[test]

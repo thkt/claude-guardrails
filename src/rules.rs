@@ -215,22 +215,25 @@ toggle_isolation! {
 }
 
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
-/// name (e.g. `"astSecurity"`) is set to `false` from an otherwise-default
-/// config. `None` when the toggle gates no fixed set: `"oxlint"` runs an
-/// external linter instead of first-party `rule_id`s.
+/// name (e.g. `"astSecurity"`) is set to `false` starting from `rules`.
+/// `None` when the toggle gates no fixed set: `"oxlint"` runs an external
+/// linter instead of first-party `rule_id`s.
 ///
-/// Derived from [`live_rule_ids`] rather than a hand-kept exception list: a
-/// listed `rule_id` counts as stopped only if `live_rule_ids` actually drops
-/// it once this one toggle turns off, so `excessive-nesting` (still live via
-/// any other AST toggle) and `rule_id::SECURITY` (still live via
-/// `astSecurity`) count correctly with no separate case for either here.
-pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
+/// The count is `live_rule_ids(rules) - live_rule_ids(rules with the toggle
+/// off)`, so it reflects `rules` as given rather than always assuming a
+/// default baseline: a `rule_id` already silenced by another toggle in
+/// `rules` (e.g. `astSecurity` already off) does not count twice, and one
+/// that stays live through a different toggle (`excessive-nesting` via any
+/// other AST toggle, `rule_id::SECURITY` via `astSecurity`) is not counted as
+/// stopped.
+pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
         .find(|(name, _)| *name == toggle_name)
-        .map(|(_, rules)| {
-            let after = live_rule_ids(&rules_with_toggle_off(&RulesConfig::default(), toggle_name));
-            rules.iter().filter(|rule| !after.contains(**rule)).count()
+        .map(|_| {
+            let before = live_rule_ids(rules);
+            let after = live_rule_ids(&rules_with_toggle_off(rules, toggle_name));
+            before.difference(&after).count()
         })
 }
 
