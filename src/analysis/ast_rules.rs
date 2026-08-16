@@ -12,7 +12,7 @@
 //! subcommand); deep-overflow inputs live only in CLI integration tests.
 
 use crate::analysis::{ast, ast_security};
-use crate::config::Config;
+use crate::config::{Config, RulesConfig};
 use crate::import_map;
 use crate::rules::{self, Violation};
 use serde::{Deserialize, Serialize};
@@ -34,16 +34,23 @@ pub struct AstRuleFlags {
 }
 
 impl AstRuleFlags {
-    pub fn from_config(config: &Config) -> Self {
+    /// Reads the six toggles straight off `RulesConfig`, for callers that hold
+    /// only the rules sub-config (not the full `Config`). `from_config` delegates
+    /// here so the field ordering lives in one place.
+    pub fn from_rules(rules: &RulesConfig) -> Self {
         Self {
-            ast_security: config.rules.ast_security,
-            no_use_effect: config.rules.no_use_effect,
-            open_redirect: config.rules.open_redirect,
-            eval: config.rules.eval,
-            sqli_concat: config.rules.sqli_concat,
-            cors_wildcard: config.rules.cors_wildcard,
-            test_assertion: config.rules.test_assertion,
+            ast_security: rules.ast_security,
+            no_use_effect: rules.no_use_effect,
+            open_redirect: rules.open_redirect,
+            eval: rules.eval,
+            sqli_concat: rules.sqli_concat,
+            cors_wildcard: rules.cors_wildcard,
+            test_assertion: rules.test_assertion,
         }
+    }
+
+    pub fn from_config(config: &Config) -> Self {
+        Self::from_rules(&config.rules)
     }
 
     pub fn any(&self) -> bool {
@@ -229,5 +236,24 @@ mod tests {
         assert!(!flags.eval);
         assert!(flags.ast_security);
         assert!(flags.any());
+    }
+
+    // T-599
+    #[test]
+    fn from_rules_は同じ_config_から_from_config_と同じ_flag_集合を返す() {
+        let mut config = Config::default();
+        config.rules.eval = false;
+        config.rules.cors_wildcard = false;
+
+        let from_rules = AstRuleFlags::from_rules(&config.rules);
+        let from_config = AstRuleFlags::from_config(&config);
+
+        assert_eq!(from_rules.ast_security, from_config.ast_security);
+        assert_eq!(from_rules.no_use_effect, from_config.no_use_effect);
+        assert_eq!(from_rules.open_redirect, from_config.open_redirect);
+        assert_eq!(from_rules.eval, from_config.eval);
+        assert_eq!(from_rules.sqli_concat, from_config.sqli_concat);
+        assert_eq!(from_rules.cors_wildcard, from_config.cors_wildcard);
+        assert_eq!(from_rules.test_assertion, from_config.test_assertion);
     }
 }
