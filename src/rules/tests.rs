@@ -330,3 +330,47 @@ fn ast_test_check_panics_on_parser_failure() {
 fn ast_test_check_panics_on_unsupported_extension() {
     ast_test_check("any content", "/docs/README.md", |_, _| Vec::new());
 }
+
+// --- live_rule_ids ---
+
+// T-600
+#[test]
+fn default_構成の_live_集合に_excessive_nesting_が入る() {
+    let rules = RulesConfig::default();
+    let live = live_rule_ids(&rules);
+    assert!(live.contains(rule_id::EXCESSIVE_NESTING));
+}
+
+// T-601
+#[test]
+fn ast_flag_をすべて_off_にした構成の_live_集合に_excessive_nesting_が入らない() {
+    let mut rules = RulesConfig::default();
+    rules.ast_security = false;
+    rules.no_use_effect = false;
+    rules.open_redirect = false;
+    rules.eval = false;
+    rules.sqli_concat = false;
+    rules.cors_wildcard = false;
+    rules.test_assertion = false;
+    let live = live_rule_ids(&rules);
+    assert!(!live.contains(rule_id::EXCESSIVE_NESTING));
+}
+
+// T-602
+#[test]
+fn security_を_off_にしても_ast_security_が_on_なら_live_集合に_security_が残る() {
+    let mut rules = RulesConfig::default();
+    rules.security = false;
+    let live = live_rule_ids(&rules);
+    assert!(live.contains(rule_id::SECURITY));
+}
+
+// T-603
+#[test]
+fn security_と_ast_security_の両方を_off_にすると_live_集合から_security_が消える() {
+    let mut rules = RulesConfig::default();
+    rules.security = false;
+    rules.ast_security = false;
+    let live = live_rule_ids(&rules);
+    assert!(!live.contains(rule_id::SECURITY));
+}

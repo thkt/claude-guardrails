@@ -26,13 +26,13 @@ pub(crate) mod test_assertion;
 mod test_location;
 mod transaction;
 
+use crate::analysis::ast_rules::AstRuleFlags;
 use crate::analysis::scanner::build_source_masks;
-use crate::config::Config;
-#[cfg(test)]
-use crate::config::RulesConfig;
+use crate::config::{Config, RulesConfig};
 use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -113,6 +113,46 @@ macro_rules! toggle_isolation {
             $( ($name, &[ $( $rule ),* ]) ),*
         ];
 
+        /// The `rule_id`s that can fire for `rules`: the union of every `on`
+        /// toggle's list in [`TOGGLE_RULE_IDS`], collected by the same
+        /// per-field walk as `config::RulesConfig::disabled_since`, then
+        /// corrected for the two toggles whose list membership alone does not
+        /// decide liveness (see the two `if`/`else` blocks below).
+        pub(crate) fn live_rule_ids(rules: &RulesConfig) -> HashSet<&'static str> {
+            let mut live: HashSet<&'static str> = HashSet::new();
+            $(if rules.$field { live.extend([ $( $rule ),* ]); })*
+
+            // `excessive-nesting` runs unconditionally from `hook::lint_with_ast`
+            // whenever any of the seven AST rules is on (`AstRuleFlags::any`),
+            // not only when `astSecurity` is.
+            if AstRuleFlags::from_rules(rules).any() {
+                live.insert(rule_id::EXCESSIVE_NESTING);
+            } else {
+                live.remove(rule_id::EXCESSIVE_NESTING);
+            }
+
+            // `rule_id::SECURITY` is also emitted by
+            // `analysis::ast_security::postmessage::check_post_message_wildcard`,
+            // independently of the `security` toggle.
+            if rules.security || rules.ast_security {
+                live.insert(rule_id::SECURITY);
+            } else {
+                live.remove(rule_id::SECURITY);
+            }
+
+            live
+        }
+
+        /// `rules` with just the toggle named `toggle_name` turned off, every
+        /// other field left as `rules` already had it. Lets
+        /// `toggle_rule_id_count` read its answer off `live_rule_ids` instead
+        /// of keeping a second, hand-written exception list in sync with it.
+        fn rules_with_toggle_off(rules: &RulesConfig, toggle_name: &str) -> RulesConfig {
+            let mut next = rules.clone();
+            $(if toggle_name == $name { next.$field = false; })*
+            next
+        }
+
         /// Single-toggle isolation configs for the precision harness:
         /// `.rules` all off except `$field`.
         #[cfg(test)]
@@ -174,39 +214,23 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
-/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it.
-/// `excessive-nesting` runs unconditionally from `src/hook.rs`, so turning
-/// `astSecurity` off leaves it firing.
-const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL: &[&str] = &[rule_id::EXCESSIVE_NESTING];
-
-/// Listed under a toggle in [`TOGGLE_RULE_IDS`] but not stopped by it because
-/// another, independently-gated module emits the same `rule_id` too.
-/// `rule_id::SECURITY` is emitted both by `rules::security` (the `"security"`
-/// toggle) and by `analysis::ast_security::postmessage::check_post_message_wildcard`,
-/// so turning `"security"` off does not stop it firing.
-const TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER: &[&str] = &[rule_id::SECURITY];
-
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
-/// name (e.g. `"astSecurity"`) is set to `false`. `None` when the toggle gates
-/// no fixed set: `"oxlint"` runs an external linter instead of first-party
-/// `rule_id`s.
+/// name (e.g. `"astSecurity"`) is set to `false` from an otherwise-default
+/// config. `None` when the toggle gates no fixed set: `"oxlint"` runs an
+/// external linter instead of first-party `rule_id`s.
 ///
-/// Both exception lists assume the other emitter is still on, so the count is
-/// the one for a config where every other toggle keeps its default. Turning
-/// `astSecurity` off first makes this undercount `"security"` by one, since the
-/// wildcard check that kept `rule_id::SECURITY` alive is gone by then.
+/// Derived from [`live_rule_ids`] rather than a hand-kept exception list: a
+/// listed `rule_id` counts as stopped only if `live_rule_ids` actually drops
+/// it once this one toggle turns off, so `excessive-nesting` (still live via
+/// any other AST toggle) and `rule_id::SECURITY` (still live via
+/// `astSecurity`) count correctly with no separate case for either here.
 pub(crate) fn toggle_rule_id_count(toggle_name: &str) -> Option<usize> {
     TOGGLE_RULE_IDS
         .iter()
         .find(|(name, _)| *name == toggle_name)
         .map(|(_, rules)| {
-            rules
-                .iter()
-                .filter(|rule| {
-                    !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_UNCONDITIONAL.contains(rule)
-                        && !TOGGLE_RULE_ID_COUNT_EXCEPTIONS_MULTI_EMITTER.contains(rule)
-                })
-                .count()
+            let after = live_rule_ids(&rules_with_toggle_off(&RulesConfig::default(), toggle_name));
+            rules.iter().filter(|rule| !after.contains(**rule)).count()
         })
 }
 
