@@ -143,16 +143,6 @@ macro_rules! toggle_isolation {
             live
         }
 
-        /// `rules` with just the toggle named `toggle_name` turned off, every
-        /// other field left as `rules` already had it. Lets
-        /// `toggle_rule_id_count` read its answer off `live_rule_ids` instead
-        /// of keeping a second, hand-written exception list in sync with it.
-        fn rules_with_toggle_off(rules: &RulesConfig, toggle_name: &str) -> RulesConfig {
-            let mut next = rules.clone();
-            $(if toggle_name == $name { next.$field = false; })*
-            next
-        }
-
         /// Single-toggle isolation configs for the precision harness:
         /// `.rules` all off except `$field`.
         #[cfg(test)]
@@ -214,6 +204,15 @@ toggle_isolation! {
     config_guard => "configGuard": ["config-guard"];
 }
 
+/// `rules` with just the toggle named `toggle_name` turned off, every other
+/// field left as `rules` already had it. A thin wrapper over
+/// `RulesConfig::with_toggle` so `toggle_rule_id_count` and
+/// `combination_only_rule_id_count` read as "turn this name off", not
+/// "set this name to false".
+fn rules_with_toggle_off(rules: &RulesConfig, toggle_name: &str) -> RulesConfig {
+    rules.with_toggle(toggle_name, false)
+}
+
 /// Number of `rule_id`s that stop firing when the toggle named by its serde
 /// name (e.g. `"astSecurity"`) is set to `false` starting from `rules`.
 /// `None` when the toggle gates no fixed set: `"oxlint"` runs an external
@@ -249,8 +248,15 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Op
 ///
 /// `rules` must have every name in `names` already on (the same precondition
 /// `toggle_rule_id_count` takes), so "before" here and there is the same file
-/// configuration; see `RulesConfig::with_toggles_restored`.
-pub(crate) fn combination_only_rule_id_count(names: &[&str], rules: &RulesConfig) -> usize {
+/// configuration; see `RulesConfig::with_toggles_restored`. `isolated_sum` is
+/// the sum of each name's own `toggle_rule_id_count(name, rules)`; the caller
+/// already computes that per-name to render the individual phrases, so it is
+/// taken here rather than recomputed.
+pub(crate) fn combination_only_rule_id_count(
+    names: &[&str],
+    rules: &RulesConfig,
+    isolated_sum: usize,
+) -> usize {
     let before = live_rule_ids(rules);
     let mut all_off = rules.clone();
     for &name in names {
@@ -258,10 +264,6 @@ pub(crate) fn combination_only_rule_id_count(names: &[&str], rules: &RulesConfig
     }
     let after = live_rule_ids(&all_off);
     let actual = before.difference(&after).count();
-    let isolated_sum: usize = names
-        .iter()
-        .filter_map(|&name| toggle_rule_id_count(name, rules))
-        .sum();
     actual.saturating_sub(isolated_sum)
 }
 

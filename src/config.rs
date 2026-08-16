@@ -52,6 +52,17 @@ macro_rules! define_rule_config {
                 disabled
             }
 
+            /// `self` with the toggle named `name` set to `value`, every
+            /// other field left as `self` has it. The one per-field name
+            /// match both `with_toggles_restored` and
+            /// `rules::rules_with_toggle_off` build on, so the toggle-name ->
+            /// field mapping lives in a single place.
+            pub(crate) fn with_toggle(&self, name: &str, value: bool) -> Self {
+                let mut next = self.clone();
+                $(if name == $serde_name { next.$field = value; })*
+                next
+            }
+
             /// `self` with every toggle named in `names` set back to `true`,
             /// every other field left as `self` has it. Recovers the
             /// "toggle still on, rest of the file's final configuration
@@ -60,7 +71,9 @@ macro_rules! define_rule_config {
             /// rules rather than the order overrides happened to run in.
             pub(crate) fn with_toggles_restored(&self, names: &[&str]) -> Self {
                 let mut next = self.clone();
-                $(if names.contains(&$serde_name) { next.$field = true; })*
+                for &name in names {
+                    next = next.with_toggle(name, true);
+                }
                 next
             }
         }
@@ -526,14 +539,20 @@ impl Config {
     /// happens an independent trailing clause names the difference, without
     /// changing the existing per-toggle phrases above.
     fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
+        let counts: Vec<Option<usize>> = disabled
+            .iter()
+            .map(|&name| toggle_rule_id_count(name, rules))
+            .collect();
         let mut parts: Vec<String> = disabled
             .iter()
-            .map(|&name| match toggle_rule_id_count(name, rules) {
+            .zip(&counts)
+            .map(|(&name, count)| match count {
                 Some(count) => format!("{name} stops {count} rule_id(s)"),
                 None => format!("{name}: external linter"),
             })
             .collect();
-        let combination = combination_only_rule_id_count(disabled, rules);
+        let isolated_sum: usize = counts.iter().filter_map(|&c| c).sum();
+        let combination = combination_only_rule_id_count(disabled, rules, isolated_sum);
         if combination > 0 {
             parts.push(format!("combination stops {combination} more rule_id(s)"));
         }
