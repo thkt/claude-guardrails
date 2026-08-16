@@ -1125,11 +1125,11 @@ fn override_軸を持たない_json_を_base_側に渡すと_gate_は_bootstrap_
     );
 }
 
-/// `tiny_report` の 2 サンプル固定と異なり、"eval" の corpus サンプル総数
-/// (tp+fn+fp+tn) を呼び出し側で指定できる report を作る。全サンプルを Fire
-/// にして fp=tn=0 に揃えるのは、precision_gate.sh の FP レート判定
-/// (`bfp * (bfp+btn)` 系) を常に不発にし、corpus サンプル総数の判定だけを
-/// 単独で踏ませるため。
+/// `tiny_report` は 2 サンプル固定なので、総数を変える test はこちらを使う。
+///
+/// 全サンプルを Fire にして fp=tn=0 に揃えるのは、precision_gate.sh の FP
+/// レート判定 (`bfp * (bfp+btn)` 系) を常に不発にし、corpus サンプル総数の
+/// 判定だけを単独で踏ませるため。
 fn report_with_eval_sample_count(count: u32) -> MetricsReport {
     let config = harness_config();
     let samples: Vec<CorpusSample> = (0..count)
@@ -1193,10 +1193,7 @@ fn base_に無い_rule_を持つ_head_を渡しても_gate_は成功で返る() 
     write_via_metrics_out_env(&report, &base_path);
     write_via_metrics_out_env(&report, &head_path);
 
-    // head にしかない rule を模す: "eval" を持つ head に対し、production の
-    // env var 経路で書き出した base.json から "rules"."eval" キーを取り除く。
-    // 手書き JSON で schema を別に定義するのではなく、実物の JSON から一部を
-    // 削るので schema が実物からずれない。
+    // 実物の JSON から一部を削るので、schema が実物からずれない。
     let mut base_value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&base_path).expect("read base"))
             .expect("parse base json");
