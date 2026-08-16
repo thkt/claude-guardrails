@@ -811,3 +811,70 @@ fn security_を切る_override_の_note_が_1_と出る() {
          got: {note}"
     );
 }
+
+// T-607: security と astSecurity を別 entry で切ると security の note が 2 を出す
+//
+// `rule_id::SECURITY` is live when either `security` or `astSecurity` is on
+// (rules.rs `live_rule_ids`), so turning `security` off stops it only if
+// `astSecurity` is also off in the file's final effective configuration. Here
+// the two toggles are disabled by two separate `overrides` entries matching
+// the same file, `security` first. The count attributed to `security` must
+// reflect the file's actual final configuration (both toggles off, so
+// `security` stops 2 rule_id(s): "security" and "dangerous-inner-html"), not
+// the state as it stood before the later `astSecurity` entry ran.
+#[test]
+fn security_と_astSecurity_を別_entry_で切ると_security_の_note_が_2_を出す() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [
+            {"files": ["**"], "rules": {"security": false}},
+            {"files": ["**"], "rules": {"astSecurity": false}}
+        ]}"#,
+    );
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    let note = notes
+        .iter()
+        .find(|n| n.contains("security stops"))
+        .unwrap_or_else(|| panic!("expected an override note naming security; got: {notes:?}"));
+    assert!(
+        note.contains("security stops 2 rule_id(s)"),
+        "expected security's note to count the rule_id that astSecurity's \
+         postMessage path also stops, since astSecurity is off in the final \
+         configuration too; got: {note}"
+    );
+}
+
+// T-608: override が 1 件だけの構成では note の並び順が変わらない
+//
+// One entry disabling two unrelated toggles at once. The JSON deliberately
+// lists `flakyTest` before `testAssertion` to pin that the note's order
+// follows `RulesConfig`'s declaration order (`disabled_since`'s field walk),
+// not the JSON key order, and that deferring the note text past the loop
+// leaves that order untouched for the single-entry case.
+#[test]
+fn override_が_1_件だけの構成では_note_の並び順が変わらない() {
+    let (tmp, config) = repo_with_config(
+        r#"{"overrides": [{"files": ["**"], "rules": {"flakyTest": false, "testAssertion": false}}]}"#,
+    );
+
+    let (_rules, notes) = config.effective_rules_with_notes(tmp.path().join("src/app.ts"));
+
+    // `.find` (not an exact-length assert) because a symlinked tmp root (e.g.
+    // macOS `/var` -> `/private/var`) adds an unrelated "followed a symlink"
+    // note ahead of the override note; that note is not this scenario's concern.
+    let note = notes
+        .iter()
+        .find(|n| n.contains("override disabled rule(s)"))
+        .unwrap_or_else(|| panic!("expected an override note; got: {notes:?}"));
+    assert!(
+        note.contains("[testAssertion, flakyTest]"),
+        "expected disabled rule names in RulesConfig declaration order \
+         (testAssertion before flakyTest), unaffected by the JSON's own key \
+         order; got: {note}"
+    );
+    assert!(
+        note.contains("(testAssertion stops 1 rule_id(s); flakyTest stops 1 rule_id(s))"),
+        "expected the rule_id-count breakdown in the same order; got: {note}"
+    );
+}

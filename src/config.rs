@@ -51,6 +51,18 @@ macro_rules! define_rule_config {
                 $(if before.$field && !self.$field { disabled.push($serde_name); })*
                 disabled
             }
+
+            /// `self` with every toggle named in `names` set back to `true`,
+            /// every other field left as `self` has it. Recovers the
+            /// "toggle still on, rest of the file's final configuration
+            /// already applied" state `toggle_rule_id_count` expects, so an
+            /// override note's count reflects the file's final effective
+            /// rules rather than the order overrides happened to run in.
+            pub(crate) fn with_toggles_restored(&self, names: &[&str]) -> Self {
+                let mut next = self.clone();
+                $(if names.contains(&$serde_name) { next.$field = true; })*
+                next
+            }
         }
 
         /// Every public toggle name (the `.guardrails.json` `rules` keys). Test-only
@@ -454,6 +466,14 @@ impl Config {
         }
         let match_target = resolved.relative;
 
+        // `stopped_rule_id_summary` reads the note-worthy count off `rules`, so
+        // it must see the file's final effective configuration, not the state
+        // as it stood mid-loop: a toggle another, later entry also disables
+        // (e.g. `astSecurity`) changes what an earlier entry's disabled toggle
+        // (`security`) is credited with stopping. The loop only collects what
+        // changed per entry; the count is computed once below, after every
+        // entry has applied.
+        let mut disabled_by_entry: Vec<(Vec<&'static str>, Vec<&str>)> = Vec::new();
         for entry in &self.overrides {
             let matched_patterns: Vec<&str> = entry
                 .files
@@ -468,13 +488,17 @@ impl Config {
             rules.apply_path_overrides(entry.rules.clone());
             let disabled = rules.disabled_since(&before);
             if !disabled.is_empty() {
-                notes.push(format!(
-                    "override disabled rule(s) [{}] for pattern(s) [{}]{}",
-                    disabled.join(", "),
-                    matched_patterns.join(", "),
-                    Self::stopped_rule_id_summary(&disabled, &before),
-                ));
+                disabled_by_entry.push((disabled, matched_patterns));
             }
+        }
+        for (disabled, matched_patterns) in disabled_by_entry {
+            let restored = rules.with_toggles_restored(&disabled);
+            notes.push(format!(
+                "override disabled rule(s) [{}] for pattern(s) [{}]{}",
+                disabled.join(", "),
+                matched_patterns.join(", "),
+                Self::stopped_rule_id_summary(&disabled, &restored),
+            ));
         }
         (rules, notes)
     }
@@ -485,6 +509,11 @@ impl Config {
     /// Per toggle, never summed: `security` is emitted by the registry rule
     /// and by `ast_security`'s postMessage path alike, so adding two toggles'
     /// counts would claim more stopped checks than exist.
+    ///
+    /// `rules` must have every name in `disabled` still toggled on (see
+    /// `with_toggles_restored`): `toggle_rule_id_count` computes each name's
+    /// count as the drop from turning that one toggle off starting from
+    /// `rules`, so a `disabled` toggle already off in `rules` would count 0.
     fn stopped_rule_id_summary(disabled: &[&str], rules: &RulesConfig) -> String {
         let parts: Vec<String> = disabled
             .iter()
