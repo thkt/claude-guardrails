@@ -47,14 +47,11 @@ fn make_violation(file_path: &str, line_num: u32) -> Violation {
     make_violation_with_opt_out(file_path, line_num, None)
 }
 
-// The bind+join path (RE_JOIN_RECEIVER match) decides violation identity from
-// the bound identifier resolved earlier on the array-literal line, not from
-// the `.join()` line's text alone — the ADR-0020 amendment's "identity fully
-// determined by the trimmed line text" locality condition does not hold for
-// it. It opts out of `hook::diff_aware`'s demotion pass so a before/after
-// line-text match can never demote it. The other three pushes (concat,
-// template, inline join) each decide identity from their own line alone and
-// stay demotable.
+// The bind+join push opts out of `hook::diff_aware`'s demotion pass. Its
+// identity comes from the identifier bound on the array-literal line, not from
+// the `.join()` line's text, so ADR-0020's locality condition does not hold and
+// a before/after text match must not stand in for sameness (#472). The other
+// three pushes decide from their own line alone and stay demotable.
 fn make_violation_with_opt_out(
     file_path: &str,
     line_num: u32,
@@ -207,7 +204,7 @@ const html = parts.join('');";
     // line) is the one push that must opt this violation out of
     // `hook::diff_aware`'s demotion pass.
     #[test]
-    fn a_bind_join_raw_html_violation_carries_the_demotion_opt_out() {
+    fn bind_join_violation_carries_demotion_opt_out() {
         let content = r"const parts = ['<div>', userInput, '</div>'];
 const html = parts.join('');";
         let v = check(content, "/src/render.ts");
@@ -218,7 +215,7 @@ const html = parts.join('');";
     // T-624: RE_HTML_CONCAT's push is one of the three left unchanged, so it
     // must not carry the demotion opt-out.
     #[test]
-    fn a_concat_raw_html_violation_does_not_carry_the_demotion_opt_out() {
+    fn concat_violation_stays_demotable() {
         let v = check(r"const html = '<div>' + userInput;", "/src/render.ts");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].no_demote, None);

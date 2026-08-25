@@ -149,14 +149,11 @@ fn keeps_all_when_project_root_is_unresolved() {
     assert!(outcome.info_note.is_none());
 }
 
-// T-621: a violation carrying the demotion opt-out is not demoted even when
-// its line text matches a before-edit occurrence. The opt-out is a per-
-// violation marker (mirrors `origin`'s shape), so a producer that already
-// knows this specific instance must never demote can set it regardless of
-// what the before-edit content contains.
+// T-621: a violation carrying the demotion opt-out is not demoted even when its
+// line text matches a before-edit occurrence. The match is set up to succeed, so
+// a green here cannot come from the texts failing to line up.
 #[test]
-fn a_violation_carrying_the_demotion_opt_out_is_not_demoted_even_when_its_line_text_matches_a_before_edit_occurrence(
-) {
+fn opted_out_violation_survives_a_matching_before_line() {
     let opted_out = Violation {
         no_demote: Some(DemotionOptOut::OptedOut),
         ..violation("eval", Some(1))
@@ -176,14 +173,11 @@ fn a_violation_carrying_the_demotion_opt_out_is_not_demoted_even_when_its_line_t
     assert_eq!(result.blocking.len(), 1);
 }
 
-// T-622: a violation decoded from the AST child subprocess keeps its
-// demotion eligibility. The child payload carries no `no_demote` key (it
-// matches every violation the child emitted before this field existed), so
-// `serde_json::from_slice::<Vec<Violation>>` (`src/hook.rs`) must decode the
-// absent field to the demotable default, not to an opted-out state, or
-// `eval`'s existing demotion would silently break.
+// T-622: a violation decoded from the AST child subprocess keeps its demotion
+// eligibility. The child payload carries no `no_demote` key, so decoding the
+// absent field to an opted-out state would silently end `eval`'s demotion.
 #[test]
-fn a_violation_decoded_from_the_ast_child_subprocess_keeps_its_demotion_eligibility() {
+fn child_decoded_violation_stays_demotable() {
     let json = br#"[{"rule":"eval","severity":"high","fix":"","file":"/src/app.ts","line":1}]"#;
     let decoded: Vec<Violation> = serde_json::from_slice(json).expect("decodes AST child payload");
     assert_eq!(

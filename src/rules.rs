@@ -408,11 +408,9 @@ pub enum ViolationOrigin {
     Preexisting,
 }
 
-/// Per-violation opt-out from `hook::diff_aware`'s demotion pass. Follows
-/// `origin`'s shape (an `Option` of a single-variant enum, absent by
-/// default): a producer that already knows this specific violation instance
-/// must never demote — regardless of what the before-edit content contains —
-/// sets it, rather than the classifier deciding from (rule, line text) alone.
+/// Per-violation opt-out from `hook::diff_aware`'s demotion pass. Set by the
+/// producing rule, not by the classifier: whether a violation may demote is a
+/// property of how the rule decided it, which (rule, line text) cannot show.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DemotionOptOut {

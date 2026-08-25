@@ -16,15 +16,9 @@ use std::path::Path;
 /// `allowlisted_rules_report_every_occurrence` and the demotion-surface
 /// corpus tests, which fail when a rule enrolls without matching entries.
 ///
-/// raw-html's bind+join branch decides from two lines (array literal +
-/// join receiver), so its identity is not fully determined by the trimmed
-/// `.join()` line alone; it fails the ADR-0020 amendment's locality test.
-/// Rather than widen identity into this allowlist, it opts out of demotion
-/// per violation (`no_demote` set by
-/// `rules::raw_html::make_violation_with_opt_out`), which keeps it blocking
-/// regardless of before/after content — never budget-capped, never
-/// position-independent. The raw-html swap and payload-swap fixtures pin
-/// that the join form always blocks.
+/// Enrollment here covers raw-html's single-line branches only. Its bind+join
+/// branch fails the locality test and opts out per violation instead; the why
+/// lives at `rules::raw_html::make_violation_with_opt_out`.
 pub(crate) const DEMOTABLE_RULES: &[&str] = &["eval", "raw-html"];
 
 /// Gate for the second pass: lint the before-edit content only when the
@@ -205,9 +199,6 @@ pub(crate) fn classify(
     let mut kept = Vec::new();
     let mut demoted = Vec::new();
     for v in blocking {
-        // A per-violation opt-out overrides the (rule, line text) match: the
-        // producer that set it already knows this instance must never
-        // demote, independent of what the before-edit content contains.
         let preexisting = v.no_demote.is_none()
             && allowlist_entry(&v.rule).is_some_and(|rule| {
                 v.line

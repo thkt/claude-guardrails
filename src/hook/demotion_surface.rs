@@ -29,27 +29,17 @@ use crate::rules::{Violation, RE_JS_FILE};
 /// violation line is removed and a different-text violation takes its place;
 /// the after key is absent from the before multiset so it cannot borrow the
 /// deleted line's demotion budget and blocks, pinning that a delete+add of
-/// different text is not a free pass), `payload-swap` (the reported line's
-/// text stays byte-identical between before and after; only a different line
-/// that feeds that report — raw-html's array literal, eval's import alias —
-/// changes. Identity is keyed on report-line text alone, so a rule that is
-/// still demotable would see no change at all; raw-html's opted-out bind+join
-/// violation keeps blocking regardless, and eval's alias change makes the
-/// call line stop being a violation in `after` in the first place, so there
-/// is nothing left to demote).
+/// different text is not a free pass), `payload-swap` (the reported line's text
+/// is byte-identical between before and after; only a line that feeds that
+/// report changes, such as raw-html's array literal or eval's import alias.
+/// This is the case the report-line key cannot see).
 //
-// The demotion budget is keyed on trimmed line text, so enrollment assumes
-// text identity equals violation identity for a rule: the same line means the
-// same severity wherever it sits. eval (a flat substring match) satisfies that,
-// as do raw-html's single-line branches (concat / template / inline-join).
-// raw-html's bind+join branch is context-dependent (a join line violates only
-// near an HTML-array bind that sits on a different line), so its violation
-// identity is not fully determined by the trimmed `.join()` line alone; it
-// fails the ADR-0020 amendment's locality test and sets `no_demote` on push
-// (`rules::raw_html::make_violation_with_opt_out`), which always blocks
-// regardless of before/after content. The raw-html swap fixture uses the join
-// form and pins that opt-out. A future context-dependent rule needs the same
-// opt-out, plus before/after pinning, before it joins DEMOTABLE_RULES.
+// The budget is keyed on trimmed line text, so enrollment assumes text identity
+// equals violation identity. eval and raw-html's single-line branches satisfy
+// that; raw-html's bind+join does not, and opts out at push time
+// (`rules::raw_html::make_violation_with_opt_out`). A future rule whose
+// identity is not text-determined needs the same opt-out plus before/after
+// pinning before it joins DEMOTABLE_RULES.
 const SCENARIOS: &[&str] = &[
     "preserved",
     "added",
@@ -198,16 +188,11 @@ fn classify_payload_swap_pair(rule: &'static str) -> Classification {
     classify(blocking, pair.after, &before_violations, pair.before)
 }
 
-// T-625: raw-html's bind+join violation carries the demotion opt-out
-// (U-002), and `classify` always keeps an opted-out violation blocking
-// (U-001) regardless of a before/after line-text match. This pins that the
-// two wire together end to end: even with the `.join()` report line held
-// byte-identical, changing the HTML array literal's contents (the payload)
-// still blocks rather than demoting, because the opt-out — not a text
-// mismatch — is what keeps it blocking.
+// T-625: with the join line byte-identical, changing the HTML array literal's
+// contents demotes nothing and blocks one raw-html violation. What keeps it
+// blocking is the opt-out, not a text mismatch: the report line matches.
 #[test]
-fn with_the_join_line_byte_identical_changing_the_html_array_literals_contents_demotes_nothing_and_blocks_one_raw_html_violation(
-) {
+fn payload_swap_blocks_raw_html_bind_join() {
     let result = classify_payload_swap_pair("raw-html");
     assert_eq!(result.demoted.len(), 0, "expected nothing demoted");
     assert_eq!(
@@ -218,14 +203,11 @@ fn with_the_join_line_byte_identical_changing_the_html_array_literals_contents_d
     assert_eq!(result.blocking[0].rule, "raw-html");
 }
 
-// T-626: eval resolves its target through the import alias's original name,
-// so renaming the alias away from `eval` (the payload) stops the call line
-// from being a violation in `after` at all, even though the call line's text
-// is byte-identical to `before`. With nothing blocking on the after side,
-// `classify` has nothing to demote and nothing to keep.
+// T-626: with the call line byte-identical, changing the import alias away from
+// eval demotes nothing and blocks nothing. The alias change stops the call line
+// from being a violation at all, so nothing reaches `classify` to demote.
 #[test]
-fn with_the_call_line_byte_identical_changing_the_import_alias_away_from_eval_demotes_nothing_and_blocks_nothing(
-) {
+fn payload_swap_leaves_eval_with_nothing_to_classify() {
     let result = classify_payload_swap_pair("eval");
     assert_eq!(result.demoted.len(), 0, "expected nothing demoted");
     assert_eq!(result.blocking.len(), 0, "expected nothing blocked");
