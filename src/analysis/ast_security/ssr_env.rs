@@ -78,6 +78,8 @@ impl SecurityVisitor<'_> {
         );
     }
 
+    // The message names neither carve-out below: an agent reading it would apply
+    // one and turn the block into an allow (ADR-0022, #473).
     pub(super) fn check_client_env_public_leak(&mut self, sme: &StaticMemberExpression) {
         if !self.has_use_client {
             return;
@@ -97,7 +99,7 @@ impl SecurityVisitor<'_> {
         self.push_violation(
             rule_id::CLIENT_ENV_PUBLIC_LEAK,
             Severity::High,
-            "process.env in a 'use client' module is bundled to the browser. Move to a server component, or use a NEXT_PUBLIC_ prefix if the value is public.",
+            "process.env in a 'use client' module is bundled to the browser. Read the value on the server and pass down only render-needed data.",
             sme.span,
         );
     }
@@ -143,10 +145,12 @@ impl SecurityVisitor<'_> {
                 continue;
             };
             if name_matches_ssr_secret_keyword(&key_name) {
+                // The message offers no rename, which this name-only match
+                // would not catch (ADR-0022, #473).
                 self.push_violation(
                     rule_id::SSR_SECRET_BLEED,
                     Severity::High,
-                    "SSR/Server Action return is sent to the client. Move secret-named field server-side or rename if value is public.",
+                    "SSR/Server Action return is sent to the client. Keep the secret server-side and return only render-needed data.",
                     op.span,
                 );
                 continue;
