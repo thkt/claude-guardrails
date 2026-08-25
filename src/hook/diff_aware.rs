@@ -203,17 +203,21 @@ pub(crate) fn classify(
     let mut kept = Vec::new();
     let mut demoted = Vec::new();
     for v in blocking {
-        let preexisting = allowlist_entry(&v.rule).is_some_and(|rule| {
-            v.line
-                .and_then(|line| line_text(&after_lines, line))
-                .is_some_and(|text| match budget.get_mut(&(rule, text)) {
-                    Some(count) if *count > 0 => {
-                        *count -= 1;
-                        true
-                    }
-                    _ => false,
-                })
-        });
+        // A per-violation opt-out overrides the (rule, line text) match: the
+        // producer that set it already knows this instance must never
+        // demote, independent of what the before-edit content contains.
+        let preexisting = v.no_demote.is_none()
+            && allowlist_entry(&v.rule).is_some_and(|rule| {
+                v.line
+                    .and_then(|line| line_text(&after_lines, line))
+                    .is_some_and(|text| match budget.get_mut(&(rule, text)) {
+                        Some(count) if *count > 0 => {
+                            *count -= 1;
+                            true
+                        }
+                        _ => false,
+                    })
+            });
         if preexisting {
             demoted.push(v);
         } else {
