@@ -213,6 +213,7 @@ fn emit_error_envelope_if_enabled(json_mode: bool, payload: ErrorPayload) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::Severity;
     use std::fs;
 
     fn tmp_with_claude() -> tempfile::TempDir {
@@ -224,7 +225,7 @@ mod tests {
     fn warning(rule: &str) -> Violation {
         Violation {
             rule: rule.to_owned(),
-            severity: crate::rules::Severity::Medium,
+            severity: Severity::Medium,
             fix: format!("fix {rule}"),
             file: "/src/app.ts".to_owned(),
             line: Some(1),

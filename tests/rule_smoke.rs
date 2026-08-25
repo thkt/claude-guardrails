@@ -4,6 +4,7 @@
 //! する正常コードを使い、「ルールが skip されただけ」を検出から除外する。
 
 use serde_json::Value;
+use std::fs;
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
@@ -861,7 +862,7 @@ fn in_project(manifest: &str) -> (tempfile::TempDir, String) {
 
 fn in_project_file(manifest: &str, relative_path: &str) -> (tempfile::TempDir, String) {
     let root = tempfile::TempDir::new().unwrap();
-    std::fs::write(root.path().join("package.json"), manifest).unwrap();
+    fs::write(root.path().join("package.json"), manifest).unwrap();
     let file_path = root.path().join(relative_path).to_str().unwrap().to_owned();
     (root, file_path)
 }

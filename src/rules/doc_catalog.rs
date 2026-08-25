@@ -114,17 +114,15 @@ fn header(table: Table, lang: Lang) -> &'static str {
         (Lang::En, Table::Rules) => {
             "| Rule | Severity | Description | Why it matters | When to disable |"
         }
-        (Lang::En, Table::Security) => {
+        (Lang::En, Table::Security | Table::Invariant) => {
             "| Sub-rule (rule_id) | Severity | Description | Why it matters |"
         }
         (Lang::En, Table::AstSecurity) => "| Sub-rule | Severity | Description | Why it matters |",
         (Lang::Ja, Table::Rules) => "| ルール | 重大度 | 説明 | なぜ重要か | 無効化する場面 |",
-        (Lang::Ja, Table::Security) => "| サブルール (rule_id) | 重大度 | 説明 | なぜ重要か |",
-        (Lang::Ja, Table::AstSecurity) => "| サブルール | 重大度 | 説明 | なぜ重要か |",
-        (Lang::En, Table::Invariant) => {
-            "| Sub-rule (rule_id) | Severity | Description | Why it matters |"
+        (Lang::Ja, Table::Security | Table::Invariant) => {
+            "| サブルール (rule_id) | 重大度 | 説明 | なぜ重要か |"
         }
-        (Lang::Ja, Table::Invariant) => "| サブルール (rule_id) | 重大度 | 説明 | なぜ重要か |",
+        (Lang::Ja, Table::AstSecurity) => "| サブルール | 重大度 | 説明 | なぜ重要か |",
     }
 }
 
