@@ -78,9 +78,8 @@ impl SecurityVisitor<'_> {
         );
     }
 
-    // ADR-0022: the message states the action and the risk and never names the
-    // `NEXT_PUBLIC_` carve-out below, which an agent would otherwise apply as a
-    // rename to turn the block into an allow (#473).
+    // The message names neither carve-out below: an agent reading it would apply
+    // one and turn the block into an allow (ADR-0022, #473).
     pub(super) fn check_client_env_public_leak(&mut self, sme: &StaticMemberExpression) {
         if !self.has_use_client {
             return;
@@ -100,7 +99,7 @@ impl SecurityVisitor<'_> {
         self.push_violation(
             rule_id::CLIENT_ENV_PUBLIC_LEAK,
             Severity::High,
-            "process.env in a 'use client' module is bundled to the browser. Read the value on the server and pass down only what the render needs.",
+            "process.env in a 'use client' module is bundled to the browser. Read the value on the server and pass down only render-needed data.",
             sme.span,
         );
     }
@@ -146,8 +145,8 @@ impl SecurityVisitor<'_> {
                 continue;
             };
             if name_matches_ssr_secret_keyword(&key_name) {
-                // ADR-0022: the match is on the property name alone, so the
-                // message must not offer a rename as a remedy (#473).
+                // The message offers no rename, which this name-only match
+                // would not catch (ADR-0022, #473).
                 self.push_violation(
                     rule_id::SSR_SECRET_BLEED,
                     Severity::High,

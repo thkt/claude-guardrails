@@ -504,50 +504,46 @@ fn ssr_secret_bleed_silent_on_helper_arrow_inside_use_server_arrow() {
     );
 }
 
+/// Returns the sole `rule` violation's fix message. Asserting the fire here
+/// keeps a rule deletion from making the opacity checks below vacuously pass.
+fn sole_fix_message(code: &str, path: &str, rule: &str) -> String {
+    let v = check(code, path);
+    let hits: Vec<_> = v.iter().filter(|x| x.rule == rule).collect();
+    assert_eq!(hits.len(), 1, "{rule} must flag once: {v:?}");
+    hits[0].fix.clone()
+}
+
 // T-616: client_env_leak_fix_message_omits_public_prefix_token
-// Perspective: Hazard (permission bypass). ADR-0022 keeps a security fix message
-// opaque to the matched construct. Naming the NEXT_PUBLIC_ prefix hands the AI
-// agent reading the message the token that makes `check_client_env_public_leak`
-// return early, so the agent turns a block into an allow (#473).
+// Not a detection test: the message is what the agent acts on (ADR-0022, #473).
 #[test]
 fn client_env_leak_fix_message_omits_public_prefix_token() {
-    let code = "\"use client\";\nconst k = process.env.API_SECRET;";
-    let v = check(code, "/src/components/Profile.tsx");
-    let leaks: Vec<_> = v
-        .iter()
-        .filter(|x| x.rule == rule_id::CLIENT_ENV_PUBLIC_LEAK)
-        .collect();
-    assert_eq!(leaks.len(), 1, "client env leak must flag: {v:?}");
-    let fix = leaks[0].fix.to_ascii_lowercase();
-    // Both early returns are levers: the NEXT_PUBLIC_ prefix and the
-    // CLIENT_ENV_ALLOW_LIST entry NODE_ENV (ssr_env.rs:24, 94-99).
+    let fix = sole_fix_message(
+        "\"use client\";\nconst k = process.env.API_SECRET;",
+        "/src/components/Profile.tsx",
+        rule_id::CLIENT_ENV_PUBLIC_LEAK,
+    );
+    let lower = fix.to_ascii_lowercase();
+    // Not just the prefix: CLIENT_ENV_ALLOW_LIST's NODE_ENV is the second lever.
     for token in ["next_public", "next public", "node_env"] {
         assert!(
-            !fix.contains(token),
-            "fix message names the {token} allowlist token that silences the rule: {}",
-            leaks[0].fix
+            !lower.contains(token),
+            "fix message names {token}, which silences the rule: {fix}"
         );
     }
 }
 
 // T-617: ssr_secret_bleed_fix_message_omits_rename_instruction
-// Perspective: Hazard (permission bypass). `name_matches_ssr_secret_keyword`
-// matches on the property name alone, so telling the agent to rename the field
-// is an instruction to silence the rule while the secret still reaches the
-// client. ADR-0022 forbids that in a security fix message (#473).
+// Not a detection test: a rename silences the match while the secret still
+// ships to the client (ADR-0022, #473).
 #[test]
 fn ssr_secret_bleed_fix_message_omits_rename_instruction() {
-    let code = "export async function getServerSideProps() { return { props: { apiKey: 'x' } }; }";
-    let v = check(code, "/pages/dashboard.tsx");
-    let bleeds: Vec<_> = v
-        .iter()
-        .filter(|x| x.rule == rule_id::SSR_SECRET_BLEED)
-        .collect();
-    assert_eq!(bleeds.len(), 1, "apiKey property in props must flag: {v:?}");
-    let fix = bleeds[0].fix.to_ascii_lowercase();
+    let fix = sole_fix_message(
+        "export async function getServerSideProps() { return { props: { apiKey: 'x' } }; }",
+        "/pages/dashboard.tsx",
+        rule_id::SSR_SECRET_BLEED,
+    );
     assert!(
-        !fix.contains("rename"),
-        "fix message tells the agent to rename the field, which silences the name-based match: {}",
-        bleeds[0].fix
+        !fix.to_ascii_lowercase().contains("rename"),
+        "fix message offers a rename, which silences the name-only match: {fix}"
     );
 }
