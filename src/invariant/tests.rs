@@ -459,9 +459,9 @@ fn symlinked_ancestor_path_resolves_to_canonical_pin_key() {
     );
 }
 
-/// `real/flags.json` を pin した repository を組み、`cfg/link.json` をその実体
-/// へ向く symlink にして返す。`TempDir` を落とすとディレクトリごと消えるので、
-/// 呼び出し側で束縛したまま保持する。返す root は canonicalize 済み。
+/// Returns the `TempDir` alongside the root because dropping it removes the
+/// directory, so the caller must keep it bound. The root is canonicalized so a
+/// symlinked `/var` cannot pass for the symlink under test.
 fn repo_with_symlinked_pin_target() -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
     let root = fs::canonicalize(tmp.path()).unwrap();
@@ -477,10 +477,8 @@ fn repo_with_symlinked_pin_target() -> (TempDir, PathBuf) {
     (tmp, root)
 }
 
-/// Collects the fix messages of the invariant violations, dropping any other
-/// rule. `Violation::file` is deliberately left out: it carries the raw
-/// `file_path` the caller spelled, which differs between a symlink and its
-/// target by design.
+/// `Violation::file` is left out: it carries the raw `file_path` the caller
+/// spelled, which differs between a symlink and its target by design.
 fn invariant_fixes(violations: &[Violation]) -> Vec<&str> {
     violations
         .iter()
@@ -489,12 +487,9 @@ fn invariant_fixes(violations: &[Violation]) -> Vec<&str> {
         .collect()
 }
 
-// T-618: a `file_path` spelled through a symlink whose target is the pinned file
-// must report the same pin drift as the target's own spelling. The final
-// component is the symlink itself, so only resolving that component lands the
-// lookup on the declared key `real/flags.json`; leaving it unresolved keys the
-// lookup as `cfg/link.json`, which is not declared, and the write passes
-// unchecked while landing on the pinned file.
+// T-618: a spelling through a symlink must report the same drift as the target's
+// own spelling. The direct spelling is asserted too, so a rule that stopped
+// firing altogether cannot turn this green.
 #[test]
 fn pin_された_file_を指す_symlink_綴りの編集が同じ違反を出す() {
     let (_tmp, root) = repo_with_symlinked_pin_target();
@@ -528,12 +523,10 @@ fn pin_された_file_を指す_symlink_綴りの編集が同じ違反を出す(
     );
 }
 
-// T-619: `degraded_note` derives its pin key through the same resolution as the
-// value pass, so a symlink spelling of a pinned file must carry the note the
-// target's own spelling carries. The note is what a human gets when the
-// post-edit content could not be reconstructed; a missed key makes it vanish.
-// `degraded_note` is called directly, as T-27, T-28, and T-30 do: the degraded
-// read is this function's precondition, not part of what it decides.
+// T-619: `degraded_note` keys off the same resolution, and it is the only signal
+// a human gets when the content could not be reconstructed, so a missed key
+// makes it vanish silently. Called directly, as T-27, T-28 and T-30 do: the
+// degraded read is this function's precondition, not what it decides.
 #[test]
 fn pin_された_file_を指す_symlink_綴りが同じ_degraded_note_を出す() {
     let (_tmp, root) = repo_with_symlinked_pin_target();

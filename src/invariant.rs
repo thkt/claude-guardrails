@@ -88,17 +88,11 @@ fn load_invariant_table(git_root: &Path) -> InvariantLoad {
     }
 }
 
-/// Derives the git-root-relative pin key from the same resolved path the content
-/// read used. `read_file_capped` (`content.rs`) calls `fs::canonicalize`, which
-/// follows every component including the last, so a key that leaves the last one
-/// unresolved misses the declaration whenever the edited file is itself a symlink
-/// (the read lands on the pinned file, the pin lookup misses, the mutation passes
-/// unchecked — #471).
-///
-/// `resolve_under_root` follows the whole path the same way and is what the
-/// override matcher, `configGuard` and `invariantGuard` already key off, so the
-/// four stay in one resolution space. Returns `None` when the path lands outside
-/// the git root: the gate fails open rather than guess a key.
+/// Derives the git-root-relative pin key. Not through `canonical_path`'s
+/// parent-only canonicalization: `read_file_capped` follows every component, so
+/// leaving the last one unresolved misses the declaration when the edited file is
+/// itself a symlink, and the write passes unchecked (#471, ADR-0023).
+/// `None` outside the git root — the gate fails open rather than guess a key.
 fn canonical_relative_key(file_path: &str, git_root: &Path) -> Option<String> {
     let resolved = path_resolve::resolve_under_root(Path::new(file_path), git_root)?;
     Some(resolved.relative.to_string_lossy().into_owned())

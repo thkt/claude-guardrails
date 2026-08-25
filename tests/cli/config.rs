@@ -793,7 +793,8 @@ fn pin_された_file_を指す_symlink_綴りの_write_が_exit_2で止まる()
     fs::write(root.join("real/flags.json"), "{\"featureX\": true}\n").unwrap();
     symlink("../real/flags.json", root.join("cfg/link.json")).unwrap();
 
-    // 綴りは pin されていない cfg/link.json だが、この Write は real/flags.json に落ちる。
+    // cfg/link.json 自体は pin されていない。それでも止まらねばならないのは、
+    // この Write が pin 済みの real/flags.json に落ちるため。
     let json = serde_json::json!({
         "tool_name": "Write",
         "tool_input": {
