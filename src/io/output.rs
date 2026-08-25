@@ -229,6 +229,7 @@ mod tests {
             file: "/src/app.ts".to_owned(),
             line: Some(1),
             origin: None,
+            no_demote: None,
         }
     }
 

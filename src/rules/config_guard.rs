@@ -42,6 +42,7 @@ pub(crate) fn check(file_path: &str, git_root: Option<&Path>) -> Vec<Violation> 
         file: file_path.to_owned(),
         line: None,
         origin: None,
+        no_demote: None,
     }]
 }
 

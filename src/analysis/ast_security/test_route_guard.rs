@@ -95,6 +95,7 @@ pub(super) fn emit_if_unguarded(visitor: &mut SecurityVisitor) {
             file: visitor.file_path.to_owned(),
             line: Some(1),
             origin: None,
+            no_demote: None,
         });
     }
 }

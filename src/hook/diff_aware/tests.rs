@@ -4,7 +4,7 @@ use super::{
 use crate::config::Config;
 use crate::content::{BeforeSource, ContentResolution, DegradedReason, ResolvedTarget};
 use crate::hook::collect_violations;
-use crate::rules::{Severity, Violation};
+use crate::rules::{DemotionOptOut, Severity, Violation};
 use std::collections::BTreeSet;
 use std::fs;
 
@@ -16,6 +16,7 @@ fn violation(rule: &str, line: Option<u32>) -> Violation {
         file: String::from("/src/app.ts"),
         line,
         origin: None,
+        no_demote: None,
     }
 }
 
@@ -146,6 +147,58 @@ fn keeps_all_when_project_root_is_unresolved() {
         "got: {note}"
     );
     assert!(outcome.info_note.is_none());
+}
+
+// T-621: a violation carrying the demotion opt-out is not demoted even when its
+// line text matches a before-edit occurrence. The match is set up to succeed, so
+// a green here cannot come from the texts failing to line up.
+#[test]
+fn opted_out_violation_survives_a_matching_before_line() {
+    let opted_out = Violation {
+        no_demote: Some(DemotionOptOut::OptedOut),
+        ..violation("eval", Some(1))
+    };
+    let before_content = "eval(userInput);\n";
+    let after_content = "eval(userInput);\n";
+    let result = classify(
+        vec![opted_out],
+        after_content,
+        &[violation("eval", Some(1))],
+        before_content,
+    );
+    assert!(
+        result.demoted.is_empty(),
+        "opted-out violation must not demote despite matching line text"
+    );
+    assert_eq!(result.blocking.len(), 1);
+}
+
+// T-622: a violation decoded from the AST child subprocess keeps its demotion
+// eligibility. The child payload carries no `no_demote` key, so decoding the
+// absent field to an opted-out state would silently end `eval`'s demotion.
+#[test]
+fn child_decoded_violation_stays_demotable() {
+    let json = br#"[{"rule":"eval","severity":"high","fix":"","file":"/src/app.ts","line":1}]"#;
+    let decoded: Vec<Violation> = serde_json::from_slice(json).expect("decodes AST child payload");
+    assert_eq!(
+        decoded[0].no_demote, None,
+        "a violation with no no_demote key must decode to the demotable default"
+    );
+
+    let before_content = "eval(userInput);\n";
+    let after_content = "eval(userInput);\n";
+    let result = classify(
+        decoded,
+        after_content,
+        &[violation("eval", Some(1))],
+        before_content,
+    );
+    assert_eq!(
+        result.demoted.len(),
+        1,
+        "eval decoded from the AST child subprocess must still demote by default"
+    );
+    assert!(result.blocking.is_empty());
 }
 
 // T-287: every allowlisted rule reports each occurrence on its own line (two

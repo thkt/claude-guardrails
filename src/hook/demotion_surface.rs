@@ -14,7 +14,7 @@ mod corpus;
 
 use std::collections::{BTreeSet, HashMap};
 
-use super::diff_aware::{classify, DEMOTABLE_RULES};
+use super::diff_aware::{classify, Classification, DEMOTABLE_RULES};
 use super::{collect_first_party_violations, partition_violations};
 use crate::config::Config;
 use crate::rules::{Violation, RE_JS_FILE};
@@ -29,18 +29,25 @@ use crate::rules::{Violation, RE_JS_FILE};
 /// violation line is removed and a different-text violation takes its place;
 /// the after key is absent from the before multiset so it cannot borrow the
 /// deleted line's demotion budget and blocks, pinning that a delete+add of
-/// different text is not a free pass).
+/// different text is not a free pass), `payload-swap` (the reported line's text
+/// is byte-identical between before and after; only a line that feeds that
+/// report changes, such as raw-html's array literal or eval's import alias.
+/// This is the case the report-line key cannot see).
 //
-// The demotion budget is keyed on trimmed line text, so enrollment assumes
-// text identity equals violation identity for a rule: the same line means the
-// same severity wherever it sits. eval (a flat substring match) satisfies that,
-// as do raw-html's single-line branches (concat / template / inline-join).
-// raw-html's bind+join branch is context-dependent (a join line violates only
-// near an HTML-array bind), so its pinning is the raw-html swap fixture, which
-// uses the join form; the budget cap keeps the mismatch on the over-blocking
-// side. A future context-dependent rule needs the same before/after pinning
-// before it joins DEMOTABLE_RULES.
-const SCENARIOS: &[&str] = &["preserved", "added", "surplus-copy", "swap", "replaced"];
+// The budget is keyed on trimmed line text, so enrollment assumes text identity
+// equals violation identity. eval and raw-html's single-line branches satisfy
+// that; raw-html's bind+join does not, and opts out at push time
+// (`rules::raw_html::make_violation_with_opt_out`). A future rule whose
+// identity is not text-determined needs the same opt-out plus before/after
+// pinning before it joins DEMOTABLE_RULES.
+const SCENARIOS: &[&str] = &[
+    "preserved",
+    "added",
+    "surplus-copy",
+    "swap",
+    "replaced",
+    "payload-swap",
+];
 
 /// One before/after fixture pair pinned to the enrolled rule and scenario it
 /// measures, with the exact classification split the pair must produce.
@@ -163,4 +170,45 @@ fn corpus_rules_match_allowlist_with_every_scenario() {
             );
         }
     }
+}
+
+/// Looks up the one `payload-swap` pair for `rule`, run through the same
+/// first_party_violations -> partition_violations -> classify pipeline as the
+/// exhaustive sweep, so a T-NNN test failure and the sweep test's failure
+/// share one root cause instead of drifting apart.
+fn classify_payload_swap_pair(rule: &'static str) -> Classification {
+    let config = harness_config();
+    let pair = corpus::PAIRS
+        .iter()
+        .find(|p| p.rule == rule && p.scenario == "payload-swap")
+        .unwrap_or_else(|| panic!("no payload-swap pair for rule {rule}"));
+    let before_violations = first_party_violations(pair.path, pair.before, &config);
+    let after_violations = first_party_violations(pair.path, pair.after, &config);
+    let (blocking, _) = partition_violations(after_violations, &config);
+    classify(blocking, pair.after, &before_violations, pair.before)
+}
+
+// T-625: with the join line byte-identical, changing the HTML array literal's
+// contents demotes nothing and blocks one raw-html violation. What keeps it
+// blocking is the opt-out, not a text mismatch: the report line matches.
+#[test]
+fn payload_swap_blocks_raw_html_bind_join() {
+    let result = classify_payload_swap_pair("raw-html");
+    assert_eq!(result.demoted.len(), 0, "expected nothing demoted");
+    assert_eq!(
+        result.blocking.len(),
+        1,
+        "expected exactly one blocked violation"
+    );
+    assert_eq!(result.blocking[0].rule, "raw-html");
+}
+
+// T-626: with the call line byte-identical, changing the import alias away from
+// eval demotes nothing and blocks nothing. The alias change stops the call line
+// from being a violation at all, so nothing reaches `classify` to demote.
+#[test]
+fn payload_swap_leaves_eval_with_nothing_to_classify() {
+    let result = classify_payload_swap_pair("eval");
+    assert_eq!(result.demoted.len(), 0, "expected nothing demoted");
+    assert_eq!(result.blocking.len(), 0, "expected nothing blocked");
 }

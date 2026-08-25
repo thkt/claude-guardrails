@@ -1,4 +1,4 @@
-use super::{Rule, Severity, Violation, RE_JS_FILE};
+use super::{DemotionOptOut, Rule, Severity, Violation, RE_JS_FILE};
 use crate::regex_compile::regex_or_die;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -44,6 +44,19 @@ static RE_JOIN_RECEIVER: LazyLock<Regex> =
 const JOIN_PROXIMITY_LINES: u32 = 5;
 
 fn make_violation(file_path: &str, line_num: u32) -> Violation {
+    make_violation_with_opt_out(file_path, line_num, None)
+}
+
+// The bind+join push opts out of `hook::diff_aware`'s demotion pass. Its
+// identity comes from the identifier bound on the array-literal line, not from
+// the `.join()` line's text, so ADR-0020's locality condition does not hold and
+// a before/after text match must not stand in for sameness (#472). The other
+// three pushes decide from their own line alone and stay demotable.
+fn make_violation_with_opt_out(
+    file_path: &str,
+    line_num: u32,
+    no_demote: Option<DemotionOptOut>,
+) -> Violation {
     Violation {
         rule: super::rule_id::RAW_HTML.to_owned(),
         severity: Severity::High,
@@ -52,6 +65,7 @@ fn make_violation(file_path: &str, line_num: u32) -> Violation {
         file: file_path.to_owned(),
         line: Some(line_num),
         origin: None,
+        no_demote,
     }
 }
 
@@ -92,7 +106,11 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                     .captures(line)
                     .is_some_and(|c| c.get(1).unwrap().as_str() == ident)
                 {
-                    violations.push(make_violation(file_path, line_num));
+                    violations.push(make_violation_with_opt_out(
+                        file_path,
+                        line_num,
+                        Some(DemotionOptOut::OptedOut),
+                    ));
                     html_array = None;
                 }
             }
@@ -105,6 +123,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::DemotionOptOut;
 
     fn check(content: &str, path: &str) -> Vec<Violation> {
         if !RULE.file_pattern.is_match(path) {
@@ -179,5 +198,26 @@ const html = parts.join('');";
     fn multiline_template_not_detected() {
         let content = "const html = `\n  <div>\n    ${variable}\n  </div>\n`;";
         assert!(check(content, "/src/render.ts").is_empty());
+    }
+
+    // T-623: the bind+join path (RE_JOIN_RECEIVER match on the `.join()`
+    // line) is the one push that must opt this violation out of
+    // `hook::diff_aware`'s demotion pass.
+    #[test]
+    fn bind_join_violation_carries_demotion_opt_out() {
+        let content = r"const parts = ['<div>', userInput, '</div>'];
+const html = parts.join('');";
+        let v = check(content, "/src/render.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].no_demote, Some(DemotionOptOut::OptedOut));
+    }
+
+    // T-624: RE_HTML_CONCAT's push is one of the three left unchanged, so it
+    // must not carry the demotion opt-out.
+    #[test]
+    fn concat_violation_stays_demotable() {
+        let v = check(r"const html = '<div>' + userInput;", "/src/render.ts");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].no_demote, None);
     }
 }

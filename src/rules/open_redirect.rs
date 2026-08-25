@@ -52,6 +52,7 @@ impl OpenRedirectVisitor<'_> {
             file: self.file_path.to_owned(),
             line: Some(self.span_to_line(span)),
             origin: None,
+            no_demote: None,
         });
     }
 }

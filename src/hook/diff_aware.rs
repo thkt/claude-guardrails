@@ -16,13 +16,9 @@ use std::path::Path;
 /// `allowlisted_rules_report_every_occurrence` and the demotion-surface
 /// corpus tests, which fail when a rule enrolls without matching entries.
 ///
-/// raw-html's bind+join branch decides from two lines (array literal +
-/// join receiver), so its identity is the join line's text with the array
-/// context erased. That widens identity, never the demotion count: the
-/// budget is still capped by before-edit occurrences, and treating an
-/// identical join line elsewhere as the same violation is the position
-/// independence the swap scenario already accepts. The join form is pinned
-/// by the raw-html swap fixture.
+/// Enrollment here covers raw-html's single-line branches only. Its bind+join
+/// branch fails the locality test and opts out per violation instead; the why
+/// lives at `rules::raw_html::make_violation_with_opt_out`.
 pub(crate) const DEMOTABLE_RULES: &[&str] = &["eval", "raw-html"];
 
 /// Gate for the second pass: lint the before-edit content only when the
@@ -203,17 +199,18 @@ pub(crate) fn classify(
     let mut kept = Vec::new();
     let mut demoted = Vec::new();
     for v in blocking {
-        let preexisting = allowlist_entry(&v.rule).is_some_and(|rule| {
-            v.line
-                .and_then(|line| line_text(&after_lines, line))
-                .is_some_and(|text| match budget.get_mut(&(rule, text)) {
-                    Some(count) if *count > 0 => {
-                        *count -= 1;
-                        true
-                    }
-                    _ => false,
-                })
-        });
+        let preexisting = v.no_demote.is_none()
+            && allowlist_entry(&v.rule).is_some_and(|rule| {
+                v.line
+                    .and_then(|line| line_text(&after_lines, line))
+                    .is_some_and(|text| match budget.get_mut(&(rule, text)) {
+                        Some(count) if *count > 0 => {
+                            *count -= 1;
+                            true
+                        }
+                        _ => false,
+                    })
+            });
         if preexisting {
             demoted.push(v);
         } else {

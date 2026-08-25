@@ -408,6 +408,15 @@ pub enum ViolationOrigin {
     Preexisting,
 }
 
+/// Per-violation opt-out from `hook::diff_aware`'s demotion pass. Set by the
+/// producing rule, not by the classifier: whether a violation may demote is a
+/// property of how the rule decided it, which (rule, line text) cannot show.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DemotionOptOut {
+    OptedOut,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Violation {
     pub rule: String,
@@ -422,6 +431,13 @@ pub struct Violation {
     // the child found (fail-open). The two attributes are a matched pair.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub origin: Option<ViolationOrigin>,
+    // Same wire contract as `origin`, for the same child-subprocess reason:
+    // `eval` round-trips through `serde_json::from_slice::<Vec<Violation>>`
+    // (`src/hook.rs`), and that payload never carries this key today, so
+    // `default` must resolve the absent field to `None` (demotable) — not to
+    // `OptedOut` — or every AST-child violation would silently stop demoting.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub no_demote: Option<DemotionOptOut>,
 }
 
 type Checker = Box<dyn Fn(&str, &str, &[(u32, &str)]) -> Vec<Violation> + Send + Sync>;

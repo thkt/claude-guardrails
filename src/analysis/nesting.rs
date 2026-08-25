@@ -92,6 +92,7 @@ fn build_violation(file_path: &str, line: Option<u32>) -> Violation {
         file: file_path.to_owned(),
         line,
         origin: None,
+        no_demote: None,
     }
 }
 

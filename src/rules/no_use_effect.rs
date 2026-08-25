@@ -60,6 +60,7 @@ impl<'a> Visit<'a> for UseEffectVisitor<'_> {
                 file: self.file_path.to_owned(),
                 line: Some(self.span_to_line(call.span)),
                 origin: None,
+                no_demote: None,
             });
             return;
         }
