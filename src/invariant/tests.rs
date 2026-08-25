@@ -459,6 +459,100 @@ fn symlinked_ancestor_path_resolves_to_canonical_pin_key() {
     );
 }
 
+/// `real/flags.json` を pin した repository を組み、`cfg/link.json` をその実体
+/// へ向く symlink にして返す。`TempDir` を落とすとディレクトリごと消えるので、
+/// 呼び出し側で束縛したまま保持する。返す root は canonicalize 済み。
+fn repo_with_symlinked_pin_target() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let root = fs::canonicalize(tmp.path()).unwrap();
+    fs::create_dir_all(root.join("real")).unwrap();
+    fs::create_dir_all(root.join("cfg")).unwrap();
+    fs::write(root.join("real/flags.json"), "{ \"featureX\": true }\n").unwrap();
+    fs::write(
+        root.join(".invariants.json"),
+        r#"{ "real/flags.json": { "featureX": true } }"#,
+    )
+    .unwrap();
+    symlink("../real/flags.json", root.join("cfg/link.json")).unwrap();
+    (tmp, root)
+}
+
+/// Collects the fix messages of the invariant violations, dropping any other
+/// rule. `Violation::file` is deliberately left out: it carries the raw
+/// `file_path` the caller spelled, which differs between a symlink and its
+/// target by design.
+fn invariant_fixes(violations: &[Violation]) -> Vec<&str> {
+    violations
+        .iter()
+        .filter(|v| v.rule == rule_id::INVARIANT)
+        .map(|v| v.fix.as_str())
+        .collect()
+}
+
+// T-618: a `file_path` spelled through a symlink whose target is the pinned file
+// must report the same pin drift as the target's own spelling. The final
+// component is the symlink itself, so only resolving that component lands the
+// lookup on the declared key `real/flags.json`; leaving it unresolved keys the
+// lookup as `cfg/link.json`, which is not declared, and the write passes
+// unchecked while landing on the pinned file.
+#[test]
+fn pin_された_file_を指す_symlink_綴りの編集が同じ違反を出す() {
+    let (_tmp, root) = repo_with_symlinked_pin_target();
+    let post_edit = "{ \"featureX\": false }\n";
+
+    let direct = run_invariant_pass(
+        &root.join("real/flags.json").to_string_lossy(),
+        Some(post_edit),
+        Some(&root),
+    );
+    let via_symlink = run_invariant_pass(
+        &root.join("cfg/link.json").to_string_lossy(),
+        Some(post_edit),
+        Some(&root),
+    );
+
+    assert_eq!(
+        invariant_count(&direct),
+        1,
+        "the target's own spelling must report featureX drifting from true to false; got {direct:?}"
+    );
+    assert_eq!(
+        invariant_count(&via_symlink),
+        1,
+        "a write landing on the pinned file through a symlink must report the same drift; got {via_symlink:?}"
+    );
+    assert_eq!(
+        invariant_fixes(&via_symlink),
+        invariant_fixes(&direct),
+        "both spellings write the same pinned file, so the reported fix must match"
+    );
+}
+
+// T-619: `degraded_note` derives its pin key through the same resolution as the
+// value pass, so a symlink spelling of a pinned file must carry the note the
+// target's own spelling carries. The note is what a human gets when the
+// post-edit content could not be reconstructed; a missed key makes it vanish.
+// `degraded_note` is called directly, as T-27, T-28, and T-30 do: the degraded
+// read is this function's precondition, not part of what it decides.
+#[test]
+fn pin_された_file_を指す_symlink_綴りが同じ_degraded_note_を出す() {
+    let (_tmp, root) = repo_with_symlinked_pin_target();
+
+    let direct = degraded_note(&root.join("real/flags.json").to_string_lossy(), Some(&root));
+    let via_symlink = degraded_note(&root.join("cfg/link.json").to_string_lossy(), Some(&root));
+
+    assert!(
+        direct
+            .as_deref()
+            .is_some_and(|note| note.contains("pinned `real/flags.json` was not verified")),
+        "the target's own spelling must name the declared key in the note; got {direct:?}"
+    );
+    assert_eq!(
+        via_symlink, direct,
+        "a degraded read of the pinned file reached through a symlink must carry the same note"
+    );
+}
+
 // T-26: the structured-config predicate matches the `.json` extension
 // case-insensitively, so an uppercase `.JSON` target is recognized.
 #[test]

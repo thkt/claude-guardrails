@@ -778,6 +778,42 @@ fn 宣言ファイルが_repository_外への_symlink_でも_pin_を消す_write
     );
 }
 
+// T-620: pin された file を指す symlink 綴りの Write が exit 2 で止まる
+#[test]
+fn pin_された_file_を指す_symlink_綴りの_write_が_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".invariants.json"),
+        r#"{"real/flags.json": {"featureX": true}}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    fs::create_dir_all(root.join("real")).unwrap();
+    fs::create_dir_all(root.join("cfg")).unwrap();
+    fs::write(root.join("real/flags.json"), "{\"featureX\": true}\n").unwrap();
+    symlink("../real/flags.json", root.join("cfg/link.json")).unwrap();
+
+    // 綴りは pin されていない cfg/link.json だが、この Write は real/flags.json に落ちる。
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("cfg/link.json"),
+            "content": "{\"featureX\": false}\n"
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a write landing on the pinned file through a symlink must block; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("pinned value at `featureX`"),
+        "the block must name the drifting pin, not another rule; stderr: {stderr}"
+    );
+}
+
 // T-587: pin が無い repository では発火しない
 #[test]
 fn pinが無いrepositoryでは発火しない() {
