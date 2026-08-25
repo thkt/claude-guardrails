@@ -304,15 +304,14 @@ fn write_atomic<R: Read>(reader: &mut R, cache: &Path, target: &Path) -> Result<
         ))
     })?;
     io::copy(reader, tmp.as_file_mut()).map_err(|e| map_io_err(&e))?;
-    // Set executable bit before persist so the rename publishes a binary that
-    // is already 0o755. Avoids a window where a parallel ensure_oxlint sees
-    // target.exists() and returns a path that is not yet chmod'd.
+    // `ensure_oxlint` hands back `target` the instant the rename lands, so a
+    // parallel process sees whatever is not finished by then: a path not yet
+    // 0o755, or one whose still-open write fd makes exec fail with ETXTBSY
+    // (#470, Linux only; macOS never raises it). Hence not
+    // `NamedTempFile::persist`, which renames first and returns the file still
+    // open (tempfile 3.27.0 `file/mod.rs:767`).
     set_executable_on(tmp.as_file_mut())?;
     tmp.as_file_mut().sync_all().map_err(|e| map_io_err(&e))?;
-    // Not `NamedTempFile::persist`: it renames first and returns the file still
-    // open for writing (tempfile 3.27.0 `file/mod.rs:767`), leaving a window in
-    // which a parallel `ensure_oxlint` execs a path Linux reports as ETXTBSY
-    // (#470). macOS never raises it, so the symptom is Linux-only.
     tmp.into_temp_path().persist(target).map_err(|e| {
         OxlintError::ExtractFailure(format!(
             "failed to persist binary to {}: {e}",
