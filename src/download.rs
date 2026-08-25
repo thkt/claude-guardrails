@@ -309,7 +309,11 @@ fn write_atomic<R: Read>(reader: &mut R, cache: &Path, target: &Path) -> Result<
     // target.exists() and returns a path that is not yet chmod'd.
     set_executable_on(tmp.as_file_mut())?;
     tmp.as_file_mut().sync_all().map_err(|e| map_io_err(&e))?;
-    tmp.persist(target).map_err(|e| {
+    // Not `NamedTempFile::persist`: it renames first and returns the file still
+    // open for writing (tempfile 3.27.0 `file/mod.rs:767`), leaving a window in
+    // which a parallel `ensure_oxlint` execs a path Linux reports as ETXTBSY
+    // (#470). macOS never raises it, so the symptom is Linux-only.
+    tmp.into_temp_path().persist(target).map_err(|e| {
         OxlintError::ExtractFailure(format!(
             "failed to persist binary to {}: {e}",
             target.display()
