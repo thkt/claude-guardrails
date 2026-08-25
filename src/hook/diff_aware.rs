@@ -17,12 +17,14 @@ use std::path::Path;
 /// corpus tests, which fail when a rule enrolls without matching entries.
 ///
 /// raw-html's bind+join branch decides from two lines (array literal +
-/// join receiver), so its identity is the join line's text with the array
-/// context erased. That widens identity, never the demotion count: the
-/// budget is still capped by before-edit occurrences, and treating an
-/// identical join line elsewhere as the same violation is the position
-/// independence the swap scenario already accepts. The join form is pinned
-/// by the raw-html swap fixture.
+/// join receiver), so its identity is not fully determined by the trimmed
+/// `.join()` line alone; it fails the ADR-0020 amendment's locality test.
+/// Rather than widen identity into this allowlist, it opts out of demotion
+/// per violation (`no_demote` set by
+/// `rules::raw_html::make_violation_with_opt_out`), which keeps it blocking
+/// regardless of before/after content — never budget-capped, never
+/// position-independent. The raw-html swap and payload-swap fixtures pin
+/// that the join form always blocks.
 pub(crate) const DEMOTABLE_RULES: &[&str] = &["eval", "raw-html"];
 
 /// Gate for the second pass: lint the before-edit content only when the
