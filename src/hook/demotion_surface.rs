@@ -14,7 +14,7 @@ mod corpus;
 
 use std::collections::{BTreeSet, HashMap};
 
-use super::diff_aware::{classify, DEMOTABLE_RULES};
+use super::diff_aware::{classify, Classification, DEMOTABLE_RULES};
 use super::{collect_first_party_violations, partition_violations};
 use crate::config::Config;
 use crate::rules::{Violation, RE_JS_FILE};
@@ -29,18 +29,35 @@ use crate::rules::{Violation, RE_JS_FILE};
 /// violation line is removed and a different-text violation takes its place;
 /// the after key is absent from the before multiset so it cannot borrow the
 /// deleted line's demotion budget and blocks, pinning that a delete+add of
-/// different text is not a free pass).
+/// different text is not a free pass), `payload-swap` (the reported line's
+/// text stays byte-identical between before and after; only a different line
+/// that feeds that report — raw-html's array literal, eval's import alias —
+/// changes. Identity is keyed on report-line text alone, so a rule that is
+/// still demotable would see no change at all; raw-html's opted-out bind+join
+/// violation keeps blocking regardless, and eval's alias change makes the
+/// call line stop being a violation in `after` in the first place, so there
+/// is nothing left to demote).
 //
 // The demotion budget is keyed on trimmed line text, so enrollment assumes
 // text identity equals violation identity for a rule: the same line means the
 // same severity wherever it sits. eval (a flat substring match) satisfies that,
 // as do raw-html's single-line branches (concat / template / inline-join).
 // raw-html's bind+join branch is context-dependent (a join line violates only
-// near an HTML-array bind), so its pinning is the raw-html swap fixture, which
-// uses the join form; the budget cap keeps the mismatch on the over-blocking
-// side. A future context-dependent rule needs the same before/after pinning
-// before it joins DEMOTABLE_RULES.
-const SCENARIOS: &[&str] = &["preserved", "added", "surplus-copy", "swap", "replaced"];
+// near an HTML-array bind that sits on a different line), so its violation
+// identity is not fully determined by the trimmed `.join()` line alone; it
+// fails the ADR-0020 amendment's locality test and sets `no_demote` on push
+// (`rules::raw_html::make_violation_with_opt_out`), which always blocks
+// regardless of before/after content. The raw-html swap fixture uses the join
+// form and pins that opt-out. A future context-dependent rule needs the same
+// opt-out, plus before/after pinning, before it joins DEMOTABLE_RULES.
+const SCENARIOS: &[&str] = &[
+    "preserved",
+    "added",
+    "surplus-copy",
+    "swap",
+    "replaced",
+    "payload-swap",
+];
 
 /// One before/after fixture pair pinned to the enrolled rule and scenario it
 /// measures, with the exact classification split the pair must produce.
@@ -163,4 +180,53 @@ fn corpus_rules_match_allowlist_with_every_scenario() {
             );
         }
     }
+}
+
+/// Looks up the one `payload-swap` pair for `rule`, run through the same
+/// first_party_violations -> partition_violations -> classify pipeline as the
+/// exhaustive sweep, so a T-NNN test failure and the sweep test's failure
+/// share one root cause instead of drifting apart.
+fn classify_payload_swap_pair(rule: &'static str) -> Classification {
+    let config = harness_config();
+    let pair = corpus::PAIRS
+        .iter()
+        .find(|p| p.rule == rule && p.scenario == "payload-swap")
+        .unwrap_or_else(|| panic!("no payload-swap pair for rule {rule}"));
+    let before_violations = first_party_violations(pair.path, pair.before, &config);
+    let after_violations = first_party_violations(pair.path, pair.after, &config);
+    let (blocking, _) = partition_violations(after_violations, &config);
+    classify(blocking, pair.after, &before_violations, pair.before)
+}
+
+// T-625: raw-html's bind+join violation carries the demotion opt-out
+// (U-002), and `classify` always keeps an opted-out violation blocking
+// (U-001) regardless of a before/after line-text match. This pins that the
+// two wire together end to end: even with the `.join()` report line held
+// byte-identical, changing the HTML array literal's contents (the payload)
+// still blocks rather than demoting, because the opt-out — not a text
+// mismatch — is what keeps it blocking.
+#[test]
+fn with_the_join_line_byte_identical_changing_the_html_array_literals_contents_demotes_nothing_and_blocks_one_raw_html_violation(
+) {
+    let result = classify_payload_swap_pair("raw-html");
+    assert_eq!(result.demoted.len(), 0, "expected nothing demoted");
+    assert_eq!(
+        result.blocking.len(),
+        1,
+        "expected exactly one blocked violation"
+    );
+    assert_eq!(result.blocking[0].rule, "raw-html");
+}
+
+// T-626: eval resolves its target through the import alias's original name,
+// so renaming the alias away from `eval` (the payload) stops the call line
+// from being a violation in `after` at all, even though the call line's text
+// is byte-identical to `before`. With nothing blocking on the after side,
+// `classify` has nothing to demote and nothing to keep.
+#[test]
+fn with_the_call_line_byte_identical_changing_the_import_alias_away_from_eval_demotes_nothing_and_blocks_nothing(
+) {
+    let result = classify_payload_swap_pair("eval");
+    assert_eq!(result.demoted.len(), 0, "expected nothing demoted");
+    assert_eq!(result.blocking.len(), 0, "expected nothing blocked");
 }

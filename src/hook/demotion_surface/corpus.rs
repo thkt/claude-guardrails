@@ -35,9 +35,11 @@ pairs! {
     "eval" / "surplus-copy" at "/src/app.ts" => demotes: 1, blocks: 1;
     "eval" / "swap" at "/src/app.ts" => demotes: 1, blocks: 0;
     "eval" / "replaced" at "/src/app.ts" => demotes: 0, blocks: 1;
+    "eval" / "payload-swap" at "/src/app.ts" => demotes: 0, blocks: 0;
     "raw-html" / "preserved" at "/src/app.ts" => demotes: 1, blocks: 0;
     "raw-html" / "added" at "/src/app.ts" => demotes: 1, blocks: 1;
     "raw-html" / "surplus-copy" at "/src/app.ts" => demotes: 1, blocks: 1;
-    "raw-html" / "swap" at "/src/app.ts" => demotes: 1, blocks: 0;
+    "raw-html" / "swap" at "/src/app.ts" => demotes: 0, blocks: 1;
     "raw-html" / "replaced" at "/src/app.ts" => demotes: 0, blocks: 1;
+    "raw-html" / "payload-swap" at "/src/app.ts" => demotes: 0, blocks: 1;
 }

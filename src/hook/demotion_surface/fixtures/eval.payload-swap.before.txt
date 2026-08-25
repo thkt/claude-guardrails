@@ -1,0 +1,2 @@
+import { eval as e } from 'mod';
+e(userInput);

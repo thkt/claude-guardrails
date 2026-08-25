@@ -1,0 +1,2 @@
+const parts = ['<span>', otherInput, '</span>'];
+const html = parts.join('');
