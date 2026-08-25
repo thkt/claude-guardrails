@@ -6,7 +6,7 @@ use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
 
 /// Returns None on unsupported file type or parser panic (fail-open).
-pub fn with_parsed_program<R>(
+pub(crate) fn with_parsed_program<R>(
     content: &str,
     file_path: &str,
     f: impl FnOnce(&Program<'_>, &[usize]) -> R,
@@ -26,15 +26,15 @@ pub fn with_parsed_program<R>(
 // line numbers stay well under u32::MAX. `as u32` cannot truncate within
 // that bound.
 #[allow(clippy::cast_possible_truncation)]
-pub fn span_to_line(offsets: &[usize], span: Span) -> u32 {
+pub(crate) fn span_to_line(offsets: &[usize], span: Span) -> u32 {
     scanner::offset_to_line(offsets, span.start as usize) as u32
 }
 
-pub fn is_ident(expr: &Expression, name: &str) -> bool {
+pub(crate) fn is_ident(expr: &Expression, name: &str) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == name)
 }
 
-pub fn is_static_template_literal(expr: &Expression) -> bool {
+pub(crate) fn is_static_template_literal(expr: &Expression) -> bool {
     matches!(expr, Expression::TemplateLiteral(tl) if tl.expressions.is_empty())
 }
 
@@ -43,7 +43,7 @@ pub fn is_static_template_literal(expr: &Expression) -> bool {
 /// text. Returns `None` for dynamic keys and for an absent cooked value (a
 /// template literal with an invalid escape) — a `None` key matches no forbidden
 /// token, keeping `obj[expr]` from firing on an unresolvable key (#383).
-pub fn static_key<'a>(key: &'a Expression<'a>) -> Option<&'a str> {
+pub(crate) fn static_key<'a>(key: &'a Expression<'a>) -> Option<&'a str> {
     match key {
         Expression::StringLiteral(s) => Some(s.value.as_str()),
         Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
@@ -56,7 +56,7 @@ pub fn static_key<'a>(key: &'a Expression<'a>) -> Option<&'a str> {
 /// Unwraps `obj.prop` and `obj[key]` to `(object, name)`. The computed key
 /// resolves through `static_key`, so a string literal or a substitution-free
 /// template literal key both unwrap; a dynamic key yields `None`.
-pub fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
+pub(crate) fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, &'a str)> {
     match expr {
         Expression::StaticMemberExpression(sme) => Some((&sme.object, sme.property.name.as_str())),
         Expression::ComputedMemberExpression(cme) => {
@@ -70,7 +70,7 @@ pub fn member_name<'a>(expr: &'a Expression<'a>) -> Option<(&'a Expression<'a>, 
 /// the concise `(e) => expr`. A caller that reads only `FunctionBody` stops
 /// seeing concise callbacks; going through this type keeps both inspected.
 #[derive(Clone, Copy)]
-pub enum CallbackBody<'a, 'b> {
+pub(crate) enum CallbackBody<'a, 'b> {
     Block(&'b FunctionBody<'a>),
     Concise(&'b Expression<'a>),
 }
@@ -78,14 +78,14 @@ pub enum CallbackBody<'a, 'b> {
 impl<'a, 'b> CallbackBody<'a, 'b> {
     /// `None` when the arrow body is neither form, which a parsed arrow function
     /// never is — the caller propagates it rather than panicking.
-    pub fn from_arrow(arrow: &'b ArrowFunctionExpression<'a>) -> Option<Self> {
+    pub(crate) fn from_arrow(arrow: &'b ArrowFunctionExpression<'a>) -> Option<Self> {
         match arrow.body.as_function_body() {
             Some(body) => Some(Self::Block(body)),
             None => arrow.body.as_expression().map(Self::Concise),
         }
     }
 
-    pub fn span(self) -> Span {
+    pub(crate) fn span(self) -> Span {
         match self {
             Self::Block(body) => body.span,
             Self::Concise(expr) => expr.span(),
@@ -96,11 +96,11 @@ impl<'a, 'b> CallbackBody<'a, 'b> {
     /// A directive-only block (`() => { 'use strict'; }`) counts as non-empty,
     /// unlike `FunctionBody::is_empty` — it is not the placeholder form callers
     /// exempt.
-    pub fn is_empty(self) -> bool {
+    pub(crate) fn is_empty(self) -> bool {
         matches!(self, Self::Block(body) if body.statements.is_empty())
     }
 
-    pub fn visit_with<V: Visit<'a>>(self, visitor: &mut V) {
+    pub(crate) fn visit_with<V: Visit<'a>>(self, visitor: &mut V) {
         match self {
             Self::Block(body) => visitor.visit_function_body(body),
             Self::Concise(expr) => visitor.visit_expression(expr),
@@ -111,7 +111,7 @@ impl<'a, 'b> CallbackBody<'a, 'b> {
 /// The parameter list and body of an inline callback, whether written as an
 /// arrow or a `function` expression. Returns `None` for any other expression,
 /// and for a body-less `function` form such as a TypeScript ambient declaration.
-pub fn callable_signature<'a, 'b>(
+pub(crate) fn callable_signature<'a, 'b>(
     expr: &'b Expression<'a>,
 ) -> Option<(&'b FormalParameters<'a>, CallbackBody<'a, 'b>)> {
     match expr {

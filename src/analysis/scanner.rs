@@ -7,7 +7,7 @@
 //! Disambiguating regex from division requires context-aware parsing beyond
 //! this scanner's scope.
 
-pub struct StringScanner<'a> {
+pub(crate) struct StringScanner<'a> {
     bytes: &'a [u8],
     pub(crate) pos: usize,
     pub(crate) in_single_quote: bool,
@@ -19,7 +19,7 @@ pub struct StringScanner<'a> {
 }
 
 impl<'a> StringScanner<'a> {
-    pub fn new(bytes: &'a [u8], start: usize) -> Self {
+    pub(crate) fn new(bytes: &'a [u8], start: usize) -> Self {
         Self {
             bytes,
             pos: start,
@@ -33,7 +33,7 @@ impl<'a> StringScanner<'a> {
     }
 
     /// Template interpolation (`${...}`) returns false because it contains executable code.
-    pub fn in_string_or_comment(&self) -> bool {
+    pub(crate) fn in_string_or_comment(&self) -> bool {
         self.in_single_quote
             || self.in_double_quote
             || self.in_template
@@ -42,7 +42,7 @@ impl<'a> StringScanner<'a> {
     }
 
     /// Also skips interpolation-closing braces (depth 1 + `}`).
-    pub fn skip_for_bracket_matching(&self) -> bool {
+    pub(crate) fn skip_for_bracket_matching(&self) -> bool {
         if self.in_string_or_comment() {
             return true;
         }
@@ -54,16 +54,16 @@ impl<'a> StringScanner<'a> {
         false
     }
 
-    pub fn current(&self) -> Option<u8> {
+    pub(crate) fn current(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
 
-    pub fn peek(&self) -> Option<u8> {
+    pub(crate) fn peek(&self) -> Option<u8> {
         self.bytes.get(self.pos + 1).copied()
     }
 
     /// Advance scanner, handling strings/comments. Returns true if advanced.
-    pub fn advance(&mut self) -> bool {
+    pub(crate) fn advance(&mut self) -> bool {
         if self.pos >= self.bytes.len() {
             return false;
         }
@@ -191,7 +191,7 @@ impl<'a> StringScanner<'a> {
     }
 }
 
-pub fn extract_delimited_range(
+pub(crate) fn extract_delimited_range(
     content: &str,
     start: usize,
     open: u8,
@@ -226,12 +226,17 @@ pub fn extract_delimited_range(
 // `extract_delimited_range` bracket-matching / string-skip tests can assert on
 // text. Production callers use `extract_delimited_range` (offsets) directly.
 #[cfg(test)]
-pub fn extract_delimited_content(content: &str, start: usize, open: u8, close: u8) -> Option<&str> {
+pub(crate) fn extract_delimited_content(
+    content: &str,
+    start: usize,
+    open: u8,
+    close: u8,
+) -> Option<&str> {
     extract_delimited_range(content, start, open, close).map(|(s, e)| &content[s..e])
 }
 
 /// Pre-compute line offsets for O(log n) line number lookup.
-pub fn build_line_offsets(content: &str) -> Vec<usize> {
+pub(crate) fn build_line_offsets(content: &str) -> Vec<usize> {
     content
         .as_bytes()
         .iter()
@@ -253,12 +258,12 @@ pub fn build_line_offsets(content: &str) -> Vec<usize> {
 ///   opener delimiters: `comment` flags them, but `code_visible` keeps them
 ///   visible (hiding uses the pre-advance state), so do not treat the masks as
 ///   inverses of each other.
-pub struct SourceMasks {
+pub(crate) struct SourceMasks {
     pub comment: Vec<bool>,
     pub code_visible: Vec<u8>,
 }
 
-pub fn build_source_masks(content: &str) -> SourceMasks {
+pub(crate) fn build_source_masks(content: &str) -> SourceMasks {
     let bytes = content.as_bytes();
     let len = bytes.len();
     let mut comment = vec![false; len];
@@ -301,7 +306,7 @@ pub fn build_source_masks(content: &str) -> SourceMasks {
 }
 
 /// Offsets on newline characters belong to the line ending at that position.
-pub fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
+pub(crate) fn offset_to_line(offsets: &[usize], offset: usize) -> usize {
     match offsets.binary_search(&offset) {
         Ok(idx) | Err(idx) => idx + 1,
     }
