@@ -23,7 +23,7 @@ use std::process;
 /// The seven toggles that gate an AST rule. Carried to the child so it applies the
 /// caller's config without serializing the whole `Config`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AstRuleFlags {
+pub(crate) struct AstRuleFlags {
     pub ast_security: bool,
     pub no_use_effect: bool,
     pub open_redirect: bool,
@@ -36,7 +36,7 @@ pub struct AstRuleFlags {
 impl AstRuleFlags {
     /// For callers holding only the rules sub-config, not the full `Config`.
     /// `from_config` delegates here so the field list lives in one place.
-    pub fn from_rules(rules: &RulesConfig) -> Self {
+    pub(crate) fn from_rules(rules: &RulesConfig) -> Self {
         Self {
             ast_security: rules.ast_security,
             no_use_effect: rules.no_use_effect,
@@ -48,11 +48,11 @@ impl AstRuleFlags {
         }
     }
 
-    pub fn from_config(config: &Config) -> Self {
+    pub(crate) fn from_config(config: &Config) -> Self {
         Self::from_rules(&config.rules)
     }
 
-    pub fn any(&self) -> bool {
+    pub(crate) fn any(&self) -> bool {
         self.ast_security
             || self.no_use_effect
             || self.open_redirect
@@ -66,7 +66,7 @@ impl AstRuleFlags {
 /// The child-subprocess request envelope. A dedicated struct (not `Config`) so
 /// only the parse inputs cross the process boundary.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct AstRequest {
+pub(crate) struct AstRequest {
     pub content: String,
     pub file_path: String,
     pub flags: AstRuleFlags,
@@ -76,7 +76,7 @@ pub struct AstRequest {
 /// file type or parser panic (fail-open, same contract as `with_parsed_program`).
 /// A stack overflow inside `.parse()` aborts the process rather than returning —
 /// that is the abort the subprocess wrapper isolates.
-pub fn run_ast_rules(
+pub(crate) fn run_ast_rules(
     content: &str,
     file_path: &str,
     flags: &AstRuleFlags,
@@ -145,7 +145,7 @@ pub fn run_ast_rules(
 /// or an envelope/encode error (parent skips structural rules, edit proceeds).
 /// A stack overflow aborts the process before any return, so the parent sees
 /// neither 0 nor 1 and treats it as the overflow block.
-pub fn run_child() -> i32 {
+pub(crate) fn run_child() -> i32 {
     // Override main()'s exit-70 panic hook: inside the child a panic means the
     // parse failed gracefully (exit 1 = skip structural rules), not an internal
     // invariant breach (exit 70). Stderr is null'd by the parent, so the hook

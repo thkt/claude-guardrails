@@ -37,7 +37,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Format check
         run: cargo fmt -- --check
@@ -251,8 +251,16 @@ jobs:
         with:
           tool: cargo-audit@0.22.1
 
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
+        with:
+          tool: cargo-machete@0.9.2
+
       - name: Deny check
         run: cargo deny check
 
       - name: Audit
         run: cargo audit
+
+      - name: Unused dependency check
+        run: cargo machete --with-metadata

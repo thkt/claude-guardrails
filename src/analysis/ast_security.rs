@@ -122,7 +122,7 @@ fn check_js(code: &str) -> Vec<Violation> {
     check(code, "/src/app/api/users/route.ts")
 }
 
-pub fn check_program(
+pub(crate) fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
     file_path: &str,
@@ -220,7 +220,7 @@ fn has_use_client_directive(directives: &[oxc_ast::ast::Directive]) -> bool {
 // MAX_INPUT_SIZE (10 MB cap in main.rs) keeps `i` within u32::MAX, so the
 // `i as u32` casts below cannot truncate.
 #[allow(clippy::cast_possible_truncation)]
-pub fn check_bidi(content: &str, file_path: &str) -> Option<Violation> {
+pub(crate) fn check_bidi(content: &str, file_path: &str) -> Option<Violation> {
     for (i, ch) in content.char_indices() {
         if is_bidi_char(ch) {
             // Build line offsets lazily: a bidi hit is rare (security

@@ -19,7 +19,7 @@ fn format_location(v: &Violation) -> String {
     }
 }
 
-pub fn format_violations(violations: &[&Violation]) -> String {
+pub(crate) fn format_violations(violations: &[&Violation]) -> String {
     if violations.is_empty() {
         return String::new();
     }
@@ -51,18 +51,18 @@ pub fn format_violations(violations: &[&Violation]) -> String {
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum Decision {
+pub(crate) enum Decision {
     Allow,
     Block,
 }
 
 #[derive(Serialize)]
-pub struct JsonReport<'a> {
+pub(crate) struct JsonReport<'a> {
     pub violations: Vec<&'a Violation>,
     pub decision: Decision,
 }
 
-pub fn build_json_report<'a>(
+pub(crate) fn build_json_report<'a>(
     blocking: &[&'a Violation],
     warnings: &[&'a Violation],
 ) -> JsonReport<'a> {
@@ -80,7 +80,7 @@ pub fn build_json_report<'a>(
     }
 }
 
-pub fn format_warnings(violations: &[&Violation], color: bool) -> String {
+pub(crate) fn format_warnings(violations: &[&Violation], color: bool) -> String {
     if violations.is_empty() {
         return String::new();
     }

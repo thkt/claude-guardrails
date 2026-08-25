@@ -20,7 +20,7 @@
 //! Claude Code reads to decide between *allow / advisory / blocking*.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookExitCode {
+pub(crate) enum HookExitCode {
     Pass,
     Advisory,
     Blocking,
@@ -29,7 +29,7 @@ pub enum HookExitCode {
 }
 
 impl HookExitCode {
-    pub const fn code(self) -> u8 {
+    pub(crate) const fn code(self) -> u8 {
         match self {
             Self::Pass => 0,
             Self::Advisory => 1,

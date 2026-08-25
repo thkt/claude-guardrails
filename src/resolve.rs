@@ -110,7 +110,7 @@ fn wait_with_timeout(child: Child, tool: &'static str) -> Option<ExitStatus> {
     }
 }
 
-pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output> {
+pub(crate) fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output> {
     let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -152,7 +152,7 @@ pub fn run_with_timeout(cmd: &mut Command, tool: &'static str) -> Option<Output>
 // the trust boundary is the spec, not a bypass instruction.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum ResolveError {
+pub(crate) enum ResolveError {
     #[error("no binary found in ancestor node_modules/.bin/")]
     NotFound,
     #[error("binary resolved outside trusted location: {canonical:?}")]
@@ -180,7 +180,7 @@ pub enum ResolveError {
 /// or `$HOME` fence stops the walk before an outside bin is reached, turning the
 /// forensic `OutsideProjectRoot` signal into a silent `NotFound`. So the guard
 /// sets are intentionally not unified — keep this boundary, do not add fences.
-pub fn try_resolve_bin(
+pub(crate) fn try_resolve_bin(
     name: &str,
     file_path: &str,
     project_root: Option<&Path>,
@@ -199,7 +199,7 @@ pub fn try_resolve_bin(
     }
 }
 
-pub fn run_linter_check<T: DeserializeOwned>(
+pub(crate) fn run_linter_check<T: DeserializeOwned>(
     content: &str,
     file_path: &str,
     bin: &Path,

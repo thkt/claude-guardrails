@@ -46,7 +46,7 @@ fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
     })
 }
 
-pub fn check_program(
+pub(crate) fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
     file_path: &str,

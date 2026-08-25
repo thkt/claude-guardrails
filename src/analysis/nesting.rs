@@ -27,7 +27,7 @@ const PREFIX_RUN_LIMIT: u32 = 50;
 /// ASCII space, template interpolation kept) so brackets inside string/comment
 /// text do not inflate the count. Never recurses, so it cannot itself overflow
 /// at any input depth. Returns the first threshold breach, or None.
-pub fn check_excessive_nesting(content: &str, file_path: &str) -> Option<Violation> {
+pub(crate) fn check_excessive_nesting(content: &str, file_path: &str) -> Option<Violation> {
     let masks = scanner::build_source_masks(content);
     let code = &masks.code_visible;
 
@@ -76,7 +76,7 @@ fn violation(content: &str, file_path: &str, byte: usize) -> Violation {
 /// the byte scan missed the depth (deep JSX / ternary / generics). No specific
 /// offset is known, so `line` is None. Same rule and message as the byte-scan
 /// hit so the two tiers present one consistent block to the caller.
-pub fn overflow_violation(file_path: &str) -> Violation {
+pub(crate) fn overflow_violation(file_path: &str) -> Violation {
     build_violation(file_path, None)
 }
 

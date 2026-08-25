@@ -59,7 +59,7 @@ const PLATFORMS: &[(&str, &str, PlatformPin)] = &[
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum OxlintError {
+pub(crate) enum OxlintError {
     #[error("no cache directory available (set XDG_CACHE_HOME or HOME)")]
     CacheDirUnavailable,
     #[error("unsupported platform for oxlint download (os={os}, arch={arch})")]
@@ -78,7 +78,7 @@ pub enum OxlintError {
 }
 
 impl OxlintError {
-    pub fn classify(&self) -> (ErrorCode, &'static str) {
+    pub(crate) fn classify(&self) -> (ErrorCode, &'static str) {
         match self {
             Self::UnsupportedPlatform { .. } => (
                 ErrorCode::DataError,
@@ -130,7 +130,7 @@ fn default_cache_dir() -> Option<PathBuf> {
     Some(cache_base.join("guardrails/bin"))
 }
 
-pub fn ensure_oxlint() -> Result<PathBuf, OxlintError> {
+pub(crate) fn ensure_oxlint() -> Result<PathBuf, OxlintError> {
     let cache = default_cache_dir().ok_or(OxlintError::CacheDirUnavailable)?;
     ensure_oxlint_with(&cache, fetch_url)
 }

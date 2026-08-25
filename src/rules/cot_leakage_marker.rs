@@ -8,7 +8,7 @@ const MARKERS: &[&str] = &[
     "<thinking>",
 ];
 
-pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+pub(super) static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_ALL_FILES.clone(),
     checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
         // Self-exclusion: this file legitimately contains every marker as literal

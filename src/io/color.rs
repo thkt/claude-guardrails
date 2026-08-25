@@ -25,11 +25,11 @@ fn wrap_with(color: bool, ansi_code: &str, text: &str) -> String {
     }
 }
 
-pub fn red(text: &str) -> String {
+pub(crate) fn red(text: &str) -> String {
     wrap("31", text)
 }
 
-pub fn yellow(text: &str) -> String {
+pub(crate) fn yellow(text: &str) -> String {
     wrap("33", text)
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn yellow_if(color: bool, text: &str) -> String {
     wrap_with(color, "33", text)
 }
 
-pub fn bold_red(text: &str) -> String {
+pub(crate) fn bold_red(text: &str) -> String {
     wrap("1;31", text)
 }
 

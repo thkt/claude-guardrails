@@ -67,7 +67,7 @@ static WEAK_CRYPTO: LazyLock<[WeakCrypto; 4]> = LazyLock::new(|| {
     ]
 });
 
-pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+pub(super) static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_JS_FILE.clone(),
     checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
         let mut violations = Vec::new();

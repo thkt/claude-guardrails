@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 macro_rules! define_rule_config {
     ($( $field:ident => $serde_name:literal ),* $(,)?) => {
         #[derive(Debug, Clone)]
-        pub struct RulesConfig {
-            $(pub $field: bool,)*
+        pub(crate) struct RulesConfig {
+            $(pub(crate) $field: bool,)*
         }
 
         impl Default for RulesConfig {
@@ -116,7 +116,7 @@ define_rule_config! {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ConfigSource {
+pub(crate) enum ConfigSource {
     Default,
     Explicit,
 }
@@ -132,7 +132,7 @@ impl RulesConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct Config {
+pub(crate) struct Config {
     pub enabled: bool,
     pub rules: RulesConfig,
     pub severity: SeverityConfig,
@@ -144,7 +144,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone)]
-pub struct SeverityConfig {
+pub(crate) struct SeverityConfig {
     /// Violations at or above this severity block the tool; below it warn.
     pub block_threshold: Severity,
 }
@@ -158,7 +158,7 @@ impl Default for SeverityConfig {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct OxlintConfig {
+pub(crate) struct OxlintConfig {
     pub deny: Vec<String>,
     pub allow: Vec<String>,
 }
@@ -166,7 +166,7 @@ pub struct OxlintConfig {
 /// A single `.guardrails.json` `overrides` entry: file glob patterns paired
 /// with the rule toggles that apply only to matching files.
 #[derive(Debug, Clone)]
-pub struct OverrideEntry {
+pub(crate) struct OverrideEntry {
     pub files: Vec<GlobMatcher>,
     pub rules: ProjectRulesConfig,
 }
@@ -226,7 +226,7 @@ struct ToolsConfig {
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     #[error("cannot determine working directory: {0}")]
     WorkingDir(#[source] io::Error),
     #[error("cannot read config {path:?}: {source}")]
@@ -261,7 +261,7 @@ impl Config {
     // LLM-controlled paths from influencing config discovery.
     /// Returns the load-time notes alongside the config (see
     /// `invalid_pattern_note`).
-    pub fn with_project_overrides(self) -> Result<(Self, Vec<String>), ConfigError> {
+    pub(crate) fn with_project_overrides(self) -> Result<(Self, Vec<String>), ConfigError> {
         let cwd = env::current_dir().map_err(ConfigError::WorkingDir)?;
         self.with_overrides_from_root(&cwd)
     }
@@ -447,7 +447,7 @@ impl Config {
     /// names and matched patterns), and one when resolution moved the path. A
     /// glob that failed to compile is not among them (see
     /// `invalid_pattern_note`).
-    pub fn effective_rules_with_notes(
+    pub(crate) fn effective_rules_with_notes(
         &self,
         file_path: impl AsRef<Path>,
     ) -> (RulesConfig, Vec<String>) {
