@@ -12,6 +12,7 @@
 //! and is not mechanically excluded; it stays out by convention, an OUTCOME
 //! non-goal a human should not pin in `.invariants.json`.
 
+use crate::path_resolve;
 use crate::rules::{rule_id, Severity, Violation};
 use serde_json::{Map, Value};
 use std::fs;
@@ -87,29 +88,14 @@ fn load_invariant_table(git_root: &Path) -> InvariantLoad {
     }
 }
 
-/// Derives the git-root-relative pin key from the same resolved path the content
-/// read used. `content.rs` canonicalizes `file_path` before reading, so deriving
-/// the key from the raw path would silently mismatch when an ancestor is a
-/// symlink (the read succeeds, the pin lookup misses, the mutation passes
-/// unchecked). The canonicalized pair is tried first; it wins whenever both the
-/// git root and the file's parent resolve. When either cannot be resolved (e.g.
-/// a new file whose parent does not exist yet at `PreToolUse`), the raw pair is
-/// used so the gate is never stricter than the raw-path lookup it replaces.
-/// Returns `None` when the path is not under the git root by either pairing,
-/// which includes a bare/relative `file_path` (no resolvable parent): the gate
-/// fails open rather than guess a key. Tool input always supplies absolute paths,
-/// so this is an edge guard, not the production path.
+/// Derives the git-root-relative pin key. Not through `canonical_path`'s
+/// parent-only canonicalization: `read_file_capped` follows every component, so
+/// leaving the last one unresolved misses the declaration when the edited file is
+/// itself a symlink, and the write passes unchecked (#471, ADR-0023).
+/// `None` outside the git root — the gate fails open rather than guess a key.
 fn canonical_relative_key(file_path: &str, git_root: &Path) -> Option<String> {
-    if let (Ok(canonical_root), Some(resolved)) = (
-        fs::canonicalize(git_root),
-        canonical_path(Path::new(file_path)),
-    ) {
-        if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
-            return Some(relative.to_string_lossy().into_owned());
-        }
-    }
-    let relative = Path::new(file_path).strip_prefix(git_root).ok()?;
-    Some(relative.to_string_lossy().into_owned())
+    let resolved = path_resolve::resolve_under_root(Path::new(file_path), git_root)?;
+    Some(resolved.relative.to_string_lossy().into_owned())
 }
 
 /// Canonicalizes a path whose final component may not exist yet (a `Write` of a

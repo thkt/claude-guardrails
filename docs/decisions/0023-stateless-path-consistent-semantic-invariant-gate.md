@@ -38,7 +38,9 @@ The gate is a pure post-edit conformance check: declared scalar versus resolved 
 
 ### Canonical-key consistency
 
-`canonical_relative_key` resolves the file path through the same canonicalization the content read used (`canonical_path`), tries the canonical pair first, and falls back to the raw pair only when a component cannot be resolved (e.g. a new-file Write whose parent does not exist yet) so the gate is never stricter than the raw-path lookup. Any future path handling that feeds the pin lookup MUST stay symlink-consistent with the read path in `content.rs`. Deriving the key from a path the read did not use reopens the symlink bypass.
+`canonical_relative_key` derives the key through `path_resolve::resolve_under_root`, which follows every component the way `read_file_capped`'s `fs::canonicalize` does and rejoins the components below the nearest existing ancestor unresolved (a new-file Write whose parent does not exist yet). The override matcher, `configGuard` and `invariantGuard` key off the same function, so the four share one resolution space. Any future path handling that feeds the pin lookup MUST stay symlink-consistent with the read path in `content.rs`. Deriving the key from a path the read did not use reopens the symlink bypass.
+
+This section originally named `canonical_path` as that shared canonicalization. It was not: `canonical_path` canonicalizes the parent alone and leaves the final component as spelled, so an edit whose own path was a symlink missed the pin (#471). `is_declaration_path` still uses `canonical_path`, where leaving the final component unresolved is the intended behavior.
 
 ### Consequences
 
