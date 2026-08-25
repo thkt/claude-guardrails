@@ -11,6 +11,7 @@ fn make_violation(rule: &str, severity: Severity) -> Violation {
         file: "/test.ts".to_owned(),
         line: Some(1),
         origin: None,
+        no_demote: None,
     }
 }
 

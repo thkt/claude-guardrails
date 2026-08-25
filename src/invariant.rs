@@ -32,6 +32,7 @@ fn violation(fix: String, file_path: &str) -> Violation {
         file: String::from(file_path),
         line: None,
         origin: None,
+        no_demote: None,
     }
 }
 

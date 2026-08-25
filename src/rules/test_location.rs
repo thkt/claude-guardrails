@@ -30,6 +30,7 @@ pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
                 file: file_path.to_owned(),
                 line: None,
                 origin: None,
+                no_demote: None,
             }];
         }
         Vec::new()

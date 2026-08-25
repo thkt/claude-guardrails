@@ -132,6 +132,7 @@ mod tests {
             file: "/src/app.ts".to_owned(),
             line: Some(1),
             origin: None,
+            no_demote: None,
         }
     }
 
@@ -262,6 +263,7 @@ mod tests {
             file: "/src/app.ts".to_owned(),
             line: None,
             origin: None,
+            no_demote: None,
         };
         let report = build_json_report(&[&v], &[]);
         let json: serde_json::Value =

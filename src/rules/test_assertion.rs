@@ -116,6 +116,7 @@ impl TestAssertionVisitor<'_> {
             file: self.file_path.to_owned(),
             line: Some(ast::span_to_line(self.line_offsets, call.span)),
             origin: None,
+            no_demote: None,
         });
     }
 

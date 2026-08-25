@@ -60,6 +60,7 @@ pub(crate) fn check(
         file: file_path.to_owned(),
         line: None,
         origin: None,
+        no_demote: None,
     }]
 }
 

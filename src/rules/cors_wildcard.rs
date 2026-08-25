@@ -57,6 +57,7 @@ impl CorsVisitor<'_> {
             file: self.file_path.to_owned(),
             line: Some(ast::span_to_line(self.line_offsets, span)),
             origin: None,
+            no_demote: None,
         });
     }
 }

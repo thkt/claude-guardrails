@@ -237,6 +237,7 @@ pub fn check_bidi(content: &str, file_path: &str) -> Option<Violation> {
                 file: file_path.to_owned(),
                 line: Some(line),
                 origin: None,
+                no_demote: None,
             });
         }
     }
@@ -309,6 +310,7 @@ impl SecurityVisitor<'_> {
             file: self.file_path.to_owned(),
             line: Some(self.span_to_line(span)),
             origin: None,
+            no_demote: None,
         });
     }
 }

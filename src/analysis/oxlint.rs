@@ -184,6 +184,7 @@ fn convert_diagnostics(output: OxlintOutput, file_path: &str) -> Vec<Violation> 
                 file: file_path.to_owned(),
                 line,
                 origin: None,
+                no_demote: None,
             })
         })
         .collect()
