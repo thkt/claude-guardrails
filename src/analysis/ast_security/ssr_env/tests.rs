@@ -503,3 +503,47 @@ fn ssr_secret_bleed_silent_on_helper_arrow_inside_use_server_arrow() {
         "inner helper arrow return is not serialized to client: {v:?}"
     );
 }
+
+/// Returns the sole `rule` violation's fix message. Asserting the fire here
+/// keeps a rule deletion from making the opacity checks below vacuously pass.
+fn sole_fix_message(code: &str, path: &str, rule: &str) -> String {
+    let v = check(code, path);
+    let hits: Vec<_> = v.iter().filter(|x| x.rule == rule).collect();
+    assert_eq!(hits.len(), 1, "{rule} must flag once: {v:?}");
+    hits[0].fix.clone()
+}
+
+// T-616: client_env_leak_fix_message_omits_public_prefix_token
+// Not a detection test: the message is what the agent acts on (ADR-0022, #473).
+#[test]
+fn client_env_leak_fix_message_omits_public_prefix_token() {
+    let fix = sole_fix_message(
+        "\"use client\";\nconst k = process.env.API_SECRET;",
+        "/src/components/Profile.tsx",
+        rule_id::CLIENT_ENV_PUBLIC_LEAK,
+    );
+    let lower = fix.to_ascii_lowercase();
+    // Not just the prefix: CLIENT_ENV_ALLOW_LIST's NODE_ENV is the second lever.
+    for token in ["next_public", "next public", "node_env"] {
+        assert!(
+            !lower.contains(token),
+            "fix message names {token}, which silences the rule: {fix}"
+        );
+    }
+}
+
+// T-617: ssr_secret_bleed_fix_message_omits_rename_instruction
+// Not a detection test: a rename silences the match while the secret still
+// ships to the client (ADR-0022, #473).
+#[test]
+fn ssr_secret_bleed_fix_message_omits_rename_instruction() {
+    let fix = sole_fix_message(
+        "export async function getServerSideProps() { return { props: { apiKey: 'x' } }; }",
+        "/pages/dashboard.tsx",
+        rule_id::SSR_SECRET_BLEED,
+    );
+    assert!(
+        !fix.to_ascii_lowercase().contains("rename"),
+        "fix message offers a rename, which silences the name-only match: {fix}"
+    );
+}
