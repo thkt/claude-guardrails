@@ -68,7 +68,7 @@ static SECRET_PATTERNS: [SecretPattern; 4] = [
     },
 ];
 
-pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+pub(super) static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_ALL_FILES.clone(),
     checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
         let mut violations = Vec::new();

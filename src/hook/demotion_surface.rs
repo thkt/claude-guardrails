@@ -173,7 +173,7 @@ fn corpus_rules_match_allowlist_with_every_scenario() {
 }
 
 /// Looks up the one `payload-swap` pair for `rule`, run through the same
-/// first_party_violations -> partition_violations -> classify pipeline as the
+/// `first_party_violations` -> `partition_violations` -> classify pipeline as the
 /// exhaustive sweep, so a T-NNN test failure and the sweep test's failure
 /// share one root cause instead of drifting apart.
 fn classify_payload_swap_pair(rule: &'static str) -> Classification {

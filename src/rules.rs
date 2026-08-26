@@ -47,7 +47,7 @@ pub(crate) mod rule_id {
     /// 各 `rule_id` を `pub const` と `RULE_ID_CATALOG` (test 専用) に同時定義する macro。
     macro_rules! define_rule_ids {
         ( $( $name:ident = $value:literal ),* $(,)? ) => {
-            $( pub const $name: &str = $value; )*
+            $( pub(crate) const $name: &str = $value; )*
             #[cfg(test)]
             pub(crate) const RULE_ID_CATALOG: &[&str] = &[ $( $name ),* ];
         };
@@ -247,15 +247,16 @@ pub(crate) fn combination_only_rule_id_count(
     actual.saturating_sub(isolated_sum)
 }
 
-pub static RE_JS_FILE: LazyLock<Regex> =
+pub(crate) static RE_JS_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_JS_FILE", r"\.m?[jt]sx?$"));
 
-pub static RE_TEST_FILE: LazyLock<Regex> =
+pub(crate) static RE_TEST_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_TEST_FILE", r"\.(test|spec)\.m?[jt]sx?$"));
 
-pub static RE_ALL_FILES: LazyLock<Regex> = LazyLock::new(|| regex_or_die("RE_ALL_FILES", r"."));
+pub(crate) static RE_ALL_FILES: LazyLock<Regex> =
+    LazyLock::new(|| regex_or_die("RE_ALL_FILES", r"."));
 
-pub static RE_REACT_FILE: LazyLock<Regex> =
+pub(crate) static RE_REACT_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_REACT_FILE", r"\.(tsx|jsx)$"));
 
 // A path segment whose name is, or starts with `<keyword>-`, one of the test
@@ -268,26 +269,26 @@ pub static RE_REACT_FILE: LazyLock<Regex> =
 // `(?i)`: route folder casing is author-controlled and case-sensitive filesystems
 // keep `Test` / `Debug` as distinct routable endpoints, so the keyword match is
 // case-insensitive; the boundary still blocks `Testimonials` / `Development`.
-pub static RE_TEST_ROUTE_SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static RE_TEST_ROUTE_SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_TEST_ROUTE_SEGMENT",
         r"(?i)(^|/)(test|seed|dev|debug|fixture)([-./]|$)",
     )
 });
 
-pub const API_PREFIX_PAT: &str = r"(^|/)(app|pages)/api/";
+pub(crate) const API_PREFIX_PAT: &str = r"(^|/)(app|pages)/api/";
 
-pub static RE_API_FILE: LazyLock<Regex> =
+pub(crate) static RE_API_FILE: LazyLock<Regex> =
     LazyLock::new(|| regex_or_die("RE_API_FILE", API_PREFIX_PAT));
 
-pub static RE_API_OR_MIDDLEWARE_FILE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static RE_API_OR_MIDDLEWARE_FILE: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_API_OR_MIDDLEWARE_FILE",
         &format!("{API_PREFIX_PAT}|(^|/)middleware\\.[jt]sx?$"),
     )
 });
 
-pub static RE_API_OR_ROUTE_FILE: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static RE_API_OR_ROUTE_FILE: LazyLock<Regex> = LazyLock::new(|| {
     regex_or_die(
         "RE_API_OR_ROUTE_FILE",
         &format!("{API_PREFIX_PAT}|(^|/)app/(.*/)?route\\.[jt]sx?$"),
@@ -355,7 +356,7 @@ pub(crate) fn non_comment_lines(content: &str) -> Vec<(u32, &str)> {
         .collect()
 }
 
-pub fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32> {
+pub(crate) fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32> {
     lines
         .iter()
         .find(|(_, line)| pattern.is_match(line))
@@ -364,7 +365,7 @@ pub fn find_match_in_lines(lines: &[(u32, &str)], pattern: &Regex) -> Option<u32
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Severity {
+pub(crate) enum Severity {
     // `Ord` derives from declaration order: weakest first so `Critical` is the max.
     Low,
     Medium,
@@ -375,7 +376,7 @@ pub enum Severity {
 impl Severity {
     /// Maps external linter severity strings to `Severity`. Caps at `High`;
     /// `Critical` is reserved for in-house high-certainty patterns.
-    pub fn from_linter_str(s: &str) -> Self {
+    pub(crate) fn from_linter_str(s: &str) -> Self {
         match s {
             "error" => Severity::High,
             "warning" => Severity::Medium,
@@ -404,7 +405,7 @@ impl fmt::Display for Severity {
 /// before-compared, so an "introduced" mark could not be verified.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ViolationOrigin {
+pub(crate) enum ViolationOrigin {
     Preexisting,
 }
 
@@ -413,12 +414,12 @@ pub enum ViolationOrigin {
 /// property of how the rule decided it, which (rule, line text) cannot show.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum DemotionOptOut {
+pub(crate) enum DemotionOptOut {
     OptedOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Violation {
+pub(crate) struct Violation {
     pub rule: String,
     pub severity: Severity,
     pub fix: String,
@@ -442,13 +443,18 @@ pub struct Violation {
 
 type Checker = Box<dyn Fn(&str, &str, &[(u32, &str)]) -> Vec<Violation> + Send + Sync>;
 
-pub struct Rule {
+pub(crate) struct Rule {
     pub file_pattern: Regex,
     checker: Checker,
 }
 
 impl Rule {
-    pub fn check(&self, content: &str, file_path: &str, lines: &[(u32, &str)]) -> Vec<Violation> {
+    pub(crate) fn check(
+        &self,
+        content: &str,
+        file_path: &str,
+        lines: &[(u32, &str)],
+    ) -> Vec<Violation> {
         (self.checker)(content, file_path, lines)
     }
 }
@@ -459,7 +465,7 @@ macro_rules! register_rules {
     };
 }
 
-pub fn load_rules(config: &Config) -> Vec<&'static Rule> {
+pub(crate) fn load_rules(config: &Config) -> Vec<&'static Rule> {
     let mut rules = Vec::new();
     register_rules!(config, rules,
         sensitive_file    => sensitive_file,

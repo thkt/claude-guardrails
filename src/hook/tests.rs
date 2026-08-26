@@ -799,8 +799,10 @@ fn rule_id_と_1_対_1_の_toggle_では数が_1_と出る() {
 // 計算 (現行値 1) と食い違うことを固定する。
 #[test]
 fn astsecurity_が_off_の構成で_security_の数が_2になる() {
-    let mut rules = RulesConfig::default();
-    rules.ast_security = false;
+    let rules = RulesConfig {
+        ast_security: false,
+        ..Default::default()
+    };
     assert_eq!(toggle_rule_id_count("security", &rules), Some(2));
 }
 

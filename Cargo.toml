@@ -29,6 +29,7 @@ thiserror = "2"
 
 [lints.rust]
 unsafe_code = "forbid"
+unreachable_pub = "deny"
 
 [lints.clippy]
 # Groups

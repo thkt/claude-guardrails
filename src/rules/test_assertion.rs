@@ -67,7 +67,7 @@ fn check_fail_open(content: &str, file_path: &str) -> Vec<Violation> {
 /// AST traversal makes detection independent of the callee form (`it`, `it.only`,
 /// `it.each(...)`) and the callback form (arrow or `function`, with or without
 /// args), which the prior regex — fixed to a bare `() =>` arrow — silently missed.
-pub fn check_program(
+pub(crate) fn check_program(
     program: &Program<'_>,
     line_offsets: &[usize],
     file_path: &str,

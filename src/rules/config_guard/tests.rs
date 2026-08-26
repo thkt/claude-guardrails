@@ -1,4 +1,5 @@
 use super::*;
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
 fn root() -> PathBuf {
@@ -55,7 +56,7 @@ fn symlink_経由で綴った設定ファイルのパスでも発火する() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     let spelled = root.join("link").join("..").join(GUARDRAILS_CONFIG_FILE);
-    std::os::unix::fs::symlink(&root, root.join("link")).unwrap();
+    symlink(&root, root.join("link")).unwrap();
 
     // `link` は root 自身を指すので、綴りを畳むと root 直下の設定ファイルになる。
     let v = check(spelled.to_str().unwrap(), Some(&root));

@@ -7,14 +7,14 @@
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
-pub struct SuccessEnvelope<T: Serialize> {
+pub(crate) struct SuccessEnvelope<T: Serialize> {
     pub data: T,
     pub degraded: bool,
     pub notes: Vec<String>,
 }
 
 impl<T: Serialize> SuccessEnvelope<T> {
-    pub fn ok(data: T) -> Self {
+    pub(crate) fn ok(data: T) -> Self {
         Self {
             data,
             degraded: false,
@@ -24,7 +24,11 @@ impl<T: Serialize> SuccessEnvelope<T> {
 
     /// Only degradation notes drive the `degraded` flag; `info` notes ride
     /// along at the tail of `notes` without flagging the envelope.
-    pub fn with_notes_and_info(data: T, degradations: Vec<String>, info: Vec<String>) -> Self {
+    pub(crate) fn with_notes_and_info(
+        data: T,
+        degradations: Vec<String>,
+        info: Vec<String>,
+    ) -> Self {
         // `degraded` is the union of environmental notes (project root / config /
         // linter) and `ContentResolution::Degraded` notes. See ADR-0007 §Degraded
         // derivation semantics for the per-source aggregation order.
@@ -42,7 +46,7 @@ impl<T: Serialize> SuccessEnvelope<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[allow(clippy::enum_variant_names)]
-pub enum ErrorCode {
+pub(crate) enum ErrorCode {
     // ADR-0005 lists USAGE_ERROR as a valid error.code for exit 64 and the
     // serialization / exit_code tests pin it, but no runtime path constructs it:
     // hook input errors map to Data/IoError and clap usage errors exit 64
@@ -54,7 +58,7 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
-    pub fn exit_code(self) -> u8 {
+    pub(crate) fn exit_code(self) -> u8 {
         match self {
             Self::UsageError => 64,
             Self::DataError => 65,
@@ -64,12 +68,12 @@ impl ErrorCode {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ErrorEnvelope {
+pub(crate) struct ErrorEnvelope {
     pub error: ErrorPayload,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ErrorPayload {
+pub(crate) struct ErrorPayload {
     pub code: ErrorCode,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]

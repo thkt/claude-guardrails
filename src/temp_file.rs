@@ -5,7 +5,7 @@ use tempfile::{Builder, NamedTempFile};
 
 /// Create a temp file in the same directory as `file_path` so linters inherit project config.
 /// Falls back to the system temp directory when the parent directory does not exist.
-pub fn write_temp(content: &str, file_path: &str, tool: &str) -> Option<NamedTempFile> {
+pub(crate) fn write_temp(content: &str, file_path: &str, tool: &str) -> Option<NamedTempFile> {
     write_temp_in(content, file_path, tool, &env::temp_dir())
 }
 

@@ -36,7 +36,7 @@ const MSG_CONSOLE: &str =
     "Logging sensitive data (password, token, secret). Remove or mask before logging.";
 const MSG_LOGGER: &str = "Logging sensitive data via logger. Remove or mask before logging.";
 
-pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+pub(super) static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_JS_FILE.clone(),
     checker: Box::new(|content: &str, file_path: &str, _lines: &[(u32, &str)]| {
         // Skip mask/offset construction when no call site exists.

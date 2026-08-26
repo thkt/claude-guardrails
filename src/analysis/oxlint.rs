@@ -84,7 +84,10 @@ struct OxlintSpan {
 // local bin" — that would turn the message into a placement guide for a
 // planted binary. The canonical path is logged for forensics but the source
 // of the trust boundary is intentionally not spelled out here.
-pub fn resolve(file_path: &str, project_root: Option<&Path>) -> (Option<PathBuf>, Vec<String>) {
+pub(crate) fn resolve(
+    file_path: &str,
+    project_root: Option<&Path>,
+) -> (Option<PathBuf>, Vec<String>) {
     match try_resolve_bin("oxlint", file_path, project_root) {
         Ok(path) => (Some(path), Vec::new()),
         Err(ResolveError::NotFound) => (download_bundled(), Vec::new()),
@@ -104,7 +107,7 @@ fn download_bundled() -> Option<PathBuf> {
         .ok()
 }
 
-pub fn check(
+pub(crate) fn check(
     content: &str,
     file_path: &str,
     bin: &Path,

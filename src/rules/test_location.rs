@@ -12,7 +12,7 @@ static TEST_DIR_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ]
 });
 
-pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+pub(super) static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_ALL_FILES.clone(),
     checker: Box::new(|_content: &str, file_path: &str, _lines: &[(u32, &str)]| {
         if !RE_SRC_DIR.is_match(file_path) {

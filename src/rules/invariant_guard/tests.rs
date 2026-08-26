@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::os::unix::fs::symlink;
 
 /// Writes a `.invariants.json` with `pins_json` as its pre-edit content and
 /// returns the owning tempdir (the git root for `check`).
@@ -47,7 +48,7 @@ fn symlink_経由で綴った_invariants_json_でも判定される() {
     )
     .unwrap();
     fs::create_dir(root.join("sub")).unwrap();
-    std::os::unix::fs::symlink(&root, root.join("sub").join("alias")).unwrap();
+    symlink(&root, root.join("sub").join("alias")).unwrap();
     let spelled = root.join("sub").join("alias").join(INVARIANTS_FILE);
 
     let v = check(spelled.to_str().unwrap(), "{}", Some(&root));
@@ -69,7 +70,7 @@ fn 根の_invariants_json_が_repository_外への_symlink_でも判定される
     fs::create_dir(&outside).unwrap();
     let target = outside.join("pins.json");
     fs::write(&target, r#"{"config.json": {"featureFlag": true}}"#).unwrap();
-    std::os::unix::fs::symlink(&target, root.join(INVARIANTS_FILE)).unwrap();
+    symlink(&target, root.join(INVARIANTS_FILE)).unwrap();
 
     let v = check(
         root.join(INVARIANTS_FILE).to_str().unwrap(),

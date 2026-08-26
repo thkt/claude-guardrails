@@ -24,7 +24,7 @@ static RE_TX_BOUNDARY: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 
-pub static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
+pub(super) static RULE: LazyLock<Rule> = LazyLock::new(|| Rule {
     file_pattern: RE_JS_FILE.clone(),
     checker: Box::new(|_content: &str, file_path: &str, lines: &[(u32, &str)]| {
         if !RE_TARGET_DIR.is_match(file_path) && !RE_API_OR_ROUTE_FILE.is_match(file_path) {

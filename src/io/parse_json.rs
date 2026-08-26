@@ -4,7 +4,11 @@ use serde::de::DeserializeOwned;
 /// and emit either single-line or pretty-printed JSON. Tries the full stdout
 /// first, then falls back to the first line beginning with `{`. Trailing bytes
 /// after the JSON value are ignored.
-pub fn parse_linter_json<T: DeserializeOwned>(stdout: &str, stderr: &str, tool: &str) -> Option<T> {
+pub(crate) fn parse_linter_json<T: DeserializeOwned>(
+    stdout: &str,
+    stderr: &str,
+    tool: &str,
+) -> Option<T> {
     if let Ok(parsed) = serde_json::from_str::<T>(stdout) {
         return Some(parsed);
     }

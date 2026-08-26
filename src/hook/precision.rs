@@ -471,9 +471,9 @@ fn 複数の_emitter_を持つ_rule_id_は_片方の_toggle_を_off_にしても
 // config から導く。
 
 /// `config` で corpus の fire サンプル全件を `detected_rules` に通し、発火した
-/// rule_id の和集合を返す。expectation が `Clean` のサンプルは対象外
+/// `rule_id` の和集合を返す。expectation が `Clean` のサンプルは対象外
 /// (fire しないことが期待値のサンプルを対象に含めると、fire しなくて当然の
-/// rule_id が unexpected fire として actual 側に混ざり得るため)。
+/// `rule_id` が unexpected fire として actual 側に混ざり得るため)。
 fn fired_rule_ids_across_fire_samples(config: &Config) -> BTreeSet<String> {
     let mut fired = BTreeSet::new();
     for sample in corpus::SAMPLES
@@ -1221,7 +1221,7 @@ fn override_軸を持たない_json_を_base_側に渡すと_gate_は_bootstrap_
 
 /// `tiny_report` は 2 サンプル固定なので、総数を変える test はこちらを使う。
 ///
-/// 全サンプルを Fire にして fp=tn=0 に揃えるのは、precision_gate.sh の FP
+/// 全サンプルを Fire にして fp=tn=0 に揃えるのは、`precision_gate.sh` の FP
 /// レート判定 (`bfp * (bfp+btn)` 系) を常に不発にし、corpus サンプル総数の
 /// 判定だけを単独で踏ませるため。
 fn report_with_eval_sample_count(count: u32) -> MetricsReport {
