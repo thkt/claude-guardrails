@@ -861,3 +861,39 @@ fn blockthreshold_を_critical_にしても設定ファイルへの_write_は_ex
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// T-629 (#474): `blockThreshold` を `critical` にした repository でも深い nest の
+// Write は exit 2 で止まり、stderr が excessive-nesting を名指しする。unit 側
+// (src/hook/tests.rs の T-627) は private な `partition_violations` の振り分けまでしか
+// 見えず、そこから exit code と BLOCKED 表示までの配線を通らない。報告された症状は
+// exit code そのものなので、その配線ごと pin する。深さ 400 は issue の repro と同じで、
+// tier 1 の byte scan (閾値 100) が parse の前に捕らえる。
+#[test]
+fn blockthreshold_を_critical_にしても深い_nest_の_write_は_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"severity": {"blockThreshold": "critical"}}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let content = format!("const x = {}1{};", "(".repeat(400), ")".repeat(400));
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/a.ts"),
+            "content": content
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "the deep-nesting guard is a DoS boundary and must block at blockThreshold=critical; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("excessive-nesting"),
+        "the blocking output must name excessive-nesting, not some other rule; stderr: {stderr}"
+    );
+}

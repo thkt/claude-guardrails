@@ -486,6 +486,75 @@ fn partition_custom_block_threshold() {
     assert_eq!(warnings[0].rule, "low-rule");
 }
 
+// #474: `severity.blockThreshold` is project-overridable up to Critical, and
+// `partition_violations` routes on severity alone, so a project config could
+// demote the deep-nesting DoS guard to advisory (exit 1). ADR-0004 puts a
+// resource boundary / DoS defense at fail-closed, so `excessive-nesting` must
+// stay blocking at every threshold. Decision table over the two independent
+// conditions (blockThreshold x rule identity):
+//
+// | blockThreshold  | rule                    | routing  | pinned by                                           |
+// | default (High)  | excessive-nesting       | blocking | collect_violations_deep_nesting_blocks_before_parse |
+// | default (High)  | any other High rule     | blocking | partition_default_severity_routing                  |
+// | critical        | excessive-nesting       | blocking | T-627                                               |
+// | critical        | eval (High, non-guard)  | advisory | T-628                                               |
+
+// T-627: at `blockThreshold` = Critical, the High `excessive-nesting` violation
+// still lands on the blocking side. The violation comes from `collect_violations`
+// rather than from `make_violation`, so the assertion holds whichever carrier the
+// guard uses to stay blocking (rule id, or a per-violation marker). Depth 150 is
+// above the guard threshold (100) and below the parse overflow floor (~282), so a
+// guard regression fails this assertion instead of aborting the test runner.
+#[test]
+fn partition_excessive_nesting_blocks_at_critical_block_threshold() {
+    let mut config = Config::default();
+    config.severity.block_threshold = Severity::Critical;
+    let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true, None);
+    assert!(
+        violations.iter().any(|v| v.rule == "excessive-nesting"),
+        "the guard must fire before partitioning, or the routing assertion below is vacuous; got: {violations:?}"
+    );
+
+    let (blocking, warnings) = partition_violations(violations, &config);
+    assert!(
+        blocking.iter().any(|v| v.rule == "excessive-nesting"),
+        "excessive-nesting must stay blocking (exit 2) at blockThreshold=critical; blocking: {blocking:?}"
+    );
+    assert!(
+        !warnings.iter().any(|v| v.rule == "excessive-nesting"),
+        "excessive-nesting must not sit on the advisory side (exit 1); warnings: {warnings:?}"
+    );
+}
+
+// T-628: the exception is limited to the guard. At the same
+// `blockThreshold` = Critical, a High `eval` violation still routes to advisory,
+// so an implementation that stopped honoring the threshold for every High
+// violation fails here.
+#[test]
+fn partition_high_eval_stays_advisory_at_critical_block_threshold() {
+    let mut config = Config::default();
+    config.severity.block_threshold = Severity::Critical;
+    let (violations, _notes) =
+        collect_violations("/src/app.ts", "eval(userInput);", &config, None, true, None);
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.rule == "eval" && v.severity == Severity::High),
+        "eval must fire as High, or the routing assertion below is vacuous; got: {violations:?}"
+    );
+
+    let (blocking, warnings) = partition_violations(violations, &config);
+    assert!(
+        warnings.iter().any(|v| v.rule == "eval"),
+        "a High violation outside the guard must route to advisory at blockThreshold=critical; warnings: {warnings:?}"
+    );
+    assert!(
+        !blocking.iter().any(|v| v.rule == "eval"),
+        "eval must not block at blockThreshold=critical; blocking: {blocking:?}"
+    );
+}
+
 #[test]
 fn partition_empty_violations() {
     let config = Config::default();

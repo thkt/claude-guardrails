@@ -283,13 +283,22 @@ fn collect_first_party_violations(
     (violations, notes)
 }
 
+/// Rules on ADR-0004's resource-boundary axis, which the fixed-axis table marks
+/// fail-closed and "敵対入力で bypass されない". They do not consult
+/// `block_threshold`: a project that raises it must not be able to switch off a
+/// guard that exists so a hostile input cannot crash the checker before any rule
+/// runs (#474). `ParseStdinError::Oversized` keeps the same axis off config by
+/// returning `HookExitCode::Blocking` directly (#375).
+const RESOURCE_BOUNDARY_RULES: &[&str] = &[rules::rule_id::EXCESSIVE_NESTING];
+
 fn partition_violations(
     violations: Vec<Violation>,
     config: &Config,
 ) -> (Vec<Violation>, Vec<Violation>) {
-    violations
-        .into_iter()
-        .partition(|v| v.severity >= config.severity.block_threshold)
+    violations.into_iter().partition(|v| {
+        RESOURCE_BOUNDARY_RULES.contains(&v.rule.as_str())
+            || v.severity >= config.severity.block_threshold
+    })
 }
 
 fn resolve_project_root_or_note(
