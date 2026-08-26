@@ -17,8 +17,6 @@ use crate::import_map;
 use crate::rules::{self, Violation};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
-use std::panic;
-use std::process;
 
 /// The seven toggles that gate an AST rule. Carried to the child so it applies the
 /// caller's config without serializing the whole `Config`.
@@ -146,12 +144,6 @@ pub(crate) fn run_ast_rules(
 /// A stack overflow aborts the process before any return, so the parent sees
 /// neither 0 nor 1 and treats it as the overflow block.
 pub(crate) fn run_child() -> i32 {
-    // Override main()'s exit-70 panic hook: inside the child a panic means the
-    // parse failed gracefully (exit 1 = skip structural rules), not an internal
-    // invariant breach (exit 70). Stderr is null'd by the parent, so the hook
-    // stays silent.
-    panic::set_hook(Box::new(|_| process::exit(1)));
-
     let mut input = String::new();
     if io::stdin().read_to_string(&mut input).is_err() {
         return 1;

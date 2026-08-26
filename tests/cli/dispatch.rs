@@ -1,4 +1,37 @@
-use crate::common::{run_guardrails, run_guardrails_json, run_guardrails_with_args};
+use crate::common::{
+    run_ast_child_with_closed_stdout, run_guardrails, run_guardrails_json, run_guardrails_with_args,
+};
+
+// T-630: The ast-child subprocess exits 70 and names an internal error on stderr when its stdout write panics
+#[test]
+fn ast_child_stdout_write_panic_exits_internal_error() {
+    let request = serde_json::json!({
+        "content": "const value = 1;",
+        "file_path": "/src/app.ts",
+        "flags": {
+            "ast_security": true,
+            "no_use_effect": true,
+            "open_redirect": true,
+            "eval": true,
+            "sqli_concat": true,
+            "cors_wildcard": true,
+            "test_assertion": true
+        }
+    });
+    let output = run_ast_child_with_closed_stdout(request.to_string().as_bytes());
+
+    assert_eq!(
+        output.status.code(),
+        Some(70),
+        "stdout EPIPE panic must keep the ast-child internal exit; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("guardrails: internal error"),
+        "stderr must name the internal error: {stderr}"
+    );
+}
 
 #[test]
 fn clean_code_exits_zero() {
