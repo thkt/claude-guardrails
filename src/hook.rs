@@ -283,13 +283,20 @@ fn collect_first_party_violations(
     (violations, notes)
 }
 
+/// Rules on ADR-0004's resource-boundary axis, which that ADR marks fail-closed
+/// and not bypassable by adversarial input. They skip `block_threshold`: a
+/// project raising it must not be able to switch off a guard that exists so a
+/// hostile input cannot crash the checker before any rule runs (#474).
+const RESOURCE_BOUNDARY_RULES: &[&str] = &[rules::rule_id::EXCESSIVE_NESTING];
+
 fn partition_violations(
     violations: Vec<Violation>,
     config: &Config,
 ) -> (Vec<Violation>, Vec<Violation>) {
-    violations
-        .into_iter()
-        .partition(|v| v.severity >= config.severity.block_threshold)
+    violations.into_iter().partition(|v| {
+        RESOURCE_BOUNDARY_RULES.contains(&v.rule.as_str())
+            || v.severity >= config.severity.block_threshold
+    })
 }
 
 fn resolve_project_root_or_note(

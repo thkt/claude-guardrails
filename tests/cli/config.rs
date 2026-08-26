@@ -861,3 +861,36 @@ fn blockthreshold_を_critical_にしても設定ファイルへの_write_は_ex
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// T-629 (#474): unit 側の T-627 は private な `partition_violations` の振り分けまでしか
+// 見えず、そこから exit code までの配線を通らない。報告された症状は exit code そのもの
+// なので、その配線ごと pin する。
+#[test]
+fn blockthreshold_を_critical_にしても深い_nest_の_write_は_exit_2で止まる() {
+    let tmp = tmp_repo();
+    fs::write(
+        tmp.path().join(".guardrails.json"),
+        r#"{"severity": {"blockThreshold": "critical"}}"#,
+    )
+    .unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let content = format!("const x = {}1{};", "(".repeat(400), ")".repeat(400));
+    let json = serde_json::json!({
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": root.join("src/a.ts"),
+            "content": content
+        }
+    });
+    let output = run_guardrails_in_dir(&json.to_string(), &root);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "the deep-nesting guard is a DoS boundary and must block at blockThreshold=critical; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("excessive-nesting"),
+        "the blocking output must name excessive-nesting, not some other rule; stderr: {stderr}"
+    );
+}

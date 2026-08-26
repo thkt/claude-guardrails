@@ -486,6 +486,59 @@ fn partition_custom_block_threshold() {
     assert_eq!(warnings[0].rule, "low-rule");
 }
 
+// T-627: at `blockThreshold` = Critical, the High `excessive-nesting` violation
+// still lands on the blocking side. The violation comes from `collect_violations`
+// rather than `make_violation`, so the assertion holds whichever carrier keeps the
+// guard blocking. Depth 150 clears the guard threshold (100) but not the parse
+// overflow floor (~282), so a regression fails here instead of aborting the runner.
+#[test]
+fn partition_excessive_nesting_blocks_at_critical_block_threshold() {
+    let mut config = Config::default();
+    config.severity.block_threshold = Severity::Critical;
+    let src = format!("const x = {}1{};", "(".repeat(150), ")".repeat(150));
+    let (violations, _notes) = collect_violations("/src/app.ts", &src, &config, None, true, None);
+    assert!(
+        violations.iter().any(|v| v.rule == "excessive-nesting"),
+        "the guard must fire before partitioning, or the routing assertion below is vacuous; got: {violations:?}"
+    );
+
+    let (blocking, warnings) = partition_violations(violations, &config);
+    assert!(
+        blocking.iter().any(|v| v.rule == "excessive-nesting"),
+        "excessive-nesting must stay blocking (exit 2) at blockThreshold=critical; blocking: {blocking:?}"
+    );
+    assert!(
+        !warnings.iter().any(|v| v.rule == "excessive-nesting"),
+        "excessive-nesting must not sit on the advisory side (exit 1); warnings: {warnings:?}"
+    );
+}
+
+// T-628: the carve-out stops at the guard. A fix that stopped honoring the
+// threshold for every High violation turns this red.
+#[test]
+fn partition_high_eval_stays_advisory_at_critical_block_threshold() {
+    let mut config = Config::default();
+    config.severity.block_threshold = Severity::Critical;
+    let (violations, _notes) =
+        collect_violations("/src/app.ts", "eval(userInput);", &config, None, true, None);
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.rule == "eval" && v.severity == Severity::High),
+        "eval must fire as High, or the routing assertion below is vacuous; got: {violations:?}"
+    );
+
+    let (blocking, warnings) = partition_violations(violations, &config);
+    assert!(
+        warnings.iter().any(|v| v.rule == "eval"),
+        "a High violation outside the guard must route to advisory at blockThreshold=critical; warnings: {warnings:?}"
+    );
+    assert!(
+        !blocking.iter().any(|v| v.rule == "eval"),
+        "eval must not block at blockThreshold=critical; blocking: {blocking:?}"
+    );
+}
+
 #[test]
 fn partition_empty_violations() {
     let config = Config::default();
