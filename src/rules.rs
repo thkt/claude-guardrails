@@ -94,6 +94,7 @@ pub(crate) mod rule_id {
         SSR_SECRET_BLEED = "ssr-secret-bleed",
         POSTMESSAGE_ORIGIN_MISSING = "postmessage-origin-missing",
         EXCESSIVE_NESTING = "excessive-nesting",
+        AST_CHECKER_INTERNAL_FAILURE = "ast-checker-internal-failure",
         TEST_ENDPOINT_PROD_GUARD = "test-endpoint-prod-guard",
         INVARIANT = "invariant",
         CONFIG_GUARD = "config-guard",

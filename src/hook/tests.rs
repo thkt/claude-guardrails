@@ -486,6 +486,57 @@ fn partition_custom_block_threshold() {
     assert_eq!(warnings[0].rule, "low-rule");
 }
 
+// T-631: A child exit code of 70 maps to the internal-failure outcome instead of ParseFailed
+#[test]
+fn ast_child_exit_70_maps_to_internal_failure() {
+    let exit_code = i32::from(HookExitCode::Internal.code());
+
+    assert!(matches!(
+        classify_ast_child_failure(Some(exit_code)),
+        AstOutcome::InternalFailure
+    ));
+}
+
+// T-632: The internal-failure violation names a checker failure and does not mention nesting depth
+#[test]
+fn ast_child_internal_failure_violation_names_checker_failure() {
+    let violation = ast_checker_failure_violation("/src/app.ts");
+    let description = format!("{} {}", violation.rule, violation.fix).to_ascii_lowercase();
+
+    assert_eq!(violation.rule, rule_id::AST_CHECKER_INTERNAL_FAILURE);
+    assert!(
+        description.contains("checker") && description.contains("fail"),
+        "the violation must identify a checker failure; got: {violation:?}"
+    );
+    assert!(
+        !description.contains("nest") && !description.contains("depth"),
+        "an internal checker failure must not be presented as a nesting-depth failure; got: {violation:?}"
+    );
+}
+
+// T-633: The internal-failure violation stays blocking at blockThreshold critical
+#[test]
+fn ast_child_internal_failure_stays_blocking_at_critical_threshold() {
+    let mut config = Config::default();
+    config.severity.block_threshold = Severity::Critical;
+    let violations = vec![ast_checker_failure_violation("/src/app.ts")];
+
+    let (blocking, warnings) = partition_violations(violations, &config);
+
+    assert!(
+        blocking
+            .iter()
+            .any(|v| v.rule == rule_id::AST_CHECKER_INTERNAL_FAILURE),
+        "the checker-internal-failure guard must stay blocking at blockThreshold=critical; blocking: {blocking:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|v| v.rule == rule_id::AST_CHECKER_INTERNAL_FAILURE),
+        "the checker-internal-failure guard must not become advisory; warnings: {warnings:?}"
+    );
+}
+
 // T-627: at `blockThreshold` = Critical, the High `excessive-nesting` violation
 // still lands on the blocking side. The violation comes from `collect_violations`
 // rather than `make_violation`, so the assertion holds whichever carrier keeps the
