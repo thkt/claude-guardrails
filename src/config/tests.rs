@@ -905,21 +905,22 @@ fn override_が_1_件だけの構成では_note_の並び順が変わらない()
 
 // T-609: AST toggle が eval だけ on の構成で eval を切ると、組み合わせで止まる分が note に出る
 //
-// `excessive-nesting` (rules.rs `live_rule_ids`) stays live as long as any of
-// the seven `AstRuleFlags` toggles is on. The base config here turns off five
+// `excessive-nesting` and `ast-checker-internal-failure` (rules.rs
+// `live_rule_ids`) stay live as long as any of the seven `AstRuleFlags` toggles
+// is on. The base config here turns off five
 // of the seven, leaving `noUseEffect` and `eval` as the only two AST toggles
 // still on; one `overrides` entry disables both at once. Read from
 // `restored` (this entry's before-state, both toggles on), each toggle's
 // *isolated* count — `toggle_rule_id_count` turning off only that one name,
 // the other name in `disabled` still on — stays at 1 (`no-use-effect`,
 // `eval`): with the other toggle still on, `AstRuleFlags::any()` stays true
-// either way, so neither isolated probe sees `excessive-nesting` move.
-// Turning both off *together* (this entry's actual effect) is what drops
-// `any()` to false and removes `excessive-nesting` too — a third rule_id
-// neither isolated count credits, `isolated sum (2) != live_rule_ids(before)
-// - live_rule_ids(after) (3)`. `stopped_rule_id_summary` must add that
-// difference as an independent clause without changing the two existing
-// `stops 1 rule_id(s)` phrases.
+// either way, so neither isolated probe sees either resource-boundary rule_id
+// move. Turning both off *together* (this entry's actual effect) is what drops
+// `any()` to false and removes both resource-boundary rule_ids too — two more
+// rule_ids neither isolated count credits, `isolated sum (2) !=
+// live_rule_ids(before) - live_rule_ids(after) (4)`.
+// `stopped_rule_id_summary` must add that difference as an independent clause
+// without changing the two existing `stops 1 rule_id(s)` phrases.
 #[test]
 fn ast_toggle_が_eval_だけ_on_の構成で_eval_を切ると_組み合わせで止まる分が_note_に出る() {
     let (tmp, config) = repo_with_config(
@@ -945,10 +946,11 @@ fn ast_toggle_が_eval_だけ_on_の構成で_eval_を切ると_組み合わせ�
          unchanged by the new combination clause; got: {note}"
     );
     assert!(
-        note.contains("combination stops 1 more rule_id(s)"),
-        "expected an independent clause for the rule_id (`excessive-nesting`) \
-         that stops only when both toggles are off together — not \
-         attributable to either toggle's isolated count; got: {note}"
+        note.contains("combination stops 2 more rule_id(s)"),
+        "expected an independent clause for the two resource-boundary rule_ids \
+         (`excessive-nesting`, `ast-checker-internal-failure`) that stop only \
+         when both toggles are off together — not attributable to either \
+         toggle's isolated count; got: {note}"
     );
 }
 
