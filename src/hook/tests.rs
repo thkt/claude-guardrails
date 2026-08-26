@@ -486,25 +486,11 @@ fn partition_custom_block_threshold() {
     assert_eq!(warnings[0].rule, "low-rule");
 }
 
-// #474: `severity.blockThreshold` is project-overridable up to Critical, and
-// `partition_violations` routes on severity alone, so a project config could
-// demote the deep-nesting DoS guard to advisory (exit 1). ADR-0004 puts a
-// resource boundary / DoS defense at fail-closed, so `excessive-nesting` must
-// stay blocking at every threshold. Decision table over the two independent
-// conditions (blockThreshold x rule identity):
-//
-// | blockThreshold  | rule                    | routing  | pinned by                                           |
-// | default (High)  | excessive-nesting       | blocking | collect_violations_deep_nesting_blocks_before_parse |
-// | default (High)  | any other High rule     | blocking | partition_default_severity_routing                  |
-// | critical        | excessive-nesting       | blocking | T-627                                               |
-// | critical        | eval (High, non-guard)  | advisory | T-628                                               |
-
 // T-627: at `blockThreshold` = Critical, the High `excessive-nesting` violation
 // still lands on the blocking side. The violation comes from `collect_violations`
-// rather than from `make_violation`, so the assertion holds whichever carrier the
-// guard uses to stay blocking (rule id, or a per-violation marker). Depth 150 is
-// above the guard threshold (100) and below the parse overflow floor (~282), so a
-// guard regression fails this assertion instead of aborting the test runner.
+// rather than `make_violation`, so the assertion holds whichever carrier keeps the
+// guard blocking. Depth 150 clears the guard threshold (100) but not the parse
+// overflow floor (~282), so a regression fails here instead of aborting the runner.
 #[test]
 fn partition_excessive_nesting_blocks_at_critical_block_threshold() {
     let mut config = Config::default();
@@ -527,10 +513,8 @@ fn partition_excessive_nesting_blocks_at_critical_block_threshold() {
     );
 }
 
-// T-628: the exception is limited to the guard. At the same
-// `blockThreshold` = Critical, a High `eval` violation still routes to advisory,
-// so an implementation that stopped honoring the threshold for every High
-// violation fails here.
+// T-628: the carve-out stops at the guard. A fix that stopped honoring the
+// threshold for every High violation turns this red.
 #[test]
 fn partition_high_eval_stays_advisory_at_critical_block_threshold() {
     let mut config = Config::default();

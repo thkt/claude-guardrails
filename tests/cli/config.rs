@@ -862,12 +862,9 @@ fn blockthreshold_を_critical_にしても設定ファイルへの_write_は_ex
     );
 }
 
-// T-629 (#474): `blockThreshold` を `critical` にした repository でも深い nest の
-// Write は exit 2 で止まり、stderr が excessive-nesting を名指しする。unit 側
-// (src/hook/tests.rs の T-627) は private な `partition_violations` の振り分けまでしか
-// 見えず、そこから exit code と BLOCKED 表示までの配線を通らない。報告された症状は
-// exit code そのものなので、その配線ごと pin する。深さ 400 は issue の repro と同じで、
-// tier 1 の byte scan (閾値 100) が parse の前に捕らえる。
+// T-629 (#474): unit 側の T-627 は private な `partition_violations` の振り分けまでしか
+// 見えず、そこから exit code までの配線を通らない。報告された症状は exit code そのもの
+// なので、その配線ごと pin する。
 #[test]
 fn blockthreshold_を_critical_にしても深い_nest_の_write_は_exit_2で止まる() {
     let tmp = tmp_repo();
