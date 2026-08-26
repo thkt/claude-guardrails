@@ -290,12 +290,15 @@ fn missing_corpus_coverage(catalog: &[&str], samples: &[CorpusSample]) -> Vec<St
 /// `tests/cli/config.rs`. `invariant-guard` needs the same disk-backed
 /// `.invariants.json` pin file at the git root as `invariant` (it judges a
 /// weakening edit to that same declaration file); its coverage lives in
-/// `rules/invariant_guard/tests.rs`. Same allowlist precedent as
-/// `UNREGISTERED_RULE_IDS`.
+/// `rules/invariant_guard/tests.rs`. `ast-checker-internal-failure` is a child
+/// process outcome that `(path, content)` cannot induce; T-631..T-633 cover its
+/// exit classification, message, and blocking route. Same allowlist precedent
+/// as `UNREGISTERED_RULE_IDS`.
 const CORPUS_EXEMPT: &[&str] = &[
     rule_id::INVARIANT,
     rule_id::CONFIG_GUARD,
     rule_id::INVARIANT_GUARD,
+    rule_id::AST_CHECKER_INTERNAL_FAILURE,
 ];
 
 /// Whether `rule` can fire through the corpus `(path, content)` harness.

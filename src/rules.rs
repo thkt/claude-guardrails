@@ -116,19 +116,21 @@ macro_rules! toggle_isolation {
 
         /// The `rule_id`s that can fire for `rules`.
         ///
-        /// Two `rule_id`s have a gate that list membership alone cannot
+        /// Three `rule_id`s have a gate that list membership alone cannot
         /// express, so each is decided by its own condition below.
         pub(crate) fn live_rule_ids(rules: &RulesConfig) -> HashSet<&'static str> {
             let mut live: HashSet<&'static str> = HashSet::new();
             $(if rules.$field { live.extend([ $( $rule ),* ]); })*
 
-            // `excessive-nesting` runs unconditionally from `hook::lint_with_ast`
-            // whenever any of the seven AST rules is on (`AstRuleFlags::any`),
-            // not only when `astSecurity` is.
+            // Both resource-boundary outcomes run from `hook::lint_with_ast`
+            // whenever any AST rule is on (`AstRuleFlags::any`), not only when
+            // `astSecurity` is.
             if AstRuleFlags::from_rules(rules).any() {
                 live.insert(rule_id::EXCESSIVE_NESTING);
+                live.insert(rule_id::AST_CHECKER_INTERNAL_FAILURE);
             } else {
                 live.remove(rule_id::EXCESSIVE_NESTING);
+                live.remove(rule_id::AST_CHECKER_INTERNAL_FAILURE);
             }
 
             // `rule_id::SECURITY` is also emitted by
@@ -189,7 +191,8 @@ toggle_isolation! {
     // same rule_id independently, so turning `astSecurity` off would not
     // stop it from firing.
     ast_security => "astSecurity": [
-        "bidi-characters", "child-process-injection", "client-env-public-leak",
+        "ast-checker-internal-failure", "bidi-characters", "child-process-injection",
+        "client-env-public-leak",
         "env-var-fallback", "err-stack-exposure", "excessive-nesting",
         "math-random-insecure", "non-literal-fs-path", "non-literal-require",
         "postmessage-origin-missing", "prototype-pollution", "ssr-secret-bleed",
@@ -225,9 +228,10 @@ pub(crate) fn toggle_rule_id_count(toggle_name: &str, rules: &RulesConfig) -> Op
 /// How many `rule_id`s stop firing only when every name in `names` is off
 /// *together*, beyond what each name's own [`toggle_rule_id_count`] credits.
 ///
-/// `excessive-nesting` is the one `rule_id` this applies to today: it stays
-/// live while any `AstRuleFlags` toggle is on, so two AST toggles can each
-/// move no isolated count yet drop it when turned off together.
+/// `excessive-nesting` and `ast-checker-internal-failure` are the two `rule_id`s
+/// this applies to today: both stay live while any `AstRuleFlags` toggle is on,
+/// so two AST toggles can each move no isolated count yet drop them when turned
+/// off together.
 ///
 /// `rules` must have every name in `names` still on, the same precondition
 /// `toggle_rule_id_count` takes (see `RulesConfig::with_toggles_restored`).
