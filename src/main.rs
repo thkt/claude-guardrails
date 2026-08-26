@@ -111,9 +111,9 @@ fn install_panic_hook(exit: HookExitCode) {
 /// closed (`Blocking`, exit 2): a panic mid-check means the security pass did
 /// not complete, and only exit 2 blocks the `PreToolUse` call, so any other
 /// code would let the unchecked edit through. The AST child keeps `Internal`
-/// (its abort already maps to a parent-side block in `spawn_ast_child`), and
-/// prefetch keeps `Internal` (sysexits scheme, not a hook). #379 — ADR-0004
-/// invariant axis.
+/// (exit 70), which the parent maps to the dedicated internal-checker blocking
+/// violation. Prefetch also keeps `Internal` (sysexits scheme, not a hook).
+/// #379 — ADR-0004 invariant axis.
 fn panic_exit_code(command: Option<&Commands>) -> HookExitCode {
     match command {
         None => HookExitCode::Blocking,
