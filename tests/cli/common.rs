@@ -42,6 +42,25 @@ pub(crate) fn run_guardrails_with_args(input: &[u8], args: &[&str]) -> Output {
     run_guardrails_with(input, None, &[], args)
 }
 
+pub(crate) fn run_ast_child_with_closed_stdout(input: &[u8]) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_guardrails"))
+        .arg("__ast-child")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn guardrails ast child");
+
+    // The child blocks on stdin until after the parent closes stdout's read end,
+    // so its single println deterministically writes to a pipe with no reader.
+    drop(child.stdout.take().expect("ast child stdout must be piped"));
+    let mut stdin = child.stdin.take().expect("ast child stdin must be piped");
+    stdin.write_all(input).expect("write ast child request");
+    drop(stdin);
+
+    child.wait_with_output().expect("wait for ast child")
+}
+
 pub(crate) fn run_guardrails_in_dir(json: &str, dir: &Path) -> Output {
     run_guardrails_with(json.as_bytes(), Some(dir), &[("NO_COLOR", "1")], &[])
 }

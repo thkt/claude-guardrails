@@ -8,11 +8,12 @@ decision-makers: thkt
 
 ## Context and Problem Statement
 
-The hook's AST pass (`lint_with_ast`, `src/hook.rs`) can end three ways: structural violations, a benign parse failure, or a stack overflow the byte scan cannot see. The hook must decide, per outcome, whether to block the edit (fail closed) or let it proceed with a note (fail open). The choice is split deliberately — a parse failure fails open, an overflow fails closed — but that policy split lives only in the `AstOutcome` enum doc-comments. ADR-0004 is the generic fail-mode policy and ADR-0021 covers the subprocess isolation mechanism; neither states why these two AST outcomes resolve in opposite directions. A contributor unifying them would silently regress either coverage or safety.
+The hook's AST pass (`lint_with_ast`, `src/hook.rs`) can end with structural violations, a benign parse failure, an internal checker failure, or a stack overflow the byte scan cannot see. The hook must decide, per outcome, whether to block the edit (fail closed) or let it proceed with a note (fail open). Only a parser-reported failure fails open; an incomplete checker run or process abort fails closed. ADR-0004 is the generic fail-mode policy and ADR-0021 covers the subprocess isolation mechanism, so this ADR records the AST-specific split.
 
 ## Decision Drivers
 
 - A parse failure on an unsupported-but-legitimate file must not block the user's edit.
+- A real Rust panic or invalid success payload means the checker did not complete and must block.
 - An input that aborts the parser must never slip through unscanned (the #314 fail-open this closes).
 - The most important byte-scan checks must run regardless of parse outcome.
 - The policy must be a stated contract, not an inference from enum variants.
@@ -27,15 +28,16 @@ The hook's AST pass (`lint_with_ast`, `src/hook.rs`) can end three ways: structu
 
 Chosen: **Option C**. The fail-mode policy for the AST pass is the following, and must remain true unless superseded.
 
-1. **A benign parse failure fails OPEN.** `AstOutcome::ParseFailed` (`src/hook.rs:54`) skips the structural rules and lets the edit proceed with a degraded-coverage note. An unsupported file type or a parser panic is not evidence of a violation, so blocking it would punish legitimate edits (#294).
-2. **A byte-scan-invisible overflow fails CLOSED.** `AstOutcome::Overflow` blocks the edit (High violation, exit 2). Deep JSX / ternary / generics abort the parser with no bracket signature the tier-1 byte scan can catch, so the only safe direction is to block (#314).
-3. **Cause-independent checks run before the parse.** `check_bidi` (when `ast_security` is on) and `check_excessive_nesting` (unconditional, because the parse runs for any AST rule) execute before the parse, so a parse abort cannot skip the highest-value security checks. Excessive nesting is itself a deliberate block with no note, since the High violation already rejects the edit.
+1. **A benign parse failure fails OPEN.** An unsupported source type or oxc's parser-reported `ret.panicked` makes `with_parsed_program` return `None`; `run_child` returns 1, and `AstOutcome::ParseFailed` skips the structural rules while the edit proceeds with a degraded-coverage note (#294).
+2. **An internal checker failure fails CLOSED.** A real Rust panic in the AST child inherits main's `Internal` (exit 70) panic hook. The parent maps that and any other numbered non-1 failure to `AstOutcome::InternalFailure`; an exit-0 payload that cannot decode takes the same path. The dedicated checker-failure Violation blocks because the structural pass did not complete.
+3. **A byte-scan-invisible overflow fails CLOSED.** Signal death maps to `AstOutcome::Overflow` and blocks the edit (High violation, exit 2). Deep JSX / ternary / generics abort the parser with no bracket signature the tier-1 byte scan can catch, so the only safe direction is to block (#314). Request serialization, child spawn, and wait failures remain on this fail-closed `Overflow` path.
+4. **Cause-independent checks run before the parse.** `check_bidi` (when `ast_security` is on) and `check_excessive_nesting` (unconditional, because the parse runs for any AST rule) execute before the parse, so a parse abort cannot skip the highest-value security checks. Excessive nesting is itself a deliberate block with no note, since the High violation already rejects the edit.
 
-The mechanism that realizes "fail closed on overflow" — re-executing the parse in a child subprocess and mapping its exit code — is ADR-0021's domain. This ADR fixes the policy (which outcome blocks); ADR-0021 fixes the mechanism (how the overflow is contained and signaled).
+The mechanism that realizes these outcomes — re-executing the parse in a child subprocess and classifying its status and output — is ADR-0021's domain. This ADR fixes the policy (which outcomes block); ADR-0021 fixes the mechanism (how they are contained and signaled).
 
 ### Confirmation
 
-The split is regression-guarded by the hook tests that drive a parse-failing input (expects proceed-with-note) and an overflow-inducing input (expects block / exit 2). A reviewer confirms compliance by checking that `ParseFailed` keeps the edit proceeding, `Overflow` blocks, and the pre-parse `check_bidi` / `check_excessive_nesting` ordering is preserved. Collapsing the two outcomes to one direction must update this ADR.
+The split is regression-guarded by tests for `ParseFailed`, exit-70 classification and its dedicated blocking Violation, and overflow (expects block / exit 2). A reviewer confirms that `ParseFailed` keeps the edit proceeding, `InternalFailure` and `Overflow` block, and the pre-parse `check_bidi` / `check_excessive_nesting` ordering is preserved. Changing any direction must update this ADR.
 
 ## Reversibility
 

@@ -1,7 +1,7 @@
 //! Authoritative content for the README rule tables (Issue #257).
 //!
 //! Rows are declared in README display order, grouped by table: `Rules` (28),
-//! then `Security` (2), then `AstSecurity` (15). `severity` is shared by both
+//! then `Security` (2), then `AstSecurity` (16). `severity` is shared by both
 //! languages; the `*_ja` fields hold the README.ja.md prose (a separate human
 //! translation, not a literal mirror). Severity / description / why are migrated
 //! verbatim from the README cells; `why` and `when_to_disable` are
@@ -503,6 +503,18 @@ pub(super) static RULE_DOCS: &[RuleDoc] = &[
         when_to_disable: None,
         description_ja: r"安全な深さを超えた入れ子 — `()[]{}` 括弧または `!`/`~` の連鎖",
         why_ja: r"深い入れ子はパーサの再帰をオーバーフローさせ、ルール実行前にチェックプロセスを落とし、編集が黙って通ってしまう。パース前のバイトスキャンで阻止する",
+        when_to_disable_ja: None,
+    },
+    RuleDoc {
+        table: Table::AstSecurity,
+        key: "ast-checker-internal-failure",
+        rule_id: Some(rule_id::AST_CHECKER_INTERNAL_FAILURE),
+        severity: "High",
+        description: r"AST checker subprocess failed before completing every structural rule",
+        why: r"An incomplete checker run cannot establish that the edit is safe; blocking prevents an internal failure from silently bypassing structural rules",
+        when_to_disable: None,
+        description_ja: r"AST checker subprocess が structural rule の完了前に内部失敗した場合にブロック",
+        why_ja: r"未完了の検査では編集の安全性を確認できないため、内部失敗による structural rule の黙った迂回をブロックする",
         when_to_disable_ja: None,
     },
     RuleDoc {

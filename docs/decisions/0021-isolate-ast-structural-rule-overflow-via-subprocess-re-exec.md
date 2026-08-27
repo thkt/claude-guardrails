@@ -30,16 +30,20 @@ A is rejected because a stack overflow is a guard-page hardware fault that abort
 
 ### Exit-code wire protocol
 
-The parent (`spawn_ast_child`) reads the child exit code as a 3-way protocol.
+The parent (`spawn_ast_child`) distinguishes parser rejection, checker failure,
+and process death instead of treating every non-success as an overflow.
 
-| Child exit           | Meaning                                  | Parent action (`AstOutcome`)                                                |
-| -------------------- | ---------------------------------------- | --------------------------------------------------------------------------- |
-| 0                    | stdout holds the JSON `Vec<Violation>`   | decode → `Violations`                                                       |
-| 1                    | parse failed or envelope/encode error    | `ParseFailed`: skip structural rules, edit proceeds with a degradation note |
-| signal-death / other | stack overflow or unexpected child death | `Overflow`: emit the blocking Violation                                     |
+| Child result                        | Meaning                                       | Parent action (`AstOutcome`)                                                |
+| ----------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------- |
+| 0 + decodable `Vec<Violation>`      | Structural pass completed                     | `Violations`                                                                |
+| 0 + undecodable stdout              | Child wire-contract failure                   | `InternalFailure`: emit the dedicated blocking checker-failure Violation    |
+| 1                                   | Explicit parse/envelope/encode failure return | `ParseFailed`: skip structural rules, edit proceeds with a degradation note |
+| 70 or another numbered nonzero exit | Rust panic or other internal checker failure  | `InternalFailure`: emit the dedicated blocking checker-failure Violation    |
+| signal death                        | Stack overflow or other process abort         | `Overflow`: emit the blocking excessive-nesting Violation                   |
 
-- The child (`run_child`) overrides main()'s exit-70 panic hook with `panic::set_hook` to `exit(1)`: inside the child a panic is a graceful parse-failure (exit 1), a deliberate local inversion of ADR-0004's exit-70 internal-error contract, valid because the parent reinterprets exit 1 as fail-open-with-note and reserves signal-death for the block.
-- Every spawn-time failure (`serde_json::to_vec`, `current_exe`, `spawn`, `wait_with_output`, an undecodable exit-0 payload) fails closed to `Overflow`, never falling back to an in-process parse. A fallback would re-open the #314 fail-open for byte-scan-invisible overflow inputs.
+- An unsupported source type or oxc's parser-reported `ret.panicked` makes `with_parsed_program` return `None`; `run_child` then returns 1, which is the explicit fail-open `ParseFailed` path.
+- A real Rust panic does not return 1. The AST child inherits main's `Internal` (exit 70) panic hook, and the parent maps that numbered exit to `InternalFailure`, which blocks through the dedicated checker-failure Violation.
+- Request serialization, `current_exe`, `spawn`, and `wait_with_output` failures remain `Overflow`; the parent never falls back to an in-process parse. A fallback would re-open the #314 fail-open for byte-scan-invisible overflow inputs.
 - `AstRuleFlags` is the single source for the enabled-rule set across the early-return, the `AstRequest` envelope, and the in-process call, so the three cannot drift apart.
 
 ### The cfg!(test) seam and its hazard

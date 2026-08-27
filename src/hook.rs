@@ -13,7 +13,7 @@ use crate::io::output::{
     render_error, show_config_hint, JsonEmission,
 };
 use crate::io::stdin::parse_stdin;
-use crate::rules::{self, non_comment_lines, Violation, ViolationOrigin};
+use crate::rules::{self, non_comment_lines, Severity, Violation, ViolationOrigin};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -58,6 +58,9 @@ enum AstOutcome {
     /// Parse failed (unsupported type or parser panic). Structural rules are
     /// skipped and the edit proceeds with a note — the #294 fail-open contract.
     ParseFailed,
+    /// The child checker failed before completing every structural rule. Block
+    /// the edit rather than treating an incomplete check as a parse failure.
+    InternalFailure,
     /// The parse aborted on a stack overflow the byte scan could not see (deep
     /// JSX / ternary / generics). Block the edit (#314).
     Overflow,
@@ -124,6 +127,10 @@ fn lint_with_ast(
                 "AST parse failed; structural rules skipped (bidi scan still applied)",
             )),
         ),
+        AstOutcome::InternalFailure => {
+            found.push(ast_checker_failure_violation(file_path));
+            (found, None)
+        }
         AstOutcome::Overflow => {
             found.push(nesting::overflow_violation(file_path));
             (found, None)
@@ -135,6 +142,31 @@ fn run_ast_inprocess(content: &str, file_path: &str, flags: &AstRuleFlags) -> As
     match ast_rules::run_ast_rules(content, file_path, flags) {
         Some(v) => AstOutcome::Violations(v),
         None => AstOutcome::ParseFailed,
+    }
+}
+
+/// Classifies a child that did not produce a successful violation payload.
+/// Exit 1 is the explicit parse-failure contract; a signal death is the parser
+/// overflow contract; every other exit code is an internal checker failure.
+fn classify_ast_child_failure(exit_code: Option<i32>) -> AstOutcome {
+    match exit_code {
+        Some(1) => AstOutcome::ParseFailed,
+        Some(_) => AstOutcome::InternalFailure,
+        None => AstOutcome::Overflow,
+    }
+}
+
+fn ast_checker_failure_violation(file_path: &str) -> Violation {
+    Violation {
+        rule: rules::rule_id::AST_CHECKER_INTERNAL_FAILURE.to_owned(),
+        severity: Severity::High,
+        fix: String::from(
+            "The checker failed before completing every structural rule; resolve the internal checker error and retry.",
+        ),
+        file: file_path.to_owned(),
+        line: None,
+        origin: None,
+        no_demote: None,
     }
 }
 
@@ -183,14 +215,9 @@ fn spawn_ast_child(content: &str, file_path: &str, flags: &AstRuleFlags) -> AstO
             // nothing else (its only stdout write is that one line), so an
             // undecodable payload is an unreachable contract breach. Fail closed:
             // proceeding here would silently drop any violation the child found.
-            Err(_) => AstOutcome::Overflow,
+            Err(_) => AstOutcome::InternalFailure,
         },
-        Some(1) => AstOutcome::ParseFailed,
-        // None = killed by a signal (the SIGABRT overflow on Unix); on Windows a
-        // stack overflow is exit 0xC0000409/0xC00000FD (also not 0/1). Any other
-        // code is an unexpected child failure. All fail closed: block rather than
-        // let a file that overflows the parser through unchecked.
-        _ => AstOutcome::Overflow,
+        code => classify_ast_child_failure(code),
     }
 }
 
@@ -287,7 +314,10 @@ fn collect_first_party_violations(
 /// and not bypassable by adversarial input. They skip `block_threshold`: a
 /// project raising it must not be able to switch off a guard that exists so a
 /// hostile input cannot crash the checker before any rule runs (#474).
-const RESOURCE_BOUNDARY_RULES: &[&str] = &[rules::rule_id::EXCESSIVE_NESTING];
+const RESOURCE_BOUNDARY_RULES: &[&str] = &[
+    rules::rule_id::EXCESSIVE_NESTING,
+    rules::rule_id::AST_CHECKER_INTERNAL_FAILURE,
+];
 
 fn partition_violations(
     violations: Vec<Violation>,

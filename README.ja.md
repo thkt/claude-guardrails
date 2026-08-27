@@ -213,6 +213,7 @@ guardrails は AI コード生成で重要な以下のルールを `--deny` で�
 | `unsafe-regex` | Medium | ReDoS に脆弱な正規表現リテラル（ネストされた量指定子、catastrophic backtracking） | 細工した入力でエンジンが指数バックトラックに陥り、CPU が 100% になって他のリクエストに応答できなくなる |
 | `bidi-characters` | High | ソース中に潜む Unicode 双方向制御文字（CVE-2021-42574 / Trojan Source） | bidi 文字は描画時にソースを並べ替えるので、レビュワーが見るコードとコンパイラが見るコードが食い違い、悪意あるロジックが平然と隠れる |
 | `excessive-nesting` | High | 安全な深さを超えた入れ子 — `()[]{}` 括弧または `!`/`~` の連鎖 | 深い入れ子はパーサの再帰をオーバーフローさせ、ルール実行前にチェックプロセスを落とし、編集が黙って通ってしまう。パース前のバイトスキャンで阻止する |
+| `ast-checker-internal-failure` | High | AST checker subprocess が structural rule の完了前に内部失敗した場合にブロック | 未完了の検査では編集の安全性を確認できないため、内部失敗による structural rule の黙った迂回をブロックする |
 | `env-var-fallback` | High | `process.env.X \|\| 'default'` 形式 — ハードコードされたフォールバックでシークレットが漏洩する | env var が未設定だとハードコードされたデフォルトが本物の credential として動き、しかもソース内に永遠に残る |
 | `test-endpoint-prod-guard` | Medium | 本番ガード (`process.env.NODE_ENV === 'production'`) を持たないテスト用ルートファイル (`app/api/test-*/route.ts`、`pages/api/seed.ts` など) | 本番ガード無しのテスト専用エンドポイントは本番でデータ投入・削除・デバッグ面を露出させる。同一ファイル内のガード追加か他経路での除外確認を促す advisory |
 | `prototype-pollution` | High | `Object.assign({}, untrusted)`、`_.merge`、`__proto__`/`constructor` を伴う `Object.create` | `__proto__` への書き込みがランタイム上の全オブジェクトを汚染し、認可チェックが誤動作し、sink 次第ではコード実行も開く |
